@@ -1,0 +1,25 @@
+body {
+    font-family: 'Fira Code', monospace;
+    margin: 0;
+}
+
+.code-editor {
+    font-family: 'Fira Code';
+    height: 14px; /* Monospace line height */
+    border: 1px solid #ddd;
+}
+
+.status-bar {
+    background-color: #f8f9fa;
+    padding: 5px;
+    font-size: 12px;
+}
+
+.tree-item {
+    background-color: #e9ecef;
+    cursor: pointer;
+}
+
+.tree-item:hover {
+    color: #0d6efd;
+}

@@ -1,0 +1,15 @@
+# Blacklist everything by default
+*
+
+# Include directories so file patterns may be whitelisted
+!*/
+
+# Include specific file patterns
+!/.gitignore
+!/deps.edn
+!/package.json
+!/README.md
+!/resources/public/css/**/*.css
+!/resources/public/**/*.html
+!/shadow-cljs.edn
+!/src/**/*.cljs
