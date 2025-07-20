@@ -1,25 +1,121 @@
-body {
-    font-family: 'Fira Code', monospace;
+html, html>body, html>body>div#app {
+    height: 100%;
+    width: 100%;
     margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: sans-serif;
+    margin: 0;
+    background-color: #001e3c; /* Dark navy from demo */
+    color: #ffffff;
 }
 
 .code-editor {
-    font-family: 'Fira Code';
-    height: 14px; /* Monospace line height */
-    border: 1px solid #ddd;
+    height: 100%;
+    width: 100%;
+    display: flex; /* If using flex internally */
+    flex-direction: column;
 }
 
+.cm-editor {
+    height: 100%;
+    width: 100%;
+    flex: 1 1 auto; /* Helps in flex contexts to fill remaining space */
+}
+
+.cm-scroller {
+    overflow: auto; /* Ensures scrolling works if content overflows */
+}
+
+.code-editor .cm-content {
+    font-family: 'Fira Code', monospace;
+    background-color: #161e27;
+    color: #ffffff;
+    padding: 10px;
+}
+
+.cm-keyword { color: #00bfff; } /* Blue for keywords like new, if */
+.cm-number { color: #c71585; } /* Purple for numbers */
+.cm-string { color: #32cd32; } /* Green for strings */
+.cm-boolean { color: #ff4500; } /* Orange for bool */
+.cm-variable { color: #ffd700; } /* Yellow for vars */
+.cm-comment { color: #808080; } /* Gray for comments */
+.cm-operator { color: #ffffff; } /* White for operators */
+.cm-type { color: #00ffff; } /* Cyan for types and collections */
+.cm-function { color: #dda0dd; } /* Plum for functions and methods */
+.cm-constant { color: #ff00ff; } /* Magenta for constants */
+
 .status-bar {
-    background-color: #f8f9fa;
-    padding: 5px;
+    background-color: #002b5c;
+    padding: 5px 10px;
     font-size: 12px;
+    color: #00bfff; /* Blue accent */
+    border-top: 1px solid #003366;
+}
+
+.toolbar {
+    background-color: #002b5c;
+    padding: 5px;
+    border-bottom: 1px solid #003366;
 }
 
 .tree-item {
-    background-color: #e9ecef;
+    padding: 5px;
     cursor: pointer;
+    background-color: #002b5c;
 }
 
 .tree-item:hover {
-    color: #0d6efd;
+    background-color: #003366;
+    color: #00bfff;
+}
+
+.diagnostic-error { color: #ff0000; } /* Red for errors */
+.diagnostic-warning { color: #ffff00; } /* Yellow for warnings */
+.diagnostic-success { color: #00ff00; font-weight: bold; } /* Green for success */
+
+.log-terminal {
+    background-color: #000a1f;
+    padding: 10px;
+    overflow: auto;
+    height: 150px;
+    font-size: 12px;
+}
+
+.log-info { color: #00ff00; }
+.log-error { color: #ff0000; }
+
+.explore, .test-agent, .display-history, .log-history {
+    border-right: 1px solid #003366;
+    padding: 10px;
+}
+
+.overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.8);
+    padding: 20px;
+    border-radius: 5px;
+    color: #ffffff;
+    font-size: 18px;
+}
+
+.search-results {
+    background-color: #002b5c;
+    padding: 10px;
+    border-top: 1px solid #003366;
+}
+
+.container-fluid {
+    height: 100vh;
+}
+
+/* Added for panel headers to match mockup styling */
+h6 {
+    color: #ffffff;
+    margin-bottom: 10px;
 }

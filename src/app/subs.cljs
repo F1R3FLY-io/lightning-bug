@@ -1,28 +1,65 @@
 (ns app.subs
-  (:require [re-frame.core :as rf]
-            [datascript.core :as d]))
+  (:require
+   [clojure.string :as str]
+   [re-frame.core :as rf]
+   [re-posh.core :as rp]))
 
 (rf/reg-sub :workspace/files
-            :<- [:workspace]
-            (fn [w _] (:files w)))
+  (fn [db _] (:files (:workspace db))))
 
 (rf/reg-sub :active-file
-            :<- [:workspace]
-            (fn [w _] (:active-file w)))
+  (fn [db _] (:active-file (:workspace db))))
 
-(rf/reg-sub :active-content
-            (fn [_ _]
-              [(rf/subscribe [:active-file])])
-            (fn [[active] _]
-              (get-in db [:workspace :files active :content])))
+;; Returns the language of the active file.
+(rf/reg-sub :active-lang
+  (fn [db _] (get-in db [:workspace :files (:active-file db) :language])))
 
-(rf/reg-sub :symbols-tree
-            (fn [db _]
-              (d/q '[:find ?s :where [?s :type :symbol]] (:ds-conn db))))
+(rf/reg-sub :languages
+  (fn [db _] (:languages db)))
 
-;; Similar for diagnostics, logs (with filter), etc.
+(defn active-content-fn [db _]
+  (or (get-in db [:workspace :files (:active-file (:workspace db)) :content]) ""))
+
+(rf/reg-sub :active-content active-content-fn)
+
+(rp/reg-sub
+ :lsp/diagnostics
+ (fn [_ _]
+   {:type :query
+    :query '[:find (pull ?e [*])
+             :where [?e :type :diagnostic]]}))
+
+(rp/reg-sub
+ :lsp/symbols
+ (fn [_ _]
+   {:type :query
+    :query '[:find (pull ?e [*])
+             :where [?e :type :symbol]]}))
+
+(rf/reg-sub :lsp/logs
+  (fn [db _] (:lsp/logs db)))
+
+(rf/reg-sub :lsp/connected?
+  (fn [db _] (some? (get-in db [:lsp :connection]))))
+
+(rf/reg-sub :search/visible?
+  (fn [db _] (:visible? (:search db))))
+
 (rf/reg-sub :filtered-logs
-            :<- [:lsp/logs]
-            :<- [:log/search-term] ; assume event for term
-            (fn [[logs term] _]
-              (filter #(str/includes? (:message %) term) logs)))
+  :<- [:lsp/logs]
+  (fn [logs [_ term]]
+    (filter #(str/includes? (:message %) term) logs)))
+
+(rf/reg-sub :status
+  (fn [db _] (:status db)))
+
+(rf/reg-sub :search-results
+  (fn [db _] (:results (:search db))))
+
+(rf/reg-sub :rename/visible?
+  (fn [db _]
+    (get-in db [:modals :rename :visible?])))
+
+(rf/reg-sub :rename/new-name
+  (fn [db _]
+    (get-in db [:modals :rename :new-name])))

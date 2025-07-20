@@ -1,8 +1,25 @@
-{:source-paths ["src"]
- :dependencies []
+{:deps {:aliases [:dev]}
  :builds {:app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"
                 :modules {:main {:init-fn app.core/init}}
-                :devtools {:after-load app.core/reload}}}
- :dev-http {3000 "resources/public"}}
+                :devtools {:after-load app.core/reload
+                           :preloads [devtools.preload
+                                      day8.re-frame-10x.preload.react-18
+                                      re-frisk.preload]}
+                :compiler-options {:closure-defines {"re_frame.trace.trace_enabled_QMARK_" true}}
+                :js-options {:resolve {"fs" false
+                                       "fs/promises" false
+                                       "path" false}}}
+          :test {:target :browser-test
+                 :test-dir "resources/public/js/test"
+                 :ns-regexp "-test$"
+                 :devtools {:http-port 8021
+                            :http-root "resources/public/js/test"
+                            :autorun true}
+                 :js-options {:resolve {"fs" false
+                                        "fs/promises" false
+                                        "path" false}}}}
+ :dev-http {3000 "resources/public"}
+ ;; Added to suppress sun.misc.Unsafe deprecation warnings from transitive dependencies (e.g., protobuf in Closure Compiler).
+ :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]}

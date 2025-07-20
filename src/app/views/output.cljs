@@ -1,14 +1,22 @@
 (ns app.views.output
-  (:require [re-frame.core :as rf]
-            [re-com.core :as rc]))
+  (:require
+   [reagent.core :as r]
+   [re-frame.core :as rf]
+   [re-com.core :as rc]
+   [app.utils :as u]))
 
+;; Renders a highlighted log message.
 (defn highlight-log [log]
-  [:span {:style {:color (case (:level log) :error "red" :warning "orange" "green")}} (:message log)]) ; Simple
+  [:div {:class (u/log-class (:level log))}
+   (:message log)])
 
+;; Renders log history panel with search filter.
 (defn component []
-  (let [search (r/atom "")]
-    [rc/v-box
-     [rc/input-text :model search :on-change #(rf/dispatch [:log/set-search @])]
-     [:div.log-terminal {:style {:overflow "auto" :height "200px"}}
-      (for [log @(rf/subscribe [:filtered-logs])]
-        [highlight-log log])]]))
+  (r/with-let [query-term (r/atom "")]
+    (let [logs @(rf/subscribe [:filtered-logs @query-term])]
+      [rc/v-box :class "log-history bg-dark"
+       :children [[:h6 "Log History"]
+                  [rc/input-text :placeholder "Search logs..." :model query-term :on-change #(reset! query-term %)]
+                  [:div.log-terminal
+                   (doall (for [log logs]
+                            ^{:key (or (:message log) (rand-int 1000))} [highlight-log log]))]]])))
