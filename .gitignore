@@ -10,6 +10,8 @@
 !/package.json
 !/README.md
 !/resources/public/css/**/*.css
+!/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
 !/resources/public/**/*.html
+!/scripts/**/*.sh
 !/shadow-cljs.edn
 !/src/**/*.cljs

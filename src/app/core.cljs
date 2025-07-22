@@ -37,11 +37,9 @@
                                            (.-error event))))
   (log/info "Initializing app")
   (rp/dispatch-sync [::e/initialize])
-  (log/info "ds-conn before posh connect: " (if ds-conn "exists" "nil")) ;; Debug log for ds-conn
   (rp/connect! ds-conn) ;; Connect before mount to ensure subs work.
   (mount-root) ;; Mount after connect.
-  (rfsk/enable) ;; Enable re-frisk for app-db inspection.
-  )
+  (rfsk/enable)) ;; Enable re-frisk for app-db inspection.
 
 ;; Reload hook for hot-reloading: re-connects Posh and re-mounts the root.
 (defn ^:dev/after-load ^:export reload []

@@ -1,5 +1,9 @@
 {:deps {:aliases [:dev]}
- :builds {:app {:target :browser
+ :builds {:lib {:target :npm-module
+                :output-dir "dist"
+                :entries [lib.core]
+                :exports {Editor lib.core/Editor}}
+          :app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"
                 :modules {:main {:init-fn app.core/init}}

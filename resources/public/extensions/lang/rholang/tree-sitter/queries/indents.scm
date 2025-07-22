@@ -1,0 +1,12 @@
+; Nodes where children should be indented
+((block) @indent)
+((map) @indent)
+((match) @indent)
+((choice) @indent)
+((inputs) @indent)
+((list) @indent)
+((tuple) @indent)
+((set) @indent)
+((contract) @indent)
+((input) @indent)
+(par "|" @branch)

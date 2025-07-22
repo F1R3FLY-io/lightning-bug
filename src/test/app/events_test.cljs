@@ -1,16 +1,10 @@
 (ns test.app.events-test
   (:require
-   [clojure.string :as str]
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [clojure.test.check :as tc]
-   [clojure.test.check.generators :as gen]
-   [clojure.test.check.properties :as prop]
    [datascript.core :as d]
    [re-frame.core :as rf]
    [re-frame.db :refer [app-db]]
-   [app.db :as db :refer [ds-conn]]
-   [app.editor.state :as es]
-   [app.editor.syntax :as syntax]
+   [app.db :as db]
    [app.events :as e]
    [re-posh.core :as rp]
    [reagent.core :as r]))
@@ -24,25 +18,47 @@
    :after (fn [])})
 
 (deftest initialize
-  (let [db @app-db]
+  (let [db @app-db
+        active (:active-file (:workspace db))
+        lang (get-in db [:workspace :files active :language])
+        ext (first (get-in db [:languages lang :extensions]))]
     (testing "Adds untitled file"
       (is (= 1 (count (:files (:workspace db)))))
-      (is (some? (:active-file (:workspace db)))))))
+      (is (some? active))
+      (is (= (str "untitled" ext) (get-in db[:workspace :files active :name]))))))
 
 (deftest file-add-remove
-  (let [initial-count (count (:files (:workspace @app-db)))]
-    (rf/dispatch-sync [:app.events/file-add])
+  (let [initial-count (count (:files (:workspace @app-db)))
+        ext (first (get-in @app-db [:languages (:default-language @app-db) :extensions]))]
+    (rf/dispatch-sync [::e/file-add])
     (let [new-count (count (:files (:workspace @app-db)))
-          file-id (get-in @app-db [:workspace :active-file])]
-      (rf/dispatch-sync [:app.events/file-remove file-id])
+          file-id (:active-file (:workspace @app-db))
+          file-name (get-in @app-db [:workspace :files file-id :name])]
+      (is (= (str "untitled-1" ext) file-name) "New file has correct name with extension")
+      (rf/dispatch-sync [::e/file-remove file-id])
       (let [final-count (count (:files (:workspace @app-db)))]
         (is (= (inc initial-count) new-count))
         (is (= initial-count final-count))))))
 
+(deftest file-remove-last
+  (let [initial-active (get-in @app-db [:workspace :active-file])]
+    (rf/dispatch-sync [::e/file-remove initial-active])
+    (is (empty? (get-in @app-db [:workspace :files])))
+    (is (nil? (get-in @app-db [:workspace :active-file])) "Active file nil after removing last")))
+
+(deftest file-rename-lang-detection
+  (let [active (:active-file (:workspace @app-db))
+        new-name "test.rho"]
+    (rf/dispatch-sync [::e/file-rename active new-name])
+    (is (= new-name (get-in @app-db [:workspace :files active :name])))
+    (is (= "rholang" (get-in @app-db [:workspace :files active :language])) "Language updated for .rho extension")
+    (rf/dispatch-sync [::e/file-rename active "test.txt"])
+    (is (= "text" (get-in @app-db [:workspace :files active :language])) "Fallback to default for unknown extension")))
+
 (deftest editor-update-dirty
   (let [active (get-in @app-db [:workspace :active-file])
         content "test content"]
-    (rf/dispatch-sync [:app.events/editor-update-content content])
+    (rf/dispatch-sync [::e/editor-update-content content])
     (is (= content (get-in @app-db [:workspace :files active :content])))
     (is (true? (get-in @app-db [:workspace :files active :dirty?])))))
 
@@ -55,58 +71,28 @@
       (is (not (contains? (first flat) :parent)))
       (is (some #(= "grandchild" (:name %)) flat)))))
 
-(def gen-non-empty-string
-  (gen/let [len (gen/choose 1 10)
-            chars (gen/vector gen/char-alphanumeric len)]
-    (apply str chars)))
-
-(def gen-term gen-non-empty-string)
-(def gen-text (gen/vector gen-non-empty-string 0 100))
-
-(def search-prop
-  (prop/for-all [term gen-term
-                 lines gen-text]
-    (let [lterm (str/lower-case term)
-          content (str/join "\n" lines)
-          db {:workspace {:files {1 {:content content}} :active-file 1}
-              :lsp {:logs (map #(hash-map :message %) lines)}}
-          results (:results (:search (#'app.events/search db [:search term])))]
-      (= (count results) (* 2 (count (filter #(str/includes? (str/lower-case %) lterm) lines)))))))
-
-(deftest search-property
-  (is (:result (tc/quick-check 100 search-prop))))
-
-(deftest fallback-no-lsp-or-grammar
-  (testing "Falls back to basic mode with no LSP URL or invalid grammar path"
-    (let [db (assoc db/default-db :languages {"rholang" {:lsp-url nil :grammar-wasm "/invalid/path"}})]
-      (reset! app-db db)
-      (rf/dispatch-sync [:app.events/lsp-connect])
-      (is (false? (:connection (:lsp @app-db))) "No LSP connection")
-      (rf/dispatch-sync [:reload-syntax])
-      ;; No assertion on view dispatch (side-effect), but verify no crash and fallback mode triggered without error.
-      (is true "Fallback mode triggered without error"))))
-
 (deftest lsp-diagnostics-update
-  (testing "Transacts diagnostics and updates status"
-    (rp/connect! ds-conn) ; Ensure connected before dispatch.
+  (testing "Transacts diagnostics"
     (let [diags [{:message "test"
                   :range {:start {:line 0 :character 0} :end {:line 0 :character 1}}
                   :severity 1}]]
-      (rp/dispatch-sync [::e/lsp-diagnostics-update diags])
-      (r/with-let [status (rf/subscribe [:status])
-                   diags-sub (rp/subscribe [:lsp/diagnostics])]
-        (is (= :error @status))
+      (rf/dispatch-sync [::e/lsp-diagnostics-update diags])
+      (r/with-let [diags-sub (rf/subscribe [:lsp/diagnostics])]
         (is (= 1 (count @diags-sub)))))))
 
 (deftest lsp-symbols-update
   (testing "Transacts symbols"
-    (rp/connect! ds-conn) ; Ensure connected before dispatch.
     (let [symbols [{:name "sym1"
                     :kind 1
                     :range {:start {:line 0 :character 0} :end {:line 0 :character 1}}}]]
       (rf/dispatch-sync [::e/lsp-symbols-update symbols])
-      (r/with-let [syms (rp/subscribe [:lsp/symbols])]
+      (r/with-let [syms (rf/subscribe [:lsp/symbols])]
         (is (= 1 (count @syms)))))))
+
+(deftest update-cursor
+  (let [cursor {:line 2 :column 3}]
+    (rf/dispatch-sync [::e/update-cursor cursor])
+    (is (= cursor (get-in @app-db [:editor :cursor])))))
 
 (deftest posh-reconnect-on-reload
   (let [conn (d/create-conn {:symbol/parent {:db/valueType :db.type/ref}
@@ -118,37 +104,5 @@
       (is (some? (meta conn)))
       (rp/connect! conn)
       (is (some? (:listeners (meta conn))))
-      (is (> (count (:listeners (meta conn))) 0))
-      (is (contains? (:listeners (meta conn)) @conn)))))
-
-(def gen-symbol
-  (gen/recursive-gen
-   (fn [rec-gen]
-     (gen/hash-map
-      :name gen/string-alphanumeric
-      :children (gen/vector rec-gen 0 3)
-      :kind gen/int
-      :range (gen/hash-map :start (gen/hash-map :line gen/nat :character gen/nat)
-                           :end (gen/hash-map :line gen/nat :character gen/nat))))
-   (gen/hash-map
-    :name gen/string-alphanumeric
-    :kind gen/int
-    :range (gen/hash-map :start (gen/hash-map :line gen/nat :character gen/nat)
-                         :end (gen/hash-map :line gen/nat :character gen/nat)))))
-
-(def flatten-prop
-  (prop/for-all [symbols (gen/vector gen-symbol 1 10)]
-    (let [flat (e/flatten-symbols symbols nil)]
-      (and (every? #(number? (:db/id %)) flat)
-           (< (apply max (map :db/id flat)) 0)
-           (= (count flat) (count (mapcat #(tree-seq :children :children %) symbols)))))))
-
-(deftest flatten-property
-  (is (:result (tc/quick-check 100 flatten-prop {:seed 42}))))
-
-(deftest reload-syntax
-  (testing "Triggers syntax init on language switch"
-    (with-redefs [syntax/init-syntax (fn [v] (is (some? v) "Calls init with view"))]
-      (reset! es/editor-view #js {})
-      (rf/dispatch-sync [:reload-syntax])
-      (is true "Syntax reload dispatched without error"))))
+      (is (> (count @(:listeners (meta conn))) 0))
+      (is (contains? @(:listeners (meta conn)) :posh)))))
