@@ -106,3 +106,46 @@
       (is (some? (:listeners (meta conn))))
       (is (> (count @(:listeners (meta conn))) 0))
       (is (contains? @(:listeners (meta conn)) :posh)))))
+
+(deftest file-rename-lang-detection-unknown-ext
+  (let [active (:active-file (:workspace @app-db))
+        new-name "test.unknown"]
+    (rf/dispatch-sync [::e/file-rename active new-name])
+    (is (= new-name (get-in @app-db [:workspace :files active :name])))
+    (is (= (:default-language @app-db) (get-in @app-db [:workspace :files active :language])) "Fallback to default for unknown extension")))
+
+(deftest file-rename-no-ext
+  (let [active (:active-file (:workspace @app-db))
+        new-name "test"]
+    (rf/dispatch-sync [::e/file-rename active new-name])
+    (is (= new-name (get-in @app-db [:workspace :files active :name])))
+    (is (= (:default-language @app-db) (get-in @app-db [:workspace :files active :language])) "Fallback to default with no extension")))
+
+(deftest log-append
+  (let [log {:message "Test log"}]
+    (rf/dispatch-sync [::e/log-append log])
+    (is (= [log] (get-in @app-db [:lsp :logs])) "Log appended to lsp/logs")))
+
+(deftest search-empty-term
+  (rf/dispatch-sync [::e/search ""])
+  (let [results (get-in @app-db [:search :results])]
+    (is (empty? results) "Empty term yields no results")))
+
+(deftest toggle-search
+  (let [initial-visible (get-in @app-db [:search :visible?])]
+    (rf/dispatch-sync [::e/toggle-search])
+    (is (not= initial-visible (get-in @app-db [:search :visible?])) "Toggles visibility")))
+
+(deftest open-rename-modal
+  (let [active-name (get-in @app-db [:workspace :files (get-in @app-db [:workspace :active-file]) :name])]
+    (rf/dispatch-sync [::e/open-rename-modal])
+    (is (true? (get-in @app-db [:modals :rename :visible?])) "Modal visible")
+    (is (= active-name (get-in @app-db [:modals :rename :new-name])) "New name set to current")))
+
+(deftest confirm-rename
+  (let [active (get-in @app-db [:workspace :active-file])
+        new-name "renamed.rho"]
+    (rf/dispatch-sync [::e/set-rename-name new-name])
+    (rf/dispatch-sync [::e/confirm-rename])
+    (is (= new-name (get-in @app-db [:workspace :files active :name])) "File renamed")
+    (is (false? (get-in @app-db [:modals :rename :visible?])) "Modal closed")))

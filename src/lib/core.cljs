@@ -2,15 +2,16 @@
   (:require
    ["@codemirror/autocomplete" :refer [closeBrackets]]
    ["@codemirror/commands" :refer [defaultKeymap]]
-   ["@codemirror/language" :refer [indentOnInput bracketMatching]]
-   ["@codemirror/state" :refer [EditorState EditorSelection]]
-   ["@codemirror/view" :refer [keymap EditorView lineNumbers]]
+   ["@codemirror/language" :refer [bracketMatching indentOnInput]]
+   ["@codemirror/state" :refer [EditorSelection EditorState]]
+   ["@codemirror/view" :refer [EditorView keymap lineNumbers]]
    ["react" :as react]
    ["rxjs" :as rxjs]
    [clojure.string :as str]
    [datascript.core :as d]
    [reagent.core :as r]
    [lib.db :refer [schema]]
+   [lib.editor.diagnostics :as diagnostics] ;; Added for LSP diagnostics rendering.
    [lib.editor.syntax :as syntax]
    [lib.lsp.client :as lsp]
    [lib.utils :as u]
@@ -59,11 +60,13 @@
      :language lang
      :version 0
      :dirty? false
+     :opened? false
      :cursor {:line 1 :column 1}
      :selection nil
      :lsp {:connection nil
            :url nil
            :pending {}
+           :initialized? false
            :logs []}
      :languages languages
      :debounce-timer nil  ;; Timer for debouncing LSP didChange notifications.
@@ -89,7 +92,8 @@
     (.next events (clj->js {:type "selection-change" :data {:cursor cursor-pos :selection sel}}))))
 
 (defn- get-extensions
-  "Returns the array of CodeMirror extensions, including dynamic syntax compartment."
+  "Returns the array of CodeMirror extensions, including dynamic syntax compartment
+  and static diagnostic extensions for rendering LSP diagnostics."
   [state-atom events]
   (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
@@ -119,6 +123,8 @@
                  (.of syntax/syntax-compartment #js [])
                  (.of keymap defaultKeymap)
                  (.theme EditorView #js {} #js {:dark true})
+                 diagnostics/diagnostic-field
+                 diagnostics/diagnostic-plugin
                  update-ext])))
 
 ;; Inner React functional component, handling CodeMirror integration and state management.
@@ -153,28 +159,32 @@
                                               to-offset (u/pos-to-offset doc to true)]
                                           (.dispatch @view-atom #js {:selection (EditorSelection.range from-offset to-offset)})))
                         :openDocument (fn [uri content lang]
+                                        ;; Opens a document, sending didOpen if connected and initialized, else flags for later send on initialized.
                                         (let [effective-lang (or lang (:language @state-atom) "text")]
                                           (when-not lang
                                             (log/warn "openDocument called with nil language; falling back to" effective-lang))
-                                          (swap! state-atom assoc :uri uri :content content :language effective-lang :version 1 :dirty? false)
+                                          (swap! state-atom assoc :uri uri :content content :language effective-lang :version 1 :dirty? false :opened? false)
                                           (.next events (clj->js {:type "document-open" :data {:uri uri :language effective-lang}}))
-                                          (when-let [conn (:connection (:lsp @state-atom))]
+                                          (when (and (get-in @state-atom [:lsp :connection]) (get-in @state-atom [:lsp :initialized?]))
                                             (lsp/send {:method "textDocument/didOpen"
                                                        :params {:textDocument {:uri uri :languageId effective-lang :version 1 :text content}}} state-atom)
-                                            (lsp/request-symbols uri state-atom))))
+                                            (lsp/request-symbols uri state-atom)
+                                            (swap! state-atom assoc :opened? true))))
                         :closeDocument (fn []
+                                         ;; Closes the document, sending didClose if opened and connected.
                                          (let [uri (:uri @state-atom)]
                                            (when uri
-                                             (when-let [conn (:connection (:lsp @state-atom))]
+                                             (when (and (:opened? @state-atom) (get-in @state-atom [:lsp :connection]))
                                                (lsp/send {:method "textDocument/didClose"
                                                           :params {:textDocument {:uri uri}}} state-atom))
                                              (.next events (clj->js {:type "document-close" :data {:uri uri}})))
-                                           (swap! state-atom assoc :uri nil :content "" :version 0 :dirty? false)))
+                                           (swap! state-atom assoc :uri nil :content "" :version 0 :dirty? false :opened? false)))
                         :saveDocument (fn []
+                                        ;; Saves the document if dirty, sending didSave with current text if connected.
                                         (let [uri (:uri @state-atom)
                                               content (:content @state-atom)]
                                           (when (and uri (:dirty? @state-atom))
-                                            (when-let [conn (:connection (:lsp @state-atom))]
+                                            (when (get-in @state-atom [:lsp :connection])
                                               (lsp/send {:method "textDocument/didSave"
                                                          :params {:textDocument {:uri uri}
                                                                   :text content}} state-atom))
@@ -191,6 +201,19 @@
                      (fn []
                        (.destroy v)
                        (reset! view-atom nil))))
+                 #js [])
+                (react/useEffect
+                 (fn []
+                   ;; Internal subscription to events for handling diagnostics updates by dispatching
+                   ;; a transaction to update the diagnostic StateField.
+                   (let [sub (.subscribe events
+                              (fn [evt-js]
+                                (let [evt (js->clj evt-js :keywordize-keys true)
+                                      type (:type evt)]
+                                  (when (and (= type "diagnostics") @view-atom)
+                                    (let [diags (:data evt)]
+                                      (.dispatch @view-atom #js {:annotations (.of diagnostics/diagnostic-annotation (clj->js diags))}))))))]
+                     (fn [] (.unsubscribe sub))))
                  #js [])
                 (react/useEffect
                  (fn []
@@ -229,7 +252,7 @@
                      (when-not config
                        (log/warn "No language configuration for" lang "; LSP connection skipped"))
                      (when-let [url (:lsp-url config)]
-                       (lsp/connect {:type (or (:lsp-method config) "websocket") :url url} state-atom events)))
+                       (lsp/connect {:url url} state-atom events)))
                    js/undefined)
                  #js [(:language @state-atom)])
                 (react/createElement "div" #js {:ref container-ref :className "code-editor flex-grow-1"})))]

@@ -16,7 +16,6 @@
                         :opt-un [::grammar-wasm
                                  ::highlight-query-path
                                  ::lsp-url
-                                 ::lsp-method
                                  ::file-icon
                                  ::fallback-highlighter]))
 

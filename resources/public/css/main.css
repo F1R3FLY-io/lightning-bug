@@ -57,10 +57,18 @@ html, body, #app {
 .cm-function { color: #dda0dd; }
 .cm-constant { color: #ff00ff; }
 
-.status-bar {
-    background-color: #002b5c;
-    padding: 5px 10px;
-    font-size: 12px;
-    color: #00bfff;
-    border-top: 1px solid #003366;
+.cm-error-underline {
+    text-decoration: underline wavy red;
+}
+
+.cm-warning-underline {
+    text-decoration: underline wavy orange;
+}
+
+.cm-info-underline {
+    text-decoration: underline dotted blue;
+}
+
+.cm-hint-underline {
+    text-decoration: underline dotted gray;
 }

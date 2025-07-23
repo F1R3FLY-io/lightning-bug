@@ -1,14 +1,16 @@
 (ns app.events
   (:require
+   [app.db :refer [default-db ds-conn]]
+   [app.utils :as u]
    [clojure.string :as str]
    [datascript.core :as d]
    [re-frame.core :as rf]
-   [taoensso.timbre :as log]
-   [app.db :refer [default-db ds-conn]]
-   [app.utils :as u]))
+   [taoensso.timbre :as log]))
 
-;; Flattens hierarchical LSP symbols into a list for datascript transaction, assigning negative db/ids to avoid conflicts.
-(defn flatten-symbols [symbols parent-id]
+(defn flatten-symbols
+  "Flattens hierarchical LSP symbols into a list for datascript transaction,
+  assigning negative db/ids to avoid conflicts."
+  [symbols parent-id]
   (let [id-counter (atom -1)]
     (letfn [(flatten-rec [syms parent]
               (mapcat (fn [s]
@@ -21,9 +23,6 @@
                       syms))]
       (flatten-rec symbols parent-id))))
 
-;; Use namespaced keywords (::event-name) for all event registrations to prevent collisions and improve debuggability.
-;; This resolves mismatches where dispatches use ::e/event-name (namespaced) but registrations use simple :event-name.
-
 (rf/reg-event-fx ::initialize
   (fn [{:keys [_]} _]
     (let [uuid (u/generate-uuid)
@@ -33,12 +32,10 @@
                (assoc-in [:workspace :files uuid] {:name name :content "" :language lang :dirty? false})
                (assoc-in [:workspace :active-file] uuid))})))
 
-;; Opens a file by setting it as active.
 (rf/reg-event-db ::file-open
   (fn [db [_ file-id]]
     (assoc-in db [:workspace :active-file] file-id)))
 
-;; Adds a new untitled file and sets it as active.
 (rf/reg-event-db ::file-add
   (fn [db _]
     (let [uuid (u/generate-uuid)
@@ -49,7 +46,6 @@
           (assoc-in [:workspace :files uuid] {:name name :content "" :language lang :dirty? false})
           (assoc-in [:workspace :active-file] uuid)))))
 
-;; Removes a file; sets active to first remaining if deleted.
 (rf/reg-event-db ::file-remove
   (fn [db [_ file-id]]
     (let [files (dissoc (get-in db [:workspace :files]) file-id)
@@ -60,22 +56,15 @@
           (assoc-in [:workspace :files] files)
           (assoc-in [:workspace :active-file] active)))))
 
-;; Renames the active file and updates its language based on the new extension.
 (rf/reg-event-db ::file-rename
   (fn [db [_ file-id new-name]]
-    (let [langs (:languages db)
-          ext (when-let [pos (str/last-index-of new-name ".")]
+    (let [ext (when-let [pos (str/last-index-of new-name ".")]
                 (subs new-name pos))
-          lang (or (ffirst
-                    (filter
-                     (fn [[_ v]] (some #{ext} (:extensions v)))
-                     langs))
-                   (:default-language db))]
+          lang (u/get-lang-from-ext db ext)]
       (-> db
           (assoc-in [:workspace :files file-id :name] new-name)
           (assoc-in [:workspace :files file-id :language] lang)))))
 
-;; Updates active file content and marks as dirty.
 (rf/reg-event-db ::editor-update-content
   (fn [db [_ content]]
     (let [file-id (:active-file (:workspace db))]
@@ -89,7 +78,6 @@
   (fn [db [_ connected?]]
     (assoc-in db [:lsp :connection] connected?)))
 
-;; Transacts diagnostics to datascript and updates status.
 (rf/reg-event-db ::lsp-diagnostics-update
   (fn [db [_ diags]]
     (let [tx (map #(assoc % :type :diagnostic) diags)
@@ -103,7 +91,6 @@
   (fn [db [_ status]]
     (assoc db :status status)))
 
-;; Transacts flattened symbols to datascript.
 (rf/reg-event-db ::lsp-symbols-update
   (fn [db [_ symbols]]
     (let [flat (flatten-symbols symbols nil)
@@ -121,20 +108,17 @@
   (fn [db [_ cursor]]
     (assoc-in db [:editor :cursor] cursor)))
 
-;; Simulates running an agent; sets status and dispatches validation after delay.
 (rf/reg-event-fx ::run-agent
   (fn [{:keys [db]} _]
     (log/info "Running agent simulation...")
     {:db (assoc db :status :running)
      :fx [[:dispatch-later {:ms 2000 :dispatch [::validate-agent]}]]}))
 
-;; Validates the active file content via LSP.
 (rf/reg-event-db ::validate-agent
   (fn [db _]
     (log/info "Validating agent...")
     db))
 
-;; Searches code and logs for term; updates search results.
 (rf/reg-event-db ::search
   (fn [db [_ term]]
     (let [lterm (str/lower-case term)

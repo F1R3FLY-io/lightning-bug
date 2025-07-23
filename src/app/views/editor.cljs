@@ -1,25 +1,24 @@
 (ns app.views.editor
   (:require
    ["react" :as react]
-   [re-frame.core :as rf]
-   [re-com.core :as rc]
-   [re-posh.core :as rp]
-   [taoensso.timbre :as log]
    [app.events :as e]
    [app.utils :as u]
-   [lib.core :refer [Editor]]))
+   [lib.core :refer [Editor]]
+   [re-frame.core :as rf]
+   [re-posh.core :as rp]
+   [taoensso.timbre :as log]))
 
-;; Main editor view component
 (defn component
+  "Renders the editor component with content, language, and LSP handling."
   []
   (let [content @(rf/subscribe [:active-content])
         lang @(rf/subscribe [:active-lang])
         languages @(rf/subscribe [:languages])
-        active @(rf/subscribe [:active-file])
+        active @(rf/subscribe [:workspace/active-file])
         ext (u/get-extension {:languages languages} lang)
         uri (str "inmemory://" active ext)
         editor-ref (react/useRef)]
-    (log/debug "lang" lang)
+    (log/debug "Rendering editor for lang:" lang)
     (if (not active)
       [:div.d-flex.justify-content-center.align-items-center.h-100 "No file open"]
       (do
@@ -53,4 +52,4 @@
                     :content content
                     :language lang
                     :languages languages
-                    :onContentChange #(rf/dispatch [::editor-update-content %])}]))))
+                    :onContentChange #(rf/dispatch [::e/editor-update-content %])}]))))

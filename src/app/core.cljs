@@ -1,20 +1,25 @@
 (ns app.core
   (:require
    ["react-dom/client" :as rd]
-   [reagent.core :as r]
-   [re-frame.core :as rf]
-   [re-frisk.core :as rfsk]
-   [re-posh.core :as rp]
-   [taoensso.timbre :as log]
    [app.db :refer [ds-conn]]
    [app.events :as e]
    [app.subs] ;; Registers subscriptions on load.
-   [app.views.main :refer [root-component]]))
+   [app.views.main :refer [root-component]]
+   [day8.re-frame-10x.preload.react-18]
+   [devtools.preload]
+   [re-frame.core :as rf]
+   [re-frisk.core :as rfsk]
+   [re-frisk.preload]
+   [re-posh.core :as rp]
+   [reagent.core :as r]
+   [taoensso.timbre :as log]))
 
 (defonce app-root (atom nil))
 
-;; Mounts the root Reagent component to the DOM element with id "app".
-(defn mount-root []
+(defn mount-root
+  "Mounts the root Reagent component to the DOM element with id 'app'.
+  Clears subscription cache and handles root creation if needed."
+  []
   (log/info "Mounting root component")
   (rf/clear-subscription-cache!)
   (let [container (js/document.getElementById "app")]
@@ -25,8 +30,10 @@
         (.render @app-root (r/as-element [root-component])))
       (log/warn "No target container for mount; skipping"))))
 
-;; Initializes the application: sets up error handling, initializes state, connects datascript, mounts UI, and enables debugging tools.
-(defn ^:export init []
+(defn ^:export init
+  "Initializes the application: sets up error handling, initializes state,
+  connects datascript, mounts UI, and enables debugging tools."
+  []
   ;; Global uncaught exception handler.
   (js/window.addEventListener "error"
                               (fn [event]
@@ -41,8 +48,9 @@
   (mount-root) ;; Mount after connect.
   (rfsk/enable)) ;; Enable re-frisk for app-db inspection.
 
-;; Reload hook for hot-reloading: re-connects Posh and re-mounts the root.
-(defn ^:dev/after-load ^:export reload []
+(defn ^:dev/after-load ^:export reload
+  "Reload hook for hot-reloading: re-connects Posh and re-mounts the root."
+  []
   (log/debug "Re-connecting Posh on hot reload")
   (rp/connect! ds-conn)
   (mount-root))

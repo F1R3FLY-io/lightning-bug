@@ -1,14 +1,14 @@
 (ns app.languages
   (:require
-   [taoensso.timbre :as log]
-   [clojure.spec.alpha :as s]))
+   [clojure.spec.alpha :as s]
+   [taoensso.timbre :as log]))
 
 (def registry (atom {}))
 
 (s/def ::grammar-wasm string?)
 (s/def ::highlight-query-path string?)
+(s/def ::indents-query-path string?)
 (s/def ::lsp-url string?)
-(s/def ::lsp-method string?)
 (s/def ::extensions (s/coll-of string? :min-count 1))
 (s/def ::file-icon string?)
 (s/def ::fallback-highlighter string?)
@@ -17,8 +17,8 @@
 (s/def ::config (s/keys :req-un [::extensions]
                         :opt-un [::grammar-wasm
                                  ::highlight-query-path
+                                 ::indents-query-path
                                  ::lsp-url
-                                 ::lsp-method
                                  ::file-icon
                                  ::fallback-highlighter
                                  ::indent-size]))
