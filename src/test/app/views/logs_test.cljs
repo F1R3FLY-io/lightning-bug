@@ -5,6 +5,7 @@
    [re-com.core :as rc]
    [re-frame.core :as rf]
    [reagent.core :as r]
+   [reagent.ratom :as ratom]
    [clojure.test :refer [deftest is async use-fixtures]]
    [clojure.core.async :refer [go <! timeout]]
    [datascript.core :as d]
@@ -95,105 +96,109 @@
 
 (deftest logs-navigate-on-click
   (async done
-    (go
-      (rf/dispatch-sync [::e/lsp-diagnostics-update [{:message "Test diagnostic"
-                                                       :range {:start {:line 0 :character 0} :end {:line 0 :character 5}}
-                                                       :severity 1}]])
-      (r/flush)
-      (<! (timeout 50))
-      (let [container (js/document.createElement "div")]
-        (js/document.body.appendChild container)
-        (let [root (rdclient/createRoot container)]
-          (react/act #(.render root (r/as-element [logs/component])))
-          (r/flush)
-          (<! (timeout 50)))
-        (react/act #(rf/dispatch-sync [::e/toggle-logs]))
-        (r/flush)
-        (<! (timeout 50))
-        (let [label (.querySelector container ".text-danger")]
-          (is (some? label) "Diagnostic label found")
-          (react/act #(.dispatchEvent label (js/MouseEvent. "click")))
-          (r/flush)
-          (<! (timeout 50))
-          (is (= {:line 1 :column 1} @(rf/subscribe [:editor-cursor-pos])) "Cursor set to diagnostic position"))
-        (js/document.body.removeChild container)
-        (done)))))
+         (go
+           (rf/dispatch-sync [::e/lsp-diagnostics-update [{:message "Test diagnostic"
+                                                           :range {:start {:line 0 :character 0} :end {:line 0 :character 5}}
+                                                           :severity 1}]])
+           (r/flush)
+           (<! (timeout 50))
+           (let [container (js/document.createElement "div")]
+             (js/document.body.appendChild container)
+             (let [root (rdclient/createRoot container)]
+               (react/act #(.render root (r/as-element [logs/component])))
+               (r/flush)
+               (<! (timeout 50)))
+             (react/act #(rf/dispatch-sync [::e/toggle-logs]))
+             (r/flush)
+             (<! (timeout 50))
+             (let [label (.querySelector container ".text-danger")]
+               (is (some? label) "Diagnostic label found")
+               (react/act #(.dispatchEvent label (js/MouseEvent. "click")))
+               (r/flush)
+               (<! (timeout 50))
+               (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+                 (is (= {:line 1 :column 1} @(rf/subscribe [:editor-cursor-pos])) "Cursor set to diagnostic position")))
+             (js/document.body.removeChild container)
+             (done)))))
 
 (deftest logs-highlight-on-hover
   (async done
-    (go
-      (rf/dispatch-sync [::e/lsp-diagnostics-update [{:message "Test diagnostic"
-                                                       :range {:start {:line 0 :character 0} :end {:line 0 :character 5}}
-                                                       :severity 1}]])
-      (r/flush)
-      (<! (timeout 50))
-      (let [container (js/document.createElement "div")]
-        (js/document.body.appendChild container)
-        (let [root (rdclient/createRoot container)]
-          (react/act #(.render root (r/as-element [logs/component])))
-          (r/flush)
-          (<! (timeout 50)))
-        (react/act #(rf/dispatch-sync [::e/toggle-logs]))
-        (r/flush)
-        (<! (timeout 50))
-        (let [label (.querySelector container ".text-danger")]
-          (is (some? label) "Diagnostic label found")
-          (react/act #(.dispatchEvent label (js/MouseEvent. "mouseenter")))
-          (r/flush)
-          (<! (timeout 50))
-          (is (= {:from {:line 1 :column 1} :to {:line 1 :column 6}} @(rf/subscribe [:highlight-range])) "Range highlighted on hover"))
-        (js/document.body.removeChild container)
-        (done)))))
+         (go
+           (rf/dispatch-sync [::e/lsp-diagnostics-update [{:message "Test diagnostic"
+                                                           :range {:start {:line 0 :character 0} :end {:line 0 :character 5}}
+                                                           :severity 1}]])
+           (r/flush)
+           (<! (timeout 50))
+           (let [container (js/document.createElement "div")]
+             (js/document.body.appendChild container)
+             (let [root (rdclient/createRoot container)]
+               (react/act #(.render root (r/as-element [logs/component])))
+               (r/flush)
+               (<! (timeout 50)))
+             (react/act #(rf/dispatch-sync [::e/toggle-logs]))
+             (r/flush)
+             (<! (timeout 50))
+             (let [label (.querySelector container ".text-danger")]
+               (is (some? label) "Diagnostic label found")
+               (react/act #(.dispatchEvent label (js/MouseEvent. "mouseenter")))
+               (r/flush)
+               (<! (timeout 50))
+               (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+                 (is (= {:from {:line 1 :column 1} :to {:line 1 :column 6}} @(rf/subscribe [:highlight-range])) "Range highlighted on hover")))
+             (js/document.body.removeChild container)
+             (done)))))
 
 (deftest logs-clear-highlight-on-leave
   (async done
-    (go
-      (rf/dispatch-sync [::e/lsp-diagnostics-update [{:message "Test diagnostic"
-                                                       :range {:start {:line 0 :character 0} :end {:line 0 :character 5}}
-                                                       :severity 1}]])
-      (r/flush)
-      (<! (timeout 50))
-      (let [container (js/document.createElement "div")]
-        (js/document.body.appendChild container)
-        (let [root (rdclient/createRoot container)]
-          (react/act #(.render root (r/as-element [logs/component])))
-          (r/flush)
-          (<! (timeout 50)))
-        (react/act #(rf/dispatch-sync [::e/toggle-logs]))
-        (r/flush)
-        (<! (timeout 50))
-        (let [label (.querySelector container ".text-danger")]
-          (is (some? label) "Diagnostic label found")
-          (react/act #(.dispatchEvent label (js/MouseEvent. "mouseenter")))
-          (r/flush)
-          (<! (timeout 50))
-          (react/act #(.dispatchEvent label (js/MouseEvent. "mouseleave")))
-          (r/flush)
-          (<! (timeout 50))
-          (is (nil? @(rf/subscribe [:highlight-range])) "Highlight cleared on mouse leave"))
-        (js/document.body.removeChild container)
-        (done)))))
+         (go
+           (rf/dispatch-sync [::e/lsp-diagnostics-update [{:message "Test diagnostic"
+                                                           :range {:start {:line 0 :character 0} :end {:line 0 :character 5}}
+                                                           :severity 1}]])
+           (r/flush)
+           (<! (timeout 50))
+           (let [container (js/document.createElement "div")]
+             (js/document.body.appendChild container)
+             (let [root (rdclient/createRoot container)]
+               (react/act #(.render root (r/as-element [logs/component])))
+               (r/flush)
+               (<! (timeout 50)))
+             (react/act #(rf/dispatch-sync [::e/toggle-logs]))
+             (r/flush)
+             (<! (timeout 50))
+             (let [label (.querySelector container ".text-danger")]
+               (is (some? label) "Diagnostic label found")
+               (react/act #(.dispatchEvent label (js/MouseEvent. "mouseenter")))
+               (r/flush)
+               (<! (timeout 50))
+               (react/act #(.dispatchEvent label (js/MouseEvent. "mouseleave")))
+               (r/flush)
+               (<! (timeout 50))
+               (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+                 (is (nil? @(rf/subscribe [:highlight-range])) "Highlight cleared on mouse leave")))
+             (js/document.body.removeChild container)
+             (done)))))
 
 (deftest logs-resize-height
   (async done
-    (go
-      (let [container (js/document.createElement "div")]
-        (js/document.body.appendChild container)
-        (let [root (rdclient/createRoot container)]
-          (react/act #(.render root (r/as-element [logs/component])))
-          (r/flush)
-          (<! (timeout 50)))
-        (react/act #(rf/dispatch-sync [::e/toggle-logs]))
-        (r/flush)
-        (<! (timeout 50))
-        (let [content (.querySelector container ".logs-content")]
-          (is (some? content) "Logs content found")
-          (set! (.-height (.-style content)) "300px")
-          (.dispatchEvent content (js/Event. "resize"))
-          (<! (timeout 200))
-          (is (= 300 @(rf/subscribe [:logs-height])) "Height updated on resize"))
-        (js/document.body.removeChild container)
-        (done)))))
+         (go
+           (let [container (js/document.createElement "div")]
+             (js/document.body.appendChild container)
+             (let [root (rdclient/createRoot container)]
+               (react/act #(.render root (r/as-element [logs/component])))
+               (r/flush)
+               (<! (timeout 50)))
+             (react/act #(rf/dispatch-sync [::e/toggle-logs]))
+             (r/flush)
+             (<! (timeout 50))
+             (let [content (.querySelector container ".logs-content")]
+               (is (some? content) "Logs content found")
+               (set! (.-height (.-style content)) "300px")
+               (.dispatchEvent content (js/Event. "resize"))
+               (<! (timeout 200))
+               (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+                 (is (= 300 @(rf/subscribe [:logs-height])) "Height updated on resize")))
+             (js/document.body.removeChild container)
+             (done)))))
 
 (deftest logs-resize-observer-setup
   (async done

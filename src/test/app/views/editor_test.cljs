@@ -13,7 +13,8 @@
    [re-frame.db :refer [app-db]]
    [re-posh.core :as rp]
    [app.db :refer [default-db ds-conn]]
-   [app.views.editor :as editor]))
+   [app.views.editor :as editor]
+   [reagent.ratom :as ratom]))
 
 (set! (.-IS_REACT_ACT_ENVIRONMENT js/globalThis) true)
 
@@ -88,8 +89,9 @@
         (react/act #(rf/dispatch-sync [::e/set-cursor-pos {:line 2 :column 3}]))
         (r/flush)
         (<! (timeout 50))
-        (is (= {:line 2 :column 3} @(rf/subscribe [:editor/cursor])) "Cursor updated")
-        (is (nil? @(rf/subscribe [:editor-cursor-pos])) "Cursor pos cleared after update")
+        (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+          (is (= {:line 2 :column 3} @(rf/subscribe [:editor/cursor])) "Cursor updated")
+          (is (nil? @(rf/subscribe [:editor-cursor-pos])) "Cursor pos cleared after update"))
         (js/document.body.removeChild container)
         (done))))))
 
@@ -104,7 +106,7 @@
         (with-redefs [Editor (react/forwardRef
                               (fn [_ forwarded-ref]
                                 (react/useImperativeHandle
-                                 forwarded-ref
+                                forwarded-ref
                                  (fn []
                                    #js {:highlightRange (fn [_ _] (reset! highlight-called true))
                                         :clearHighlight (fn [] (reset! clear-called true))
