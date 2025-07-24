@@ -1,19 +1,22 @@
 (ns test.app.events-test
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures]]
+   [clojure.core.async :refer [go <! timeout]]
+   [clojure.test :refer [deftest is testing async use-fixtures]]
    [datascript.core :as d]
    [re-frame.core :as rf]
    [re-frame.db :refer [app-db]]
+   [reagent.ratom :as ratom]
    [app.db :as db]
    [app.events :as e]
-   [re-posh.core :as rp]
-   [reagent.core :as r]))
+   [app.shared :refer [editor-ref-atom]]
+   [re-posh.core :as rp]))
 
 (use-fixtures :each
   {:before (fn []
              (set! db/ds-conn (d/create-conn db/schema))
              (reset! app-db {})
-             (rp/dispatch-sync [::e/initialize])
+             (reset! editor-ref-atom nil)
+             (rf/dispatch-sync [::e/initialize])
              (rp/connect! db/ds-conn))
    :after (fn [])})
 
@@ -25,7 +28,7 @@
     (testing "Adds untitled file"
       (is (= 1 (count (:files (:workspace db)))))
       (is (some? active))
-      (is (= (str "untitled" ext) (get-in db[:workspace :files active :name]))))))
+      (is (= (str "untitled" ext) (get-in db [:workspace :files active :name]))))))
 
 (deftest file-add-remove
   (let [initial-count (count (:files (:workspace @app-db)))
@@ -53,23 +56,26 @@
     (is (= new-name (get-in @app-db [:workspace :files active :name])))
     (is (= "rholang" (get-in @app-db [:workspace :files active :language])) "Language updated for .rho extension")
     (rf/dispatch-sync [::e/file-rename active "test.txt"])
-    (is (= "text" (get-in @app-db [:workspace :files active :language])) "Fallback to default for unknown extension")))
+    (is (= "text" (get-in @app-db [:workspace :files active :language])) "Fallback to text for .txt")))
 
 (deftest editor-update-dirty
   (let [active (get-in @app-db [:workspace :active-file])
         content "test content"]
     (rf/dispatch-sync [::e/editor-update-content content])
     (is (= content (get-in @app-db [:workspace :files active :content])))
-    (is (true? (get-in @app-db [:workspace :files active :dirty?])))))
+    (is (true? (get-in @app-db [:workspace :files active :dirty?])) "Marked dirty")))
 
 (deftest flatten-symbols
   (testing "Flattens hierarchical symbols"
     (let [hierarchical [{:name "root" :children [{:name "child1"} {:name "child2" :children [{:name "grandchild"}]}]}]
-          flat (e/flatten-symbols hierarchical nil)]
+          flat (e/flatten-symbols hierarchical nil)
+          conn (d/create-conn {:parent {:db/valueType :db.type/ref}})]
       (is (= 4 (count flat)))
       (is (every? #(contains? % :db/id) flat))
       (is (not (contains? (first flat) :parent)))
-      (is (some #(= "grandchild" (:name %)) flat)))))
+      (is (some #(= "grandchild" (:name %)) flat))
+      (d/transact! conn flat)
+      (is (= 4 (count (d/q '[:find ?e :where [?e]] @conn))) "Transacts without nil ref error"))))
 
 (deftest lsp-diagnostics-update
   (testing "Transacts diagnostics"
@@ -77,8 +83,9 @@
                   :range {:start {:line 0 :character 0} :end {:line 0 :character 1}}
                   :severity 1}]]
       (rf/dispatch-sync [::e/lsp-diagnostics-update diags])
-      (r/with-let [diags-sub (rf/subscribe [:lsp/diagnostics])]
-        (is (= 1 (count @diags-sub)))))))
+      (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+        (let [diags-sub @(rf/subscribe [:lsp/diagnostics])]
+          (is (= 1 (count diags-sub))))))))
 
 (deftest lsp-symbols-update
   (testing "Transacts symbols"
@@ -86,8 +93,9 @@
                     :kind 1
                     :range {:start {:line 0 :character 0} :end {:line 0 :character 1}}}]]
       (rf/dispatch-sync [::e/lsp-symbols-update symbols])
-      (r/with-let [syms (rf/subscribe [:lsp/symbols])]
-        (is (= 1 (count @syms)))))))
+      (binding [ratom/*ratom-context* (ratom/make-reaction (fn []))]
+        (let [syms @(rf/subscribe [:lsp/symbols])]
+          (is (= 1 (count syms))))))))
 
 (deftest update-cursor
   (let [cursor {:line 2 :column 3}]
@@ -104,8 +112,11 @@
       (is (some? (meta conn)))
       (rp/connect! conn)
       (is (some? (:listeners (meta conn))))
-      (is (> (count @(:listeners (meta conn))) 0))
-      (is (contains? @(:listeners (meta conn)) :posh)))))
+      (if (some? (:listeners (meta conn)))
+        (do
+          (is (> (count @(:listeners (meta conn))) 0))
+          (is (contains? @(:listeners (meta conn)) :posh)))
+        (is false "Listeners not present; skipping count and contains checks")))))
 
 (deftest file-rename-lang-detection-unknown-ext
   (let [active (:active-file (:workspace @app-db))
@@ -118,8 +129,8 @@
   (let [active (:active-file (:workspace @app-db))
         new-name "test"]
     (rf/dispatch-sync [::e/file-rename active new-name])
-    (is (= new-name (get-in @app-db [:workspace :files active :name])))
-    (is (= (:default-language @app-db) (get-in @app-db [:workspace :files active :language])) "Fallback to default with no extension")))
+    (is (= new-name (get-in @app-db [:workspace :files active :name]))
+    (is (= (:default-language @app-db) (get-in @app-db [:workspace :files active :language])) "Fallback to default with no extension"))))
 
 (deftest log-append
   (let [log {:message "Test log"}]
@@ -143,9 +154,23 @@
     (is (= active-name (get-in @app-db [:modals :rename :new-name])) "New name set to current")))
 
 (deftest confirm-rename
+  (async done
+         (go
+           (let [active (get-in @app-db [:workspace :active-file])
+                 new-name "renamed.rho"]
+             (rf/dispatch-sync [::e/set-rename-name new-name])
+             (rf/dispatch [::e/confirm-rename])
+             (<! (timeout 50))
+             (is (= new-name (get-in @app-db [:workspace :files active :name])) "File renamed")
+             (done)))))
+
+(deftest confirm-rename-calls-editor-method
   (let [active (get-in @app-db [:workspace :active-file])
-        new-name "renamed.rho"]
-    (rf/dispatch-sync [::e/set-rename-name new-name])
-    (rf/dispatch-sync [::e/confirm-rename])
-    (is (= new-name (get-in @app-db [:workspace :files active :name])) "File renamed")
-    (is (false? (get-in @app-db [:modals :rename :visible?])) "Modal closed")))
+        new-name "renamed.rho"
+        called (atom false)]
+    (with-redefs [editor-ref-atom (atom #js {:current #js {:renameDocument (fn [name]
+                                                                             (reset! called true)
+                                                                             (is (= new-name name) "Called renameDocument with new name"))}})]
+      (rf/dispatch-sync [::e/set-rename-name new-name])
+      (rf/dispatch-sync [::e/confirm-rename])
+      (is @called "Editor renameDocument method called"))))

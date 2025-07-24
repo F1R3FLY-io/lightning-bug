@@ -1,6 +1,8 @@
 (ns app.views.main
   (:require
    [app.views.editor :as editor]
+   [app.views.error-boundary :as error-boundary]
+   [app.views.logs :as logs]
    [re-frame.core :as rf]))
 
 (defn status-bar
@@ -16,5 +18,6 @@
   "Root view component for the application."
   []
   [:div.d-flex.flex-column.vh-100
-   [:f> editor/component]
-   [status-bar]])
+   [error-boundary/component {:children [:f> editor/component]}]
+   [status-bar]
+   [:f> logs/component]])

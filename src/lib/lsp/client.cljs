@@ -12,7 +12,9 @@
     (letfn [(flatten-rec [syms parent]
               (mapcat (fn [s]
                         (let [sid (swap! id-counter dec)
-                              s' (assoc (dissoc s :children) :db/id sid :parent parent)
+                              s' (cond-> (dissoc s :children)
+                                   true (assoc :db/id sid)
+                                   parent (assoc :parent parent))
                               children (:children s)]
                           (cons s' (when children (flatten-rec children sid)))))
                       syms))]
@@ -46,7 +48,8 @@
   (send {:method "textDocument/documentSymbol" :params {:textDocument {:uri uri}} :response-type :document-symbol} state-atom))
 
 (defn handle-message
-  "Handles incoming LSP messages, parsing the transport header, then JSON, logging, and processing responses or notifications."
+  "Handles incoming LSP messages, parsing the transport header, then JSON, logging, and processing responses or notifications.
+  Emits events for all relevant LSP messages."
   [msg state-atom events]
   (let [text (get-text msg)]
     (log/debug "Received raw LSP message:" text)
@@ -63,17 +66,21 @@
             (let [parsed-js (js/JSON.parse body)]
               (log/debug "Parsed LSP JSON:" parsed-js)
               (let [parsed (js->clj parsed-js :keywordize-keys true)]
+                (.next events (clj->js {:type "lsp-message" :data parsed})) ;; Emit all LSP messages for clients.
                 (if-let [id (:id parsed)]
                   (let [type (get-in @state-atom [:lsp :pending id])]
                     (when type
                       (swap! state-atom update-in [:lsp :pending] dissoc id)
                       (if (:error parsed)
-                        (log/error "LSP response error:" (:error parsed))
+                        (do
+                          (log/error "LSP response error:" (:error parsed))
+                          (.next events (clj->js {:type "lsp-error" :data (:error parsed)})))
                         (case type
                           :initialize (do
                                         (log/info "LSP initialized")
                                         (send {:method "initialized" :params {}} state-atom)
                                         (swap! state-atom assoc-in [:lsp :initialized?] true)
+                                        (.next events (clj->js {:type "lsp-initialized"}))
                                         (when (and (:uri @state-atom) (not (:opened? @state-atom)))
                                           (let [uri (:uri @state-atom)
                                                 lang (:language @state-atom)
@@ -119,5 +126,6 @@
                                                             (assoc :opened? false)
                                                             (update :lsp assoc :connection false :initialized? false :url nil))))
                                     (.next events (clj->js {:type "disconnect"}))))
-      (set! (.-onerror socket) #(log/error "LSP connection error:" %))
+      (set! (.-onerror socket) #(do (log/error "LSP connection error:" %)
+                                    (.next events (clj->js {:type "lsp-error" :data %}))))
       (reset! ws socket))))

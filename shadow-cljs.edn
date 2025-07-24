@@ -1,8 +1,12 @@
 {:deps {:aliases [:dev]}
  :builds {:lib {:target :npm-module
-                :output-dir "dist"
+                :output-dir "dist/lib"
                 :entries [lib.core]
                 :exports {Editor lib.core/Editor}}
+          :ext {:target :npm-module
+                :output-dir "dist/ext"
+                :entries [ext.lang.rholang]
+                :exports {RholangExtension ext.lang.rholang/config}}
           :app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"
@@ -25,5 +29,4 @@
                                         "fs/promises" false
                                         "path" false}}}}
  :dev-http {3000 "resources/public"}
- ;; Added to suppress sun.misc.Unsafe deprecation warnings from transitive dependencies (e.g., protobuf in Closure Compiler).
  :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]}

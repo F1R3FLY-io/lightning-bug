@@ -3,7 +3,7 @@ html, body, #app {
     margin: 0;
     padding: 0;
     background-color: #001e3c;
-    color: #ffffff;
+    color: #f1f3f5;
 }
 
 .code-editor {
@@ -18,7 +18,7 @@ html, body, #app {
 .cm-content {
     font-family: 'Fira Code', monospace;
     background-color: #161e27;
-    color: #ffffff;
+    color: #f1f3f5;
     padding: 10px;
 }
 
@@ -52,7 +52,7 @@ html, body, #app {
 .cm-boolean { color: #ff4500; }
 .cm-variable { color: #ffd700; }
 .cm-comment { color: #808080; }
-.cm-operator { color: #ffffff; }
+.cm-operator { color: #f1f3f5; }
 .cm-type { color: #00ffff; }
 .cm-function { color: #dda0dd; }
 .cm-constant { color: #ff00ff; }
@@ -71,4 +71,32 @@ html, body, #app {
 
 .cm-hint-underline {
     text-decoration: underline dotted gray;
+}
+
+.logs-panel {
+    border-top: 1px solid #283747 !important;
+    background-color: #161e27;
+    color: #f1f3f5;
+}
+
+.logs-panel .logs-header {
+    background-color: #161e27;
+    color: #f1f3f5;
+}
+
+.logs-panel > .rc-button-wrapper {
+    border-bottom: 1px solid #283747 !important;
+}
+
+.logs-content {
+    background-color: #161e27;
+}
+
+.logs-panel > .rc-button-wrapper > button {
+    background-color: #161e27;
+    color: #f1f3f5;
+}
+
+.cm-highlight {
+    background-color: #ffff99; /* Lighter yellow for better visibility */
 }

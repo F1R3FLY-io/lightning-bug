@@ -3,10 +3,10 @@
    [clojure.core.async :as async :refer [go <!]]
    [clojure.string :as str]
    [taoensso.timbre :as log]
-   ["@codemirror/state" :refer [ChangeSet Compartment Line RangeSetBuilder StateField Text]]
+   ["@codemirror/state" :refer [ChangeSet Compartment RangeSetBuilder StateField Text]]
    ["@codemirror/language" :refer [indentService indentUnit]]
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
-   ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query Tree]]))
+   ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]))
 
 ;; Compartment for dynamic reconfiguration of the syntax highlighting extension.
 (def syntax-compartment (Compartment.))
@@ -47,7 +47,7 @@
     ch))
 
 (defn index-to-point [^Text doc ^number index]
-  (let [line ^Line (.lineAt doc index)]
+  (let [^js line (.lineAt doc index)]
     #js {:row (dec (.-number line))
          :column (- index (.-from line))}))
 
@@ -93,7 +93,7 @@
                 0)
               (let [bias-pos (max 0 (if (> pos 0) (dec pos) pos))
                     ^js node (or (.descendantForIndex ^js root bias-pos bias-pos) root)]
-                (log/debug "Calculating indent at pos" pos "bias-pos" bias-pos "node-type" (.-type node)
+                (log/trace "Calculating indent at pos" pos "bias-pos" bias-pos "node-type" (.-type node)
                            "node-range" {:start (.-startIndex node) :end (.-endIndex node)})
                 (if (or (nil? node) (#{"ERROR" "MISSING"} (.-type node)))
                   (do
@@ -103,27 +103,27 @@
                                 (cond
                                   (nil? cur) nil
                                   :else
-                                  (let [caps (.captures indents-query cur)]
+                                  (let [caps (.captures ^js indents-query cur)]
                                     (cond
                                       (some #(= "branch" (.-name %)) caps) {:type "branch" :node cur :captures caps}
                                       (some #(= "indent" (.-name %)) caps) {:type "indent" :node cur :captures caps}
                                       :else (recur (.-parent cur))))))]
                     (if (nil? found)
                       (do
-                        (log/debug "No indent or branch node found, using base indent 0")
+                        (log/trace "No indent or branch node found, using base indent 0")
                         0)
                       (let [{:keys [type node captures]} found
                             cap (first (filter #(= type (.-name %)) captures))
-                            captured-node (.-node cap)
+                            ^js captured-node (.-node cap)
                             ;; For branch, use start of the node (e.g., par start) to align to the construct's beginning.
                             ;; For indent, use start of captured-node (usually the node itself).
                             start (if (= type "branch")
-                                    (.-startIndex node)
-                                    (.-startIndex captured-node))
+                                    (.-startIndex ^js node)
+                                    (.-startIndex ^js captured-node))
                             ^js line (.lineAt (.-doc state) start)
                             base (line-indent line state)
                             add (if (= type "indent") indent-size 0)]
-                        (log/debug "Indentation level calculated: type" type "base" base "plus" add "start" start "captured-type" (.-type captured-node))
+                        (log/trace "Indentation level calculated: type" type "base" base "plus" add "start" start "captured-type" (.-type captured-node))
                         (+ base add)))))))))))))
 
 (defn make-language-state
@@ -136,8 +136,8 @@
                            :update (fn [value ^js tr]
                                      (if-not (.-docChanged tr)
                                        value
-                                       (let [old-tree (.-tree value)
-                                             edited-tree (.copy old-tree)
+                                       (let [old-tree (.-tree ^js value)
+                                             edited-tree (.copy ^js old-tree)
                                              changes ^ChangeSet (.-changes tr)
                                              old-doc (.-doc (.-startState tr))
                                              new-doc (.-doc (.-state tr))]
@@ -146,16 +146,16 @@
                                                          (let [start (index-to-point old-doc fromA)
                                                                old-end (index-to-point old-doc toA)
                                                                new-end (index-to-point new-doc toB)]
-                                                           (.edit ^Tree edited-tree #js {:startIndex fromA
-                                                                                         :oldEndIndex toA
-                                                                                         :newEndIndex toB
-                                                                                         :startPosition start
-                                                                                         :oldEndPosition old-end
-                                                                                         :newEndPosition new-end})))
+                                                           (.edit ^js edited-tree #js {:startIndex fromA
+                                                                                       :oldEndIndex toA
+                                                                                       :newEndIndex toB
+                                                                                       :startPosition start
+                                                                                       :oldEndPosition old-end
+                                                                                       :newEndPosition new-end})))
                                                        false)
-                                         (let [new-tree (.parse (.-parser value) (.toString new-doc) edited-tree)]
+                                         (let [new-tree (.parse (.-parser ^js value) (.toString new-doc) edited-tree)]
                                            (log/debug "Tree-Sitter tree incrementally updated")
-                                           #js {:tree new-tree :parser (.-parser value)}))))}))
+                                           #js {:tree new-tree :parser (.-parser ^js value)}))))}))
 
 (defn make-highlighter-plugin
   "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries."
@@ -166,26 +166,26 @@
                                   vp (.-viewport view)
                                   from (.-from vp)
                                   to (.-to vp)
-                                  doc (.-doc (.-state view))
-                                  tree (.. (.-state view) (field language-state-field) -tree)
+                                  ^js doc (.-doc (.-state view))
+                                  ^js tree (.. (.-state view) (field language-state-field) -tree)
                                   start-point (index-to-point doc from)
                                   end-point (index-to-point doc to)
-                                  captures (.captures highlight-query (.-rootNode tree) start-point end-point)]
-                              (doseq [capture captures]
+                                  captures (.captures ^js highlight-query (.-rootNode ^js tree) start-point end-point)]
+                              (doseq [^js capture captures]
                                 (let [cls (aget style-js (.-name capture))]
                                   (when cls
                                     (.add builder (.-startIndex (.-node capture)) (.-endIndex (.-node capture)) (.mark Decoration #js {:class cls})))))
                               (.finish builder)))
         PluginClass (fn [^js view]
-                      (this-as this
+                      (this-as ^js this
                         (set! (.-decorations this) (build-decorations view))
                         this))]
     (set! (.-prototype ^js PluginClass) (js/Object.create js/Object.prototype))
     (set! (.-update (.-prototype ^js PluginClass)) (fn [^js update]
-                                                      (this-as this
+                                                      (this-as ^js this
                                                         (when (or (.-viewportChanged update) (.-docChanged update))
                                                           (set! (.-decorations this) (build-decorations (.-view update)))))))
-    (.fromClass ViewPlugin PluginClass #js {:decorations (fn [instance] (.-decorations instance))})))
+    (.fromClass ViewPlugin PluginClass #js {:decorations (fn [^js instance] (.-decorations instance))})))
 
 (defn- make-indent-ext
   "Creates an indentService extension for CodeMirror using Tree-Sitter indentation queries."
@@ -202,7 +202,7 @@
 
 (defn init-syntax
   "Initializes syntax highlighting and indentation for the editor view."
-  [view state-atom]
+  [^js view state-atom]
   (go
     (try
       (let [[init-tag init-cause] (<! (promise->chan @ts-init-promise))]
@@ -228,6 +228,7 @@
             (let [wasm-path (:grammar-wasm lang-config)
                   indent-size (or (:indent-size lang-config) 2)
                   indent-unit-str (str/join (repeat indent-size " "))
+                  indent-unit-ext (.of indentUnit indent-unit-str)
                   cached (get @languages lang-key)
                   highlight-query-str (or (:highlight-query lang-config)
                                           (when-let [path (:highlight-query-path lang-config)]
@@ -298,7 +299,6 @@
                   language-state-field (when (and lang parser) (make-language-state parser))
                   highlight-plugin (when highlight-query (make-highlighter-plugin language-state-field highlight-query))
                   indent-ext (when indents-query (make-indent-ext indents-query indent-size language-state-field))
-                  indent-unit-ext (.of indentUnit indent-unit-str)
                   extensions (cond-> []
                                language-state-field (conj language-state-field)
                                highlight-plugin (conj highlight-plugin)

@@ -3,7 +3,8 @@
    [app.db :refer [ds-conn]]
    [clojure.string :as str]
    [datascript.core :as d]
-   [re-frame.core :as rf]))
+   [re-frame.core :as rf]
+   [taoensso.timbre :as log]))
 
 (rf/reg-sub :workspace/files
             (fn [db _] (:files (:workspace db))))
@@ -66,14 +67,28 @@
 (rf/reg-sub
  :lsp/diagnostics
  (fn [_ _]
-   (d/q '[:find (pull ?e [*])
-          :where [?e :type :diagnostic]] @ds-conn)))
+   (log/debug "Executing Datascript query for diagnostics sub")
+   (map first (d/q '[:find (pull ?e [*])
+                     :where [?e :type :diagnostic]] @ds-conn))))
 
 (rf/reg-sub
  :lsp/symbols
  (fn [_ _]
-   (d/q '[:find (pull ?e [*])
-          :where [?e :type :symbol]] @ds-conn)))
+   (log/debug "Executing Datascript query for symbols sub")
+   (map first (d/q '[:find (pull ?e [*])
+                     :where [?e :type :symbol]] @ds-conn))))
 
 (rf/reg-sub :lsp/logs
   (fn [db _] (:lsp/logs db)))
+
+(rf/reg-sub :logs-visible?
+  (fn [db _] (:logs-visible? db)))
+
+(rf/reg-sub :logs-height
+  (fn [db _] (or (:logs-height db) 200)))
+
+(rf/reg-sub :editor-cursor-pos
+  (fn [db _] (:editor-cursor-pos db)))
+
+(rf/reg-sub :highlight-range
+  (fn [db _] (:highlight-range db)))

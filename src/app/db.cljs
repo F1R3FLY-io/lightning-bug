@@ -42,4 +42,7 @@
      :status nil
      :search {:term "" :results [] :visible? false}
      :modals {:rename {:visible? false :new-name ""}}
-     :ds-conn ds-conn}))
+     :logs-visible? false
+     :logs-height 200
+     :editor-cursor-pos nil
+     :highlight-range nil}))

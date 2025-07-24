@@ -6,11 +6,12 @@ set -ex  # Exit on any error
 
 # Create main and test js directories
 mkdir -p resources/public/js
+mkdir -p resources/public/js/test/js
 mkdir -p resources/public/js/test/extensions/lang/rholang/tree-sitter/queries
 
 # Copy Tree-Sitter WASM to main and test directories
 cp node_modules/web-tree-sitter/tree-sitter.wasm resources/public/js/tree-sitter.wasm
-cp node_modules/web-tree-sitter/tree-sitter.wasm resources/public/js/test/
+cp node_modules/web-tree-sitter/tree-sitter.wasm resources/public/js/test/js
 
 # Copy entire extensions directory to test/js for test server access
 cp -r resources/public/extensions resources/public/js/test/

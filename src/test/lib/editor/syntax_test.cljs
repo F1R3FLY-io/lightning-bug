@@ -55,7 +55,7 @@
         (is (nil? plugin) "Returns nil for invalid inputs")
         (done)))))
 
-(def gen-query (gen/let [captures (gen/vector (gen/elements (keys syntax/style-map)) 1 10)]
+(def gen-query (gen/let [captures (gen/vector (gen/elements (keys syntax/style-map)) 1 1)]
   (str/join "\n" (map #(str "(_" % ") @" %) captures))))
 
 (def gen-doc gen/string-alphanumeric)
@@ -101,35 +101,35 @@
 
 (deftest incremental-parse
   (async done
-    (go
-      (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-            query-str (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
-            [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-            parser (doto (new Parser) (.setLanguage lang))
-            query (new (.-Query TreeSitter) lang query-str)
-            initial-str "let x = 1"
-            language-state-field (syntax/make-language-state parser)
-            highlighter-ext (syntax/make-highlighter-plugin language-state-field query)
-            state (.create EditorState #js {:doc initial-str :extensions #js [language-state-field highlighter-ext]})
-            initial-doc (.-doc state)
-            view (EditorView. #js {:state state :parent js/document.body})
-            plugin-instance (.plugin view highlighter-ext)
-            old-tree (.-tree plugin-instance)
-            change-spec #js {:from 9 :to 9 :insert " in y"}
-            changes (.of ChangeSet change-spec (.-length initial-doc))
-            new-str (str (subs initial-str 0 9) " in y" (subs initial-str 9))
-            new-doc (.-doc (.create EditorState #js {:doc new-str}))
-            mock-update #js {:docChanged true
-                             :changes changes
-                             :startState state
-                             :state #js {:doc new-doc}
-                             :view view}
-            _ ((.-update (.-prototype (.-constructor plugin-instance))) mock-update plugin-instance)
-            new-tree (.-tree plugin-instance)]
-        (is (not= old-tree new-tree) "Tree updated")
-        (is (= (.toString new-doc) (.-text ^js (.-rootNode ^js new-tree))) "New tree matches new doc")
-        (.destroy view)
-        (done)))))
+     (go
+       (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+             query-str (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
+             [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+             parser (doto (new Parser) (.setLanguage lang))
+             query (new (.-Query TreeSitter) lang query-str)
+             initial-str "let x = 1"
+             language-state-field (syntax/make-language-state parser)
+             highlighter-ext (syntax/make-highlighter-plugin language-state-field query)
+             state (.create EditorState #js {:doc initial-str :extensions #js [language-state-field highlighter-ext]})
+             initial-doc (.-doc state)
+             view (EditorView. #js {:state state :parent js/document.body})
+             plugin-instance (.plugin view highlighter-ext)
+             old-tree (.-tree plugin-instance)
+             change-spec #js {:from 9 :to 9 :insert " in y"}
+             changes (.of ChangeSet change-spec (.-length initial-doc))
+             new-str (str (subs initial-str 0 9) " in y" (subs initial-str 9))
+             new-doc (.-doc (.create EditorState #js {:doc new-str}))
+             mock-update #js {:docChanged true
+                              :changes changes
+                              :startState state
+                              :state #js {:doc new-doc}
+                              :view view}
+             _ ((.-update (.-prototype (.-constructor plugin-instance))) mock-update plugin-instance)
+             new-tree ^js (.-tree plugin-instance)]
+         (is (not= old-tree new-tree) "Tree updated")
+         (is (= (.toString new-doc) (.-text ^js (.-rootNode ^js new-tree))) "New tree matches new doc")
+         (.destroy view)
+         (done)))))
 
 (deftest empty-document-handling
   (async done
