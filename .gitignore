@@ -17,3 +17,6 @@
 !/scripts/**/*.sh
 !/shadow-cljs.edn
 !/src/**/*.cljs
+
+# Exclude specific file patterns
+/resources/public/js/test/*
