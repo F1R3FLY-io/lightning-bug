@@ -103,20 +103,29 @@
     (is (= cursor (get-in @app-db [:editor :cursor])))))
 
 (deftest posh-reconnect-on-reload
-  (let [conn (d/create-conn {:symbol/parent {:db/valueType :db.type/ref}
-                             :symbol/range {:db/cardinality :db.cardinality/one}
-                             :diagnostic/range {:db/cardinality :db.cardinality/one}})]
-    (testing "Reconnects if conn present"
-      (is (some? conn))
-      (is (some? @conn))
-      (is (some? (meta conn)))
+  (let [conn (d/create-conn db/schema)]
+    (testing "Connects and verifies listeners"
+      (is (some? conn) "Connection created")
+      (is (some? @conn) "Derefs to DB map")
+      (is (some? (meta conn)) "Conn atom has metadata")
       (rp/connect! conn)
-      (is (some? (:listeners (meta conn))))
-      (if (some? (:listeners (meta conn)))
-        (do
-          (is (> (count @(:listeners (meta conn))) 0))
-          (is (contains? @(:listeners (meta conn)) :posh)))
-        (is false "Listeners not present; skipping count and contains checks")))))
+      (let [listeners (:listeners @(:atom conn))]
+        (when (is (some? listeners) "Listeners map attached")
+          (is (> (count listeners) 0) "Listeners populated")
+          (is (contains? listeners :posh-listener) "Posh listener key present"))))
+    (testing "Simulate unload: unlisten"
+      (d/unlisten! conn :posh-listener)
+      (when-let [listeners (:listeners @(:atom conn))]
+        (is (not (contains? listeners :posh-listener)) "Posh listener removed")))
+    (testing "Reconnects on reload"
+      (rp/connect! conn)
+      (let [listeners (:listeners @(:atom conn))]
+        (when (is (some? listeners) "Listeners still attached after reconnect")
+          (is (> (count listeners) 0) "Listeners count >0 after reconnect")
+          (is (contains? listeners :posh-listener) "Posh listener re-added"))))
+    (testing "Transact and query works with Posh"
+      (d/transact! conn [[:db/add -1 :test/key "value"]])
+      (is (= #{["value"]} (d/q '[:find ?v :where [?e :test/key ?v]] @conn)) "Transact and query succeed"))))
 
 (deftest file-rename-lang-detection-unknown-ext
   (let [active (:active-file (:workspace @app-db))
@@ -129,8 +138,8 @@
   (let [active (:active-file (:workspace @app-db))
         new-name "test"]
     (rf/dispatch-sync [::e/file-rename active new-name])
-    (is (= new-name (get-in @app-db [:workspace :files active :name]))
-    (is (= (:default-language @app-db) (get-in @app-db [:workspace :files active :language])) "Fallback to default with no extension"))))
+    (is (= new-name (get-in @app-db [:workspace :files active :name])))
+    (is (= (:default-language @app-db) (get-in @app-db [:workspace :files active :language])) "Fallback to default with no extension")))
 
 (deftest log-append
   (let [log {:message "Test log"}]

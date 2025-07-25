@@ -5,8 +5,10 @@
 !*/
 
 # Include specific file patterns
-!/.gitignore
 !/deps.edn
+!/.gitignore
+!/LICENSE.txt
+!/NOTICE.txt
 !/package.json
 !/README.md
 !/resources/public/css/**/*.css
