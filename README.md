@@ -1,6 +1,6 @@
 # Lightning Bug
 
-Lightning Bug is a modern, extensible code editor built with ClojureScript, Reagent, Re-frame, and CodeMirror 6. It features pluggable language support via Tree-Sitter for syntax highlighting and indentation, and LSP integration for advanced features like diagnostics and symbols. The editor is designed to be decoupled from specific language or servers, allowing easy extension for new languages.
+Lightning Bug is a modern, extensible code editor built with ClojureScript and CodeMirror 6. It features pluggable language support via Tree-Sitter for syntax highlighting and indentation, and LSP integration for advanced features like diagnostics and symbols. The editor is designed to be decoupled from specific language or servers, allowing easy extension for new languages.
 
 ## License
 
@@ -12,30 +12,23 @@ This project is licensed under the Apache License 2.0. See the [LICENSE.txt](LIC
 - Rholang Tree-Sitter Grammar: [https://github.com/dylon/rholang-rs](https://github.com/dylon/rholang-rs) (use branch: `dylon/comments`)
 - Rholang Language Server: [https://github.com/f1R3FLY-io/rholang-language-server](https://github.com/f1R3FLY-io/rholang-language-server)
 
-## Compiling Rholang Tree-Sitter Parser WASM
+## Installing Rholang Tree-Sitter Parser from NPM
 
-To compile the Tree-Sitter parser for Rholang from the `rholang-rs` repository and copy it to the project:
+The Tree-Sitter parser for Rholang is available as an NPM package `@f1r3fly-io/tree-sitter-rholang-js`. It is listed as a dependency in `package.json`.
 
-1. Clone the repository and checkout the branch:
-   ```
-   git clone https://github.com/dylon/rholang-rs.git
-   cd rholang-rs
-   git checkout dylon/comments
-   ```
+1. Install the dependencies:
 
-2. Build the WASM parser using `tree-sitter-cli` (ensure you have `wasm-bindgen` and `wasm-opt` installed via Cargo if needed):
    ```
-   cargo install tree-sitter-cli
-   tree-sitter generate
-   tree-sitter build-wasm
+   npm install
    ```
 
-3. Copy the generated WASM file to the project:
-   ```
-   cp tree-sitter-rholang.wasm path/to/lightning-bug/resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm
-   ```
+The postinstall script (`scripts/postinstall.sh`) will automatically copy the WASM file to the appropriate locations in the project, including `resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm`, as well as to the demo and test directories.
 
-   Replace `path/to/lightning-bug` with your local project path.
+If you need to manually copy after installation:
+
+   ```
+   cp node_modules/@f1r3fly-io/tree-sitter-rholang-js/tree-sitter-rholang.wasm resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm
+   ```
 
 ## Installation and Compilation
 
@@ -47,7 +40,7 @@ To compile the Tree-Sitter parser for Rholang from the `rholang-rs` repository a
 
 ### Compiling and Watching Targets
 
-Use `shadow-cljs` for building. Targets include `:libs` (core library and extensions), `:app` (demo app), and `:test` (browser tests).
+Use `shadow-cljs` for building. Targets include `:libs` (core library and extensions), `:app` (full development app with Re-frame UI), `:demo` (minimal standalone demo), and `:test` (browser tests).
 
 - Compile a target (e.g., `:app`): `npx shadow-cljs compile app`
 - Watch a target (e.g., `:app`): `npx shadow-cljs watch app`
@@ -55,7 +48,7 @@ Use `shadow-cljs` for building. Targets include `:libs` (core library and extens
 
 For multiple targets: `npx shadow-cljs watch libs app test`
 
-Access the app at `http://localhost:3000` during watch.
+Access the full development app at `http://localhost:3000` during watch (requires watching `:app`).
 
 The `:libs` target compiles to ESM format for modern browser compatibility. Release builds are minified via advanced compilation. Note that while the outputs are ESM modules, they consist of multiple files due to Closure compilation and external dependencies (e.g., CodeMirror, RxJS). For single-file bundles, consider a post-build step with a tool like esbuild or Rollup (not included in this project).
 
@@ -78,9 +71,17 @@ Open `http://localhost:8021` in a browser to run and view tests.
 
 Validate TypeScript bindings: `npm run test:types`
 
-## Demo App
+## Development App (:app target)
 
-The demo app is a standalone HTML file located at `resources/public/demo/index.html` that demonstrates importing and using the `Editor` component and `RholangExtension` in a browser environment without a server. It loads dependencies via an import map and ESM modules, including the compiled library from `node_modules/lightning-bug/dist/libs/`.
+The development app is a full-featured Re-frame application located under `src/app/`, including a multi-file workspace, logs panel, and integration with Datascript/Re-posh for managing diagnostics and symbols. It serves as the primary environment for developing and testing the editor's UI and features.
+
+- Watch: `npx shadow-cljs watch app` (or include in multi-watch)
+- Access: `http://localhost:3000`
+- Features: File management, search, rename modals, LSP diagnostics in logs panel, cursor/selection subs, etc.
+
+## Demo App (:demo target)
+
+The demo app is a standalone HTML file located at `resources/public/demo/index.html` that demonstrates importing and using the `Editor` component and `RholangExtension` in a browser environment without a server. It loads dependencies via an import map and ESM modules, including the compiled library from `node_modules/lightning-bug/dist/libs/`. This minimal setup is ideal for quick isolated testing of the core editor component, separate from the full Re-frame development app (:app target).
 
 ### Building the Demo App
 
