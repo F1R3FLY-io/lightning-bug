@@ -1,31 +1,14 @@
 (ns app.events
   (:require
-   [app.db :refer [default-db ds-conn]]
-   [app.utils :as u]
-   [app.shared :refer [editor-ref-atom]]
    [clojure.string :as str]
    [datascript.core :as d]
    [re-frame.core :as rf]
    [re-posh.core :as rp]
-   [taoensso.timbre :as log]))
-
-(def debounced-set-rename-name (u/debounce #(rf/dispatch [::set-rename-name %]) 200))
-
-(defn flatten-symbols
-  "Flattens hierarchical LSP symbols into a list for datascript transaction,
-  assigning negative db/ids to avoid conflicts."
-  [symbols parent-id]
-  (let [id-counter (atom -1)]
-    (letfn [(flatten-rec [syms parent]
-              (mapcat (fn [s]
-                        (let [sid (swap! id-counter dec)
-                              s' (cond-> (dissoc s :children)
-                                   true (assoc :db/id sid)
-                                   parent (assoc :parent parent))
-                              children (:children s)]
-                          (cons s' (when children (flatten-rec children sid)))))
-                      syms))]
-      (flatten-rec symbols parent-id))))
+   [taoensso.timbre :as log]
+   [app.db :refer [default-db ds-conn]]
+   [app.shared :refer [editor-ref-atom]]
+   [app.utils :as u]
+   [lib.db :refer [diagnostics-tx symbols-tx]]))
 
 (rf/reg-event-fx ::initialize
   (fn [{:keys [_]} _]
@@ -82,26 +65,33 @@
   (fn [db [_ connected?]]
     (assoc-in db [:lsp :connection] connected?)))
 
-(rp/reg-event-fx ::lsp-diagnostics-update
-  (fn [{:keys [db]} [_ diags]]
-    (let [old-eids (d/q '[:find [?e ...] :where [?e :type :diagnostic]] @ds-conn)
-          retract-tx (map (fn [eid] [:db/retractEntity eid]) old-eids)
-          new-tx (map #(assoc % :type :diagnostic) diags)
-          status (if (empty? diags) :success :error)]
-      (log/debug "Updated diagnostics:" (count diags))
-      {:transact (concat retract-tx new-tx)
-       :dispatch [::set-status status]})))
+(rp/reg-event-fx
+ ::lsp-diagnostics-update
+ (fn [{:keys [db]} [_ diags]]
+   ;; Dereference ds-conn directly to get the current DataScript database value for querying.
+   (let [current-db @ds-conn
+         old-eids (d/q '[:find [?e ...] :where [?e :type :diagnostic]] current-db)
+         retract-tx (map (fn [eid] [:db/retractEntity eid]) old-eids)
+         tx (diagnostics-tx diags)
+         status (if (empty? diags) :success :error)]
+     (log/debug "Updated diagnostics:" (count tx))
+     {:transact (concat retract-tx tx)
+      :dispatch [::set-status status]})))
 
 (rf/reg-event-db ::set-status
   (fn [db [_ status]]
     (assoc db :status status)))
 
-(rp/reg-event-fx ::lsp-symbols-update
-  (fn [_ [_ symbols]]
-    (let [flat (flatten-symbols symbols nil)
-          tx (map #(assoc % :type :symbol) flat)]
-      (log/debug "Updated symbols:" (count flat))
-      {:transact tx})))
+(rp/reg-event-fx
+ ::lsp-symbols-update
+ (fn [{:keys [db]} [_ symbols]]
+   ;; Dereference ds-conn directly to get the current DataScript database value for querying.
+   (let [current-db @ds-conn
+         old-eids (d/q '[:find [?e ...] :where [?e :type :symbol]] current-db)
+         retract-tx (map (fn [eid] [:db/retractEntity eid]) old-eids)
+         tx (symbols-tx symbols)]
+     (log/debug "Updated symbols:" (count tx))
+     {:transact (concat retract-tx tx)})))
 
 (rf/reg-event-db ::log-append
   (fn [db [_ log]]
@@ -110,7 +100,14 @@
 
 (rf/reg-event-db ::update-cursor
   (fn [db [_ cursor]]
+    (log/debug "::update-cursor" cursor)
     (assoc-in db [:editor :cursor] cursor)))
+
+(rf/reg-event-db
+ ::update-selection
+ (fn [db [_ selection]]
+   (log/debug "::update-selection" selection)
+   (assoc-in db [:editor :selection] selection)))
 
 (rf/reg-event-fx ::run-agent
   (fn [{:keys [db]} _]
@@ -129,7 +126,7 @@
       (if (empty? term)
         (assoc db :search {:term term :results []})
         (let [content (or (get-in db [:workspace :files (:active-file db) :content]) "")
-              logs (:lsp :logs db)
+              logs (get-in db [:lsp :logs])
               code-results (filter #(str/includes? (str/lower-case %) lterm) (str/split-lines content))
               log-results (filter #(str/includes? (str/lower-case (:message %)) lterm) logs)]
           (log/debug "Search results found:" (+ (count code-results) (count log-results)))
@@ -171,14 +168,48 @@
   (fn [db [_ height]]
     (assoc db :logs-height height)))
 
-(rf/reg-event-db ::set-cursor-pos
-  (fn [db [_ pos]]
-    (assoc db :editor-cursor-pos pos)))
+(rf/reg-event-fx ::set-editor-cursor
+  (fn [{:keys [db]} [_ pos]]
+    {:set-editor-cursor pos}))
 
-(rf/reg-event-db ::clear-cursor-pos
-  (fn [db _]
-    (assoc db :editor-cursor-pos nil)))
+(rf/reg-fx
+ :set-editor-cursor
+ (fn [pos]
+   (log/debug ":set-editor-cursor" pos)
+   (log/debug "er" (.-current @editor-ref-atom))
+   (when-let [er (.-current @editor-ref-atom)]
+     (log/debug "(.isReady er)" (.isReady er))
+     (when (.isReady er)
+       (.setCursor er (clj->js pos))))))
 
-(rf/reg-event-db ::set-highlight-range
-  (fn [db [_ range]]
-    (assoc db :highlight-range range)))
+(rf/reg-event-fx ::set-highlight-range
+  (fn [{:keys [db]} [_ range]]
+    (log/debug "::set-highlight-range" range)
+    {:set-editor-highlight range}))
+
+(rf/reg-fx
+ :set-editor-highlight
+ (fn [range]
+   (log/debug ":set-editor-highlight" range)
+   (log/debug "er" (.-current @editor-ref-atom))
+   (when-let [er (.-current @editor-ref-atom)]
+     (log/debug "(.isReady er)" (.isReady er))
+     (when (.isReady er)
+       (if range
+         (let [{:keys [from to]} range]
+           (.highlightRange er (clj->js from) (clj->js to)))
+         (.clearHighlight er))))))
+
+(rf/reg-event-db
+ ::update-highlights
+ ;; Updates the highlighted range in the editor state (or clears if nil).
+ ;; Triggered from RxJS "highlight-change" subscription.
+ (fn [db [_ range]]
+   (log/debug "::update-highlights" range)
+   (assoc-in db [:editor :highlights] range)))
+
+(rf/reg-event-db
+ ::editor-ready
+ (fn [db _]
+   (log/debug "::editor-ready")
+   (assoc-in db [:editor :ready] true)))

@@ -1,10 +1,10 @@
 (ns lib.editor.diagnostics
   (:require
-   ["@codemirror/state" :refer [Annotation StateField RangeSetBuilder]]
-   ["@codemirror/view" :refer [Decoration ViewPlugin]]
-   [clojure.string :as str]
-   [lib.utils :as u]
-   [taoensso.timbre :as log]))
+    ["@codemirror/state" :refer [Annotation StateField RangeSetBuilder]]
+    ["@codemirror/view" :refer [Decoration ViewPlugin]]
+    [clojure.string :as str]
+    [lib.utils :as u]
+    [taoensso.timbre :as log]))
 
 ;; Annotation to mark transactions that update diagnostics in the StateField.
 (def diagnostic-annotation (.define Annotation))
@@ -12,12 +12,12 @@
 ;; StateField to hold the current list of LSP diagnostics.
 (def diagnostic-field
   (.define StateField
-    #js {:create (fn [_] #js []) ;; Initial empty array of diagnostics.
-         :update (fn [value ^js tr]
-                   ;; Update with new diagnostics if the transaction has the annotation, else keep current.
-                   (if-let [new-diags (.annotation tr diagnostic-annotation)]
-                     new-diags
-                     value))}))
+           #js {:create (fn [_] #js []) ;; Initial empty array of diagnostics.
+                :update (fn [value ^js tr]
+                          ;; Update with new diagnostics if the transaction has the annotation, else keep current.
+                          (if-let [new-diags (.annotation tr diagnostic-annotation)]
+                            new-diags
+                            value))}))
 
 (defn severity-class
   "Maps LSP diagnostic severity to a CSS class for underlining.
@@ -40,19 +40,14 @@
         diags (.field (.-state view) diagnostic-field)
         ^js doc (.-doc (.-state view))]
     (doseq [^js diag diags]
-      (let [^js range (.-range diag)]
-        (if (or (nil? range) (nil? (.-start range)) (nil? (.-end range)))
-          (log/warn "Invalid diagnostic range; skipping decoration:" diag)
-          (let [^js start (.-start range)
-                ^js end (.-end range)
-                from (u/pos-to-offset doc {:line (or (.-line start) 0)
-                                           :column (or (.-character start) 0)} false)
-                to (u/pos-to-offset doc {:line (or (.-line end) 0)
-                                         :column (or (.-character end) 0)} false)
-                cls (severity-class (or (.-severity diag) 0))]
-            (if (or (nil? from) (nil? to) (> from to) (str/blank? cls))
-              (log/trace "Skipping invalid decoration for diag:" diag)
-              (.add builder from to (.mark Decoration #js {:class cls})))))))
+      (let [from (u/pos-to-offset doc {:line (or (.-startLine diag) 0)
+                                       :column (or (.-startChar diag) 0)} false)
+            to (u/pos-to-offset doc {:line (or (.-endLine diag) 0)
+                                     :column (or (.-endChar diag) 0)} false)
+            cls (severity-class (or (.-severity diag) 0))]
+        (if (or (nil? from) (nil? to) (> from to) (str/blank? cls))
+          (log/trace "Skipping invalid decoration for diag:" diag)
+          (.add builder from to (.mark Decoration #js {:class cls})))))
     (.finish builder)))
 
 (def diagnostic-plugin

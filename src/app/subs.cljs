@@ -64,6 +64,9 @@
 (rf/reg-sub :editor/cursor
   (fn [db _] (get-in db [:editor :cursor])))
 
+(rf/reg-sub :editor/selection
+  (fn [db _] (get-in db [:editor :selection])))
+
 (rf/reg-sub
  :lsp/diagnostics
  (fn [_ _]
@@ -79,7 +82,7 @@
                      :where [?e :type :symbol]] @ds-conn))))
 
 (rf/reg-sub :lsp/logs
-  (fn [db _] (:lsp/logs db)))
+  (fn [db _] (get-in db [:lsp :logs])))
 
 (rf/reg-sub :logs-visible?
   (fn [db _] (:logs-visible? db)))
@@ -87,8 +90,10 @@
 (rf/reg-sub :logs-height
   (fn [db _] (or (:logs-height db) 200)))
 
-(rf/reg-sub :editor-cursor-pos
-  (fn [db _] (:editor-cursor-pos db)))
+(rf/reg-sub
+ :editor/highlights
+ (fn [db _] (get-in db [:editor :highlights])))
 
-(rf/reg-sub :highlight-range
-  (fn [db _] (:highlight-range db)))
+(rf/reg-sub
+ :editor/ready
+ (fn [db _] (get-in db [:editor :ready])))

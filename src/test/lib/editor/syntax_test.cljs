@@ -316,3 +316,21 @@
             ctx #js {:state state :pos pos :unit "  "}]
         (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after second '|' by 2 spaces, aligning with previous processes")
         (done)))))
+
+(deftest indentation-demo-example
+  (async done
+    (go
+      (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+            indents-str (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm")
+            [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+            parser (doto (new Parser) (.setLanguage lang))
+            indents-query (new Query lang indents-str)
+            doc "new x in { x!(\"Hello\") | Nil }"
+            tree (.parse parser doc)
+            language-state-field (syntax/make-language-state parser)
+            state (.create EditorState #js {:doc doc
+                                            :extensions #js [language-state-field]})
+            pos 25 ; approximate position after '|' in the example code
+            ctx #js {:state state :pos pos :unit "  "}]
+        (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after '|' in demo example by 2 spaces")
+        (done)))))

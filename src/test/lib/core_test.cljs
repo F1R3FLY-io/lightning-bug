@@ -500,3 +500,60 @@
                      true)))))]
   (deftest rxjs-event-stream-property
     (is (:result (tc/quick-check 10 prop {:seed 42})))))
+
+(deftest highlight-change-event-emission
+  (async done
+         (go
+           (let [container (js/document.createElement "div")
+                 ref (react/createRef)
+                 events (atom [])]
+             (js/document.body.appendChild container)
+             (let [root (act-mount container [:> Editor {:content "test content"
+                                                         :language "text"
+                                                         :ref ref}])]
+               (<! (timeout 10))
+               (let [^js/Object editor (.-current ref)]
+                 (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                 (act-flush #(.highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 6}))
+                 (<! (wait-for-event events "highlight-change" 1000))
+                 (let [evt (first (filter #(= "highlight-change" (:type %)) @events))]
+                   (is (= {:from {:line 1 :column 1} :to {:line 1 :column 6}} (:data evt)) "Emitted highlight-change with range"))
+                 (act-flush #(.clearHighlight editor))
+                 (<! (wait-for-event events "highlight-change" 1000))
+                 (let [evt (last (filter #(= "highlight-change" (:type %)) @events))]
+                   (is (nil? (:data evt)) "Emitted highlight-change with nil on clear"))
+                 (act-flush #(.unmount root))
+                 (js/document.body.removeChild container)
+                 (done)))))))
+
+(let [gen-pos (gen/hash-map :line gen/small-integer :column gen/small-integer)
+      gen-action (gen/one-of [(gen/tuple (gen/return :highlight) gen-pos gen-pos)
+                              (gen/return [:clear])])
+      prop (prop/for-all [actions (gen/vector gen-action 1 10)]
+             (async done
+               (go
+                 (let [container (js/document.createElement "div")
+                       ref (react/createRef)
+                       events (atom [])]
+                   (js/document.body.appendChild container)
+                   (let [root (act-mount container [:> Editor {:content (str/join "\n" (repeat 10 "line"))
+                                                               :language "text"
+                                                               :ref ref}])]
+                     (<! (timeout 10))
+                     (let [^js/Object editor (.-current ref)]
+                       (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                       (doseq [action actions]
+                         (let [cmd (first action)]
+                           (act-flush #(case cmd
+                                         :highlight (.highlightRange editor (clj->js (second action)) (clj->js (nth action 2)))
+                                         :clear (.clearHighlight editor))))
+                         (<! (timeout 10)))
+                       (let [highlight-events (filter #(= "highlight-change" (:type %)) @events)]
+                         (is (= (count actions) (count highlight-events)) "Event emitted for each action")
+                         (is (every? #(or (map? (:data %)) (nil? (:data %))) highlight-events) "Data is range map or nil")))
+                     (act-flush #(.unmount root))
+                     (js/document.body.removeChild container)
+                     (done))
+                   true))))]
+  (deftest highlight-event-property
+    (is (:result (tc/quick-check 10 prop {:seed 42})))))

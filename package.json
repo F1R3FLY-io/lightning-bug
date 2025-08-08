@@ -1,20 +1,44 @@
 {
+  "name": "lightning-bug",
+  "version": "0.1.0",
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.6",
     "@codemirror/commands": "^6.8.1",
     "@codemirror/language": "^6.11.2",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.1",
+    "@f1r3fly-io/tree-sitter-rholang-js": "file:../rholang-rs/rholang-tree-sitter/bindings/js",
     "bootstrap": "^5.3.7",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "rxjs": "^7.8.2",
     "web-tree-sitter": "0.25.8"
   },
   "devDependencies": {
-    "shadow-cljs": "3.1.7"
+    "@types/react": "^19.1.9",
+    "shadow-cljs": "3.1.7",
+    "tsd": "^0.31.2"
   },
   "scripts": {
-    "postinstall": "./scripts/postinstall.sh"
-  }
+    "postinstall": "./scripts/postinstall.sh",
+    "test:types": "tsd"
+  },
+  "main": "dist/libs/lib.core.js",
+  "module": "dist/libs/lib.core.js",
+  "types": "types/lib.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/libs/lib.core.js",
+      "types": "./types/lib.d.ts"
+    },
+    "./extensions": {
+      "import": "./dist/libs/ext.lang.rholang.js",
+      "types": "./types/ext.d.ts"
+    }
+  },
+  "files": [
+    "dist/**",
+    "types/**",
+    "resources/public/extensions/**"
+  ]
 }

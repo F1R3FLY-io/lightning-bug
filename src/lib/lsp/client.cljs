@@ -1,24 +1,10 @@
 (ns lib.lsp.client
   (:require
-   [datascript.core :as d]
-   [taoensso.timbre :as log]))
+    [datascript.core :as d]
+    [lib.db :refer [diagnostics-tx symbols-tx flatten-diags flatten-symbols]]
+    [taoensso.timbre :as log]))
 
 (defonce ws (atom nil))
-
-(defn flatten-symbols
-  "Flattens hierarchical LSP symbols into a list for datascript transaction, assigning negative db/ids to avoid conflicts."
-  [symbols parent-id]
-  (let [id-counter (atom -1)]
-    (letfn [(flatten-rec [syms parent]
-              (mapcat (fn [s]
-                        (let [sid (swap! id-counter dec)
-                              s' (cond-> (dissoc s :children)
-                                   true (assoc :db/id sid)
-                                   parent (assoc :parent parent))
-                              children (:children s)]
-                          (cons s' (when children (flatten-rec children sid)))))
-                      syms))]
-      (flatten-rec symbols parent-id))))
 
 (defn- get-text [data]
   (if (instance? js/ArrayBuffer data)
@@ -87,24 +73,24 @@
                                                 version (:version @state-atom)
                                                 text (:content @state-atom)]
                                             (send {:method "textDocument/didOpen"
-                                                   :params {:textDocument {:uri uri :languageId lang :version version :text text}}} state-atom)
+                                                   :params {:textDocument {:uri uri
+                                                                           :languageId lang
+                                                                           :version version
+                                                                           :text text}}}
+                                                  state-atom)
                                             (request-symbols uri state-atom)
                                             (swap! state-atom assoc :opened? true))))
-                          :validate (let [diags (:result parsed)]
-                                      (d/transact! (:conn @state-atom) (map #(assoc % :type :diagnostic) diags))
-                                      (.next events (clj->js {:type "diagnostics" :data diags})))
-                          :document-symbol (let [flat (flatten-symbols (:result parsed) nil)
-                                                 tx (map #(assoc % :type :symbol) flat)]
-                                             (d/transact! (:conn @state-atom) tx)
-                                             (.next events (clj->js {:type "symbols-update" :data flat})))
+                          :document-symbol (let [hier-symbols (:result parsed)
+                                                 symbols (flatten-symbols hier-symbols nil)]
+                                             (.next events (clj->js {:type "symbols" :data symbols})))
                           (log/warn "Unhandled response type:" type)))))
                   (case (:method parsed)
                     "window/logMessage" (let [log-entry (:params parsed)]
                                           (swap! state-atom update-in [:lsp :logs] conj log-entry)
                                           (.next events (clj->js {:type "log" :data log-entry})))
-                    "textDocument/publishDiagnostics" (let [diags (:diagnostics (:params parsed))]
-                                                         (d/transact! (:conn @state-atom) (map #(assoc % :type :diagnostic) diags))
-                                                         (.next events (clj->js {:type "diagnostics" :data diags})))
+                    "textDocument/publishDiagnostics" (let [diag-params (:params parsed)
+                                                            diags (flatten-diags diag-params)]
+                                                        (.next events (clj->js {:type "diagnostics" :data diags})))
                     (log/info "Unhandled notification:" (:method parsed))))))))))))
 
 (defn connect
@@ -127,5 +113,6 @@
                                                             (update :lsp assoc :connection false :initialized? false :url nil))))
                                     (.next events (clj->js {:type "disconnect"}))))
       (set! (.-onerror socket) #(do (log/error "LSP connection error:" %)
+                                    (js/window.console.debug %)
                                     (.next events (clj->js {:type "lsp-error" :data %}))))
       (reset! ws socket))))

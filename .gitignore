@@ -11,12 +11,16 @@
 !/NOTICE.txt
 !/package.json
 !/README.md
-!/resources/public/css/**/*.css
 !/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
+!/resources/public/**/*.css
 !/resources/public/**/*.html
 !/scripts/**/*.sh
 !/shadow-cljs.edn
 !/src/**/*.cljs
+!/tsconfig.json
+!/types/**/*.d.ts
+!/types/**/*.test-d.ts
 
 # Exclude specific file patterns
 /resources/public/js/test/*
+/resources/public/demo/node_modules/*

@@ -1,38 +1,17 @@
 (ns app.db
   (:require
-   [clojure.spec.alpha :as s]
    [datascript.core :as d]
-   [taoensso.timbre :as log]
-   [app.extensions.lang.rholang]
-   [app.languages :as langs]))
+   [ext.lang.rholang :refer [config]]
+   [lib.db :as lib-db]))
 
-(def schema {:symbol/parent {:db/valueType :db.type/ref}
-             :symbol/range {:db/cardinality :db.cardinality/one}
-             :diagnostic/range {:db/cardinality :db.cardinality/one}})
-
-(defonce ds-conn (d/create-conn schema))
-
-(s/def ::config (s/keys :req-un [::extensions]
-                        :opt-un [::grammar-wasm
-                                 ::highlight-query-path
-                                 ::lsp-url
-                                 ::file-icon
-                                 ::fallback-highlighter]))
-
-(s/def ::languages (s/map-of string? ::config))
+(defonce ds-conn (d/create-conn lib-db/schema))
 
 (def default-db
-  (let [langs @langs/registry
-        default-lang (or (first (keys langs)) "text")
-        langs (if (empty? langs)
-                {"text" {:extensions [".txt"]
-                         :fallback-highlighter "none"
-                         :file-icon "fas fa-file text-secondary"}}
-                langs)]
-    (when-not (every? string? (keys langs))
-      (log/warn "Non-string keys found in languages registry:" (keys langs)))
-    (when-not (s/valid? ::languages langs)
-      (throw (ex-info "Invalid language configs" {:explain (s/explain-data ::languages langs)})))
+  (let [langs {"rholang" config
+               "text" {:extensions [".txt"]
+                       :fallback-highlighter "none"
+                       :file-icon "fas fa-file text-secondary"}}
+        default-lang "rholang"]
     {:workspace {:files {} :active-file nil}
      :lsp {:connection false
            :logs []}
@@ -43,6 +22,4 @@
      :search {:term "" :results [] :visible? false}
      :modals {:rename {:visible? false :new-name ""}}
      :logs-visible? false
-     :logs-height 200
-     :editor-cursor-pos nil
-     :highlight-range nil}))
+     :logs-height 200}))

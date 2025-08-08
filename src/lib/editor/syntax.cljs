@@ -1,9 +1,9 @@
 (ns lib.editor.syntax
   (:require
-   [clojure.core.async :as async :refer [go <!]]
+   [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.string :as str]
    [taoensso.timbre :as log]
-   ["@codemirror/state" :refer [ChangeSet Compartment RangeSetBuilder StateField Text]]
+   ["@codemirror/state" :refer [Compartment RangeSetBuilder StateField Text]]
    ["@codemirror/language" :refer [indentService indentUnit]]
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]))
@@ -11,15 +11,15 @@
 ;; Compartment for dynamic reconfiguration of the syntax highlighting extension.
 (def syntax-compartment (Compartment.))
 
-;; Deferred promise for initializing Tree-Sitter.
+;; Deferred promise for initializing Tree-Sitter (loaded once).
 (defonce ts-init-promise
   (delay
-    (Parser.init #js {:locateFile (fn [_ _] "/js/tree-sitter.wasm")})))
+    (Parser.init #js {:locateFile (fn [_ _] "js/tree-sitter.wasm")})))
 
-;; Cache for loaded languages to avoid redundant loads.
+;; Cache for loaded languages to avoid redundant loads (keyed by language string).
 (defonce languages (atom {}))
 
-;; Mapping from Tree-Sitter query capture names to CodeMirror CSS classes.
+;; Mapping from Tree-Sitter query capture names to CodeMirror CSS classes for styling.
 (def style-map
   {"keyword" "cm-keyword"
    "operator" "cm-operator"
@@ -39,14 +39,18 @@
    "punctuation.delimiter" "cm-punctuation"
    "punctuation.bracket" "cm-punctuation cm-bracket"})
 
-(defn promise->chan [p]
+(defn promise->chan
+  "Converts a JS promise to an async channel, putting [:ok val] on resolve or [:error err] on reject."
+  [p]
   (let [ch (async/chan)]
     (-> p
         (.then #(async/put! ch [:ok %]))
         (.catch #(async/put! ch [:error %])))
     ch))
 
-(defn index-to-point [^Text doc ^number index]
+(defn index-to-point
+  "Converts a character offset to a Tree-Sitter point (row, column)."
+  [^Text doc ^number index]
   (let [^js line (.lineAt doc index)]
     #js {:row (dec (.-number line))
          :column (- index (.-from line))}))
@@ -104,6 +108,7 @@
                                   (nil? cur) nil
                                   :else
                                   (let [caps (.captures ^js indents-query cur)]
+                                    (log/trace "Captures for node" (.-type cur) ":" (map #(js->clj % :keywordize-keys true) caps))
                                     (cond
                                       (some #(= "branch" (.-name %)) caps) {:type "branch" :node cur :captures caps}
                                       (some #(= "indent" (.-name %)) caps) {:type "indent" :node cur :captures caps}
@@ -127,7 +132,8 @@
                         (+ base add)))))))))))))
 
 (defn make-language-state
-  "Creates a CodeMirror StateField for managing the Tree-Sitter parse tree."
+  "Creates a CodeMirror StateField for managing the Tree-Sitter parse tree.
+   Updates incrementally on document changes."
   [parser]
   (.define StateField #js {:create (fn [^js state]
                                      (let [tree (.parse parser (.toString (.-doc state)))]
@@ -138,27 +144,34 @@
                                        value
                                        (let [old-tree (.-tree ^js value)
                                              edited-tree (.copy ^js old-tree)
-                                             changes ^ChangeSet (.-changes tr)
                                              old-doc (.-doc (.-startState tr))
-                                             new-doc (.-doc (.-state tr))]
-                                         (.iterChanges changes
-                                                       (fn [fromA toA fromB toB _]
-                                                         (let [start (index-to-point old-doc fromA)
-                                                               old-end (index-to-point old-doc toA)
-                                                               new-end (index-to-point new-doc toB)]
-                                                           (.edit ^js edited-tree #js {:startIndex fromA
-                                                                                       :oldEndIndex toA
-                                                                                       :newEndIndex toB
-                                                                                       :startPosition start
-                                                                                       :oldEndPosition old-end
-                                                                                       :newEndPosition new-end})))
-                                                       false)
-                                         (let [new-tree (.parse (.-parser ^js value) (.toString new-doc) edited-tree)]
-                                           (log/debug "Tree-Sitter tree incrementally updated")
-                                           #js {:tree new-tree :parser (.-parser ^js value)}))))}))
+                                             new-doc (.-doc (.-state tr))
+                                             changes (.-changes tr)]
+                                         (if (.-isEmpty changes)
+                                           (do
+                                             (log/debug "docChanged true but changes.isEmpty; re-parsing full document")
+                                             (let [new-tree (.parse (.-parser ^js value) (.toString new-doc))]
+                                               #js {:tree new-tree :parser (.-parser ^js value)}))
+                                           (do
+                                             (.iterChanges changes
+                                                          (fn [fromA toA fromB toB _]
+                                                            (let [start (index-to-point old-doc fromA)
+                                                                  old-end (index-to-point old-doc toA)
+                                                                  new-end (index-to-point new-doc toB)]
+                                                              (.edit ^js edited-tree #js {:startIndex fromA
+                                                                                          :oldEndIndex toA
+                                                                                          :newEndIndex toB
+                                                                                          :startPosition start
+                                                                                          :oldEndPosition old-end
+                                                                                          :newEndPosition new-end})))
+                                                          false)
+                                             (let [new-tree (.parse (.-parser ^js value) (.toString new-doc) edited-tree)]
+                                               (log/debug "Tree-Sitter tree incrementally updated")
+                                               #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
 
 (defn make-highlighter-plugin
-  "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries."
+  "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries.
+   Builds decorations only for the visible viewport to optimize performance."
   [language-state-field highlight-query]
   (let [style-js (clj->js style-map)
         build-decorations (fn [^js view]
@@ -171,9 +184,11 @@
                                   start-point (index-to-point doc from)
                                   end-point (index-to-point doc to)
                                   captures (.captures ^js highlight-query (.-rootNode ^js tree) start-point end-point)]
+                              (log/trace "Building decorations for viewport" from "-" to "with" (count captures) "captures")
                               (doseq [^js capture captures]
                                 (let [cls (aget style-js (.-name capture))]
                                   (when cls
+                                    (log/trace "Adding decoration for capture" (.-name capture) "at" (.-startIndex (.-node capture)) "-" (.-endIndex (.-node capture)))
                                     (.add builder (.-startIndex (.-node capture)) (.-endIndex (.-node capture)) (.mark Decoration #js {:class cls})))))
                               (.finish builder)))
         PluginClass (fn [^js view]
@@ -184,6 +199,7 @@
     (set! (.-update (.-prototype ^js PluginClass)) (fn [^js update]
                                                       (this-as ^js this
                                                         (when (or (.-viewportChanged update) (.-docChanged update))
+                                                          (log/trace "Updating highlighter decorations")
                                                           (set! (.-decorations this) (build-decorations (.-view update)))))))
     (.fromClass ViewPlugin PluginClass #js {:decorations (fn [^js instance] (.-decorations instance))})))
 
@@ -194,38 +210,35 @@
                        (calculate-indent ctx nil indents-query indent-size language-state-field))))
 
 (defn fallback-extension
-  "Returns a fallback extension when Tree-Sitter is unavailable."
+  "Returns a fallback extension when Tree-Sitter is unavailable (e.g., basic indentation)."
   [lang-config]
   (if (= (:fallback-highlighter lang-config) "regex")
-    #js []
+    #js [] ;; Placeholder for regex-based fallback if implemented.
     #js []))
 
 (defn init-syntax
-  "Initializes syntax highlighting and indentation for the editor view."
+  "Initializes syntax highlighting and indentation for the editor view asynchronously.
+   Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment.
+   Falls back to basic mode on failure."
   [^js view state-atom]
   (go
     (try
-      (let [[init-tag init-cause] (<! (promise->chan @ts-init-promise))]
-        (if (= init-tag :ok)
-          (log/info "Tree-Sitter initialized successfully")
-          (do
-            (log/error "Tree-Sitter initialization failed:" (.-message init-cause))
-            (throw (ex-info "Tree-Sitter initialization failed" {:cause init-cause})))))
-      (<! (async/timeout 100))
       (let [lang-key (or (:language @state-atom) "text")]
         (when-not (string? lang-key)
           (log/warn "Language key is not a string:" lang-key))
         (let [lang-config (get-in @state-atom [:languages lang-key])]
-          (log/debug "state-atom" @state-atom)
-          (log/debug "languages" (:languages @state-atom))
-          (log/debug "lang-key" lang-key)
-          (log/debug "lang-config" lang-config)
+          (log/debug "Initializing syntax for language:" lang-key "with config:" lang-config)
           (if-not lang-config
             (do
               (log/warn "No configuration found for language:" lang-key "- falling back to basic mode")
               (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))})
               :no-config)
             (let [wasm-path (:grammar-wasm lang-config)
+                  ;; Skip core Tree-Sitter init if no grammar-wasm (e.g., for "text" fallback).
+                  ;; This avoids unnecessary WASM loads and potential delays/hangs in tests or basic modes.
+                  _ (when wasm-path
+                      (<! (promise->chan @ts-init-promise))
+                      (<! (timeout 100)))
                   indent-size (or (:indent-size lang-config) 2)
                   indent-unit-str (str/join (repeat indent-size " "))
                   indent-unit-ext (.of indentUnit indent-unit-str)
@@ -239,7 +252,7 @@
                                                   (if (= text-tag :ok)
                                                     (do
                                                       (swap! state-atom assoc-in [:languages lang-key :highlight-query] text)
-                                                      (log/info "Loaded highlight query for" lang-key "from" path)
+                                                      (log/debug "Loaded highlight query for" lang-key "from" path)
                                                       text)
                                                     (do
                                                       (log/error "Failed to read query text for" lang-key ":" (.-message text))
@@ -256,7 +269,7 @@
                                                 (if (= text-tag :ok)
                                                   (do
                                                     (swap! state-atom assoc-in [:languages lang-key :indents-query] text)
-                                                    (log/info "Loaded indents query for" lang-key "from" path)
+                                                    (log/debug "Loaded indents query for" lang-key "from" path)
                                                     text)
                                                   (do
                                                     (log/error "Failed to read indents query text for" lang-key ":" (.-message text))
@@ -270,7 +283,7 @@
                              (let [[tag val] (<! (promise->chan (.load Language wasm-path)))]
                                (if (= tag :ok)
                                  (do
-                                   (log/info "Successfully loaded language WASM for" lang-key "from" wasm-path)
+                                   (log/debug "Successfully loaded language WASM for" lang-key "from" wasm-path)
                                    val)
                                  (do
                                    (log/error "Failed to load language WASM for" lang-key ":" (.-message val))
@@ -283,7 +296,7 @@
                   highlight-query (when (and lang highlight-query-str)
                                     (try
                                       (let [q (new Query lang highlight-query-str)]
-                                        (log/info "Successfully created highlight query for" lang-key)
+                                        (log/debug "Successfully created highlight query for" lang-key)
                                         q)
                                       (catch js/Error e
                                         (log/error "Failed to create highlight query for" lang-key ":" (.-message e))
@@ -291,7 +304,7 @@
                   indents-query (when (and lang indents-query-str)
                                   (try
                                     (let [q (new Query lang indents-query-str)]
-                                      (log/info "Successfully created indents query for" lang-key)
+                                      (log/debug "Successfully created indents query for" lang-key)
                                       q)
                                     (catch js/Error e
                                       (log/error "Failed to create indents query for" lang-key ":" (.-message e))
@@ -305,18 +318,18 @@
                                indent-ext (conj indent-ext)
                                true (conj indent-unit-ext))]
               (when-not wasm-path
-                (log/warn "No grammar-wasm path provided for" lang-key))
+                (log/debug "No grammar-wasm path provided for" lang-key))
               (when-not highlight-query-str
                 (log/warn "No valid highlight query string for" lang-key))
               (when-not indents-query-str
-                (log/info "No indents query for" lang-key "; default indentation behavior will apply"))
+                (log/debug "No indents query for" lang-key "; default indentation behavior will apply"))
               (when-not lang
                 (log/warn "No language loaded for" lang-key))
               (when-not parser
                 (log/warn "No parser created for" lang-key))
               (when (and (not cached) lang parser)
                 (swap! languages assoc lang-key {:lang lang :parser parser})
-                (log/info "Tree-Sitter cached for" lang-key))
+                (log/debug "Tree-Sitter cached for" lang-key))
               (if (and lang parser highlight-query)
                 (do
                   (log/debug "Reconfiguring syntax compartment with Tree-Sitter extensions for" lang-key)

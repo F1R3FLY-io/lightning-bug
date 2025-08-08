@@ -1,4 +1,4 @@
-; Nodes where children should be indented
+; Nodes where children should be indented (e.g., blocks, collections, control structures).
 ((block) @indent)
 ((map) @indent)
 ((match) @indent)
@@ -9,4 +9,12 @@
 ((set) @indent)
 ((contract) @indent)
 ((input) @indent)
+((new) @indent)
+((ifElse) @indent)
+((let) @indent)
+((bundle) @indent)
+
+; Branch points for alignment (add 0 indent to align with start of construct).
 (par "|" @branch)
+(branch "=>" @branch)
+(case "=>" @branch)

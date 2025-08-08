@@ -46,6 +46,7 @@
                                            (.-filename event)
                                            (.-lineno event)
                                            (.-error event))))
+  (log/set-min-level! :trace)
   (log/info "Initializing app")
   (rf/dispatch-sync [::e/initialize])
   (rp/connect! ds-conn) ;; Connect before mount to ensure subs work.

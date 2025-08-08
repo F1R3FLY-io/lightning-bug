@@ -4,9 +4,10 @@
    ["@codemirror/commands" :refer [defaultKeymap]]
    ["@codemirror/language" :refer [bracketMatching indentOnInput]]
    ["@codemirror/state" :refer [EditorSelection EditorState]]
-   ["@codemirror/view" :as view :refer [EditorView keymap lineNumbers]]
+   ["@codemirror/view" :refer [EditorView keymap lineNumbers]]
    ["react" :as react]
-   ["rxjs" :as rxjs]
+   ["rxjs" :as rxjs :refer [ReplaySubject]]
+   [clojure.spec.alpha :as s]
    [clojure.string :as str]
    [datascript.core :as d]
    [reagent.core :as r]
@@ -21,6 +22,25 @@
 ;; Hardcoded default languages for the library; uses string keys.
 (defonce ^:const default-languages {"text" {:extensions [".txt"]
                                             :fallback-highlighter "none"}})
+
+;; Language configuration specs (moved from app.languages)
+(s/def ::grammar-wasm string?)
+(s/def ::highlight-query-path string?)
+(s/def ::indents-query-path string?)
+(s/def ::lsp-url string?)
+(s/def ::extensions (s/coll-of string? :min-count 1))
+(s/def ::file-icon string?)
+(s/def ::fallback-highlighter string?)
+(s/def ::indent-size pos-int?)
+
+(s/def ::config (s/keys :req-un [::extensions]
+                        :opt-un [::grammar-wasm
+                                 ::highlight-query-path
+                                 ::indents-query-path
+                                 ::lsp-url
+                                 ::file-icon
+                                 ::fallback-highlighter
+                                 ::indent-size]))
 
 (defn- kebab-keyword
   "Converts a camelCase keyword to kebab-case keyword.
@@ -37,12 +57,16 @@
 
 (defn- normalize-languages
   "Ensures all keys in the languages map are strings, converting keywords if necessary.
-  Also normalizes inner config keys from camelCase to kebab-case."
+  Also normalizes inner config keys from camelCase to kebab-case.
+  Validates each config with spec and throws on invalid."
   [langs]
   (reduce-kv
    (fn [m k v]
      (let [key-str (if (keyword? k) (name k) (str k))
            config (convert-config-keys v)]
+       (when-not (s/valid? ::config config)
+         (throw (ex-info "Invalid language config" {:lang key-str :explain (s/explain-data ::config config)})))
+       (log/debug "Validated and normalized language config for" key-str)
        (assoc m key-str config)))
    {}
    langs))
@@ -91,14 +115,16 @@
                     to-pos (u/offset-to-pos doc to true)
                     text (.sliceString doc from to)]
                 {:from from-pos :to to-pos :text text}))]
+    (log/debug "cursor-pos" cursor-pos)
+    (log/debug "sel" sel)
     (swap! state-atom assoc :cursor cursor-pos :selection sel)
     (.next events (clj->js {:type "selection-change" :data {:cursor cursor-pos :selection sel}}))))
 
 (defn- get-extensions
   "Returns the array of CodeMirror extensions, including dynamic syntax compartment,
-  static diagnostic, and highlight extensions. Appends extra-extensions from state."
+  static diagnostic compartment, and highlight extensions. Appends extra-extensions from state."
   [state-atom events]
-  (let [update-ext (.. view/EditorView -updateListener
+  (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              (when (or (.-docChanged u) (.-selectionSet u))
                                (update-editor-state (.-state u) state-atom events))
@@ -125,7 +151,7 @@
                       (closeBrackets)
                       (.of keymap defaultKeymap)
                       (.of syntax/syntax-compartment #js [])
-                      (.theme view/EditorView #js {} #js {:dark true})
+                      (.theme EditorView #js {} #js {:dark true})
                       diagnostics/diagnostic-field
                       diagnostics/diagnostic-plugin
                       highlight/highlight-field
@@ -137,9 +163,12 @@
 ;; Inner React functional component, handling CodeMirror integration and state management.
 (let [inner (fn [js-props forwarded-ref]
               (let [props (js->clj js-props :keywordize-keys true)
-                    state-atom (r/atom (default-state props))
-                    view-atom (r/atom nil)
-                    events (rxjs/BehaviorSubject.)
+                    state-ref (react/useRef nil)
+                    _ (when (nil? (.-current state-ref))
+                        (set! (.-current state-ref) (r/atom (default-state props))))
+                    state-atom (.-current state-ref)
+                    view-ref (react/useRef nil)
+                    events (react/useMemo (fn [] (ReplaySubject. 1)) #js [])
                     on-content-change (:onContentChange props)
                     container-ref (react/useRef nil)]
                 (react/useImperativeHandle
@@ -161,25 +190,25 @@
                         :getCursor (fn [] (clj->js (:cursor @state-atom)))
                         :setCursor (fn [pos-js]
                                      (let [pos (js->clj pos-js :keywordize-keys true)]
-                                       (if @view-atom
-                                         (let [^js doc (.-doc (.-state ^js @view-atom))
+                                       (if (.-current view-ref)
+                                         (let [^js doc (.-doc (.-state ^js (.-current view-ref)))
                                                offset (u/pos-to-offset doc pos true)]
                                            (when offset
-                                             (.dispatch ^js @view-atom #js {:selection (EditorSelection.cursor offset)})
+                                             (.dispatch ^js (.-current view-ref) #js {:selection (EditorSelection.cursor offset)})
                                              (log/trace "Set cursor to" pos)))
-                                         (log/trace "Skipping set cursor: view-atom not ready, pos:" pos))))
+                                         (log/trace "Skipping set cursor: view-ref not ready, pos:" pos))))
                         :getSelection (fn [] (clj->js (:selection @state-atom)))
                         :setSelection (fn [from-js to-js]
                                         (let [from (js->clj from-js :keywordize-keys true)
                                               to (js->clj to-js :keywordize-keys true)]
-                                          (if @view-atom
-                                            (let [^js doc (.-doc (.-state ^js @view-atom))
+                                          (if (.-current view-ref)
+                                            (let [^js doc (.-doc (.-state ^js (.-current view-ref)))
                                                   from-offset (u/pos-to-offset doc from true)
                                                   to-offset (u/pos-to-offset doc to true)]
                                               (when (and from-offset to-offset)
-                                                (.dispatch ^js @view-atom #js {:selection (EditorSelection.range from-offset to-offset)})
+                                                (.dispatch ^js (.-current view-ref) #js {:selection (EditorSelection.range from-offset to-offset)})
                                                 (log/trace "Set selection from" from "to" to)))
-                                            (log/trace "Skipping set selection: view-atom not ready, from:" from "to:" to))))
+                                            (log/trace "Skipping set selection: view-ref not ready, from:" from "to:" to))))
                         :openDocument (fn [uri content lang]
                                         (let [effective-lang (or lang (:language @state-atom) "text")
                                               effective-content (or content "")]
@@ -229,68 +258,50 @@
                                                                   :text content}} state-atom))
                                             (swap! state-atom assoc :dirty? false)
                                             (.next events (clj->js {:type "document-save" :data {:uri uri :content content}})))))
-                        :isReady (fn [] (boolean @view-atom))
+                        :isReady (fn [] (boolean (.-current view-ref)))
                         :highlightRange (fn [from-js to-js]
                                           (let [from (js->clj from-js :keywordize-keys true)
                                                 to (js->clj to-js :keywordize-keys true)]
-                                            (if @view-atom
-                                              (let [^js doc (.-doc (.-state ^js @view-atom))
+                                            (if (.-current view-ref)
+                                              (let [^js doc (.-doc (.-state ^js (.-current view-ref)))
                                                     from-offset (u/pos-to-offset doc from true)
                                                     to-offset (u/pos-to-offset doc to true)]
                                                 (if (and from-offset to-offset (<= from-offset to-offset))
                                                   (do
-                                                    (.dispatch ^js @view-atom #js {:annotations (.of highlight/highlight-annotation (clj->js {:from from :to to}))})
+                                                    (.dispatch ^js (.-current view-ref) #js {:annotations (.of highlight/highlight-annotation (clj->js {:from from :to to}))})
+                                                    (.next events (clj->js {:type "highlight-change" :data {:from from :to to}})) ;; Emit highlight-change event with range
                                                     (log/trace "Highlighted range from" from "to" to))
                                                   (log/warn "Cannot highlight range: invalid offsets, from:" from "to:" to)))
-                                              (log/warn "Cannot highlight range: view-atom is nil, from:" from "to:" to))))
+                                              (log/warn "Cannot highlight range: view-ref is nil, from:" from "to:" to))))
                         :clearHighlight (fn []
-                                          (if @view-atom
+                                          (if (.-current view-ref)
                                             (do
-                                              (.dispatch ^js @view-atom #js {:annotations (.of highlight/highlight-annotation nil)})
+                                              (.dispatch ^js (.-current view-ref) #js {:annotations (.of highlight/highlight-annotation nil)})
+                                              (.next events (clj->js {:type "highlight-change" :data nil})) ;; Emit highlight-change event with nil
                                               (log/trace "Cleared highlight"))
-                                            (log/trace "Skipping clear highlight: view-atom not ready")))
+                                            (log/trace "Skipping clear highlight: view-ref not ready")))
                         :centerOnRange (fn [from-js to-js]
                                          (let [from (js->clj from-js :keywordize-keys true)
                                                to (js->clj to-js :keywordize-keys true)]
-                                           (if @view-atom
-                                             (let [^js doc (.-doc (.-state ^js @view-atom))
+                                           (if (.-current view-ref)
+                                             (let [^js doc (.-doc (.-state ^js (.-current view-ref)))
                                                    from-offset (u/pos-to-offset doc from true)
                                                    to-offset (u/pos-to-offset doc to true)]
                                                (if (and from-offset to-offset)
                                                  (do
-                                                   (.dispatch ^js @view-atom #js {:effects (EditorView.scrollIntoView (.range EditorSelection from-offset to-offset) #js {:y "center"})})
+                                                   (.dispatch ^js (.-current view-ref) #js {:effects (EditorView.scrollIntoView (.range EditorSelection from-offset to-offset) #js {:y "center"})})
                                                    (log/trace "Centered on range from" from "to" to))
                                                  (log/warn "Cannot center on range: invalid offsets, from:" from "to:" to)))
-                                             (log/trace "Skipping center on range: view-atom not ready, from:" from "to:" to))))}))
-                (react/useEffect
-                 (fn []
-                   (log/debug "Editor: Initializing EditorView")
-                   (let [container (.-current container-ref)
-                         exts (get-extensions state-atom events)
-                         editor-state (EditorState.create #js {:doc (:content @state-atom) :extensions exts})
-                         v (EditorView. #js {:state editor-state :parent container})]
-                     (log/trace "Editor: EditorView created, setting view-atom")
-                     (reset! view-atom v)
-                     (.next events (clj->js {:type "ready"}))
-                     (update-editor-state editor-state state-atom events)
-                     (fn []
-                       (log/debug "Editor: Destroying EditorView")
-                       (.destroy v)
-                       (reset! view-atom nil))))
-                 #js [])
-                (react/useEffect
-                 (fn []
-                   ;; Internal subscription to events for handling diagnostics updates by dispatching
-                   ;; a transaction to update the diagnostic StateField.
-                   (let [sub (.subscribe events
-                                         (fn [evt-js]
-                                           (let [evt (js->clj evt-js :keywordize-keys true)
-                                                 type (:type evt)]
-                                             (when (and (= type "diagnostics") @view-atom)
-                                               (let [diags (:data evt)]
-                                                 (.dispatch ^js @view-atom #js {:annotations (.of diagnostics/diagnostic-annotation (clj->js diags))}))))))]
-                     (fn [] (.unsubscribe sub))))
-                 #js [])
+                                             (log/trace "Skipping center on range: view-ref not ready, from:" from "to:" to, from, to))))
+                        :setText (fn [text]
+                                   (if (.-current view-ref)
+                                     (let [^js v (.-current view-ref)
+                                           ^js doc (.-doc (.-state v))
+                                           len (.-length doc)]
+                                       (.dispatch v #js {:changes #js {:from 0 :to len :insert text}})
+                                       (log/trace "Set editor text to" text))
+                                     (log/warn "Cannot set editor text: view not ready")))})
+                 #js [@state-atom (.-current view-ref)])
                 (react/useEffect
                  (fn []
                    (let [prop-lang (:language props)]
@@ -301,26 +312,20 @@
                 (react/useEffect
                  (fn []
                    (let [prop-content (:content props)]
-                     (when (not= prop-content (:content @state-atom))
+                     (when (and (not= prop-content (:content @state-atom)) (not (:dirty? @state-atom)))
                        (swap! state-atom assoc :content prop-content :dirty? false)))
                    js/undefined)
                  #js [(:content props)])
                 (react/useEffect
                  (fn []
-                   (when @view-atom
-                     (let [current-doc (.toString (.-doc (.-state ^js @view-atom)))]
+                   (when (.-current view-ref)
+                     (let [current-doc (.toString (.-doc (.-state ^js (.-current view-ref))))]
                        (when (not= (:content @state-atom) current-doc)
-                         (.dispatch ^js @view-atom #js {:changes #js {:from 0 :to (.-length current-doc) :insert (:content @state-atom)}})
+                         (.dispatch ^js (.-current view-ref) #js {:changes #js {:from 0 :to (.-length current-doc) :insert (:content @state-atom)}})
                          (when on-content-change
                            (on-content-change (:content @state-atom))))))
                    js/undefined)
                  #js [(:content @state-atom)])
-                (react/useEffect
-                 (fn []
-                   (when @view-atom
-                     (syntax/init-syntax @view-atom state-atom))
-                   js/undefined)
-                 #js [(:language @state-atom) @view-atom])
                 (react/useEffect
                  (fn []
                    (let [lang (:language @state-atom)
@@ -331,6 +336,37 @@
                        (lsp/connect {:url url} state-atom events)))
                    js/undefined)
                  #js [(:language @state-atom)])
+                (react/useEffect
+                 (fn []
+                   ;; Internal subscription to events for handling diagnostics updates by dispatching
+                   ;; a transaction to update the diagnostic StateField.
+                   (let [sub (.subscribe events
+                                         (fn [evt-js]
+                                           (let [evt (js->clj evt-js :keywordize-keys true)
+                                                 type (:type evt)]
+                                             (when (and (= type "diagnostics") (.-current view-ref))
+                                               (let [diags (:data evt)]
+                                                 (.dispatch ^js (.-current view-ref) #js {:annotations (.of diagnostics/diagnostic-annotation (clj->js diags))}))))))]
+                     (fn [] (.unsubscribe sub))))
+                 #js [(.-current view-ref)])
+                (react/useEffect
+                 (fn []
+                   (log/debug "Editor: Initializing EditorView")
+                   (let [container (.-current container-ref)
+                         exts (get-extensions state-atom events)
+                         editor-state (EditorState.create #js {:doc (:content @state-atom) :extensions exts})
+                         v (EditorView. #js {:state editor-state :parent container})]
+                     (log/trace "Editor: EditorView created, setting view-ref")
+                     (set! (.-current view-ref) v)
+                     (syntax/init-syntax v state-atom)
+                     (js/setTimeout (fn [] (.next events (clj->js {:type "ready"}))) 0)
+                     (update-editor-state editor-state state-atom events)
+                     (fn []
+                       (log/debug "Editor: Destroying EditorView")
+                       (when-let [v (.-current view-ref)]
+                         (.destroy v))
+                       (set! (.-current view-ref) nil))))
+                 #js [(:language @state-atom) (:extra-extensions @state-atom) container-ref])
                 (react/createElement "div" #js {:ref container-ref :className "code-editor flex-grow-1"})))]
   (def editor-comp (react/forwardRef inner))
   (def Editor editor-comp))

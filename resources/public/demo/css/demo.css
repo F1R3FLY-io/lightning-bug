@@ -1,0 +1,102 @@
+html, body, #app {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #001e3c;
+    color: #f1f3f5;
+}
+
+.code-editor {
+    height: 100%;
+    width: 100%;
+}
+
+.cm-editor {
+    height: 100%;
+}
+
+.cm-content {
+    font-family: 'Fira Code', monospace;
+    background-color: #161e27;
+    color: #f1f3f5;
+    padding: 10px;
+}
+
+/* Style for CodeMirror line number gutter */
+.cm-gutters {
+    background-color: #1e2936 !important;
+    border-right: 1px solid #283747 !important;
+    min-width: 4em !important;
+    display: flex !important;
+    justify-content: center !important; /* Center the line numbers panel horizontally */
+}
+
+/* Style for individual line numbers to align left within their container */
+.cm-lineNumbers .cm-gutterElement {
+    text-align: left !important; /* Left-align line numbers relative to each other */
+    padding-left: 1em !important; /* Add padding for better spacing */
+}
+
+/* Style for the status bar */
+.status-bar {
+    background-color: #1e2936 !important;
+    border-top: 1px solid #283747 !important;
+    padding: 0.5em 1em;
+    color: #83b0be !important;
+    font-family: monospace;
+}
+
+.cm-keyword { color: #00bfff; }
+.cm-number { color: #c71585; }
+.cm-string { color: #32cd32; }
+.cm-boolean { color: #ff4500; }
+.cm-variable { color: #ffd700; }
+.cm-comment { color: #808080; }
+.cm-operator { color: #f1f3f5; }
+.cm-type { color: #00ffff; }
+.cm-function { color: #dda0dd; }
+.cm-constant { color: #ff00ff; }
+
+.cm-error-underline {
+    text-decoration: underline wavy red;
+}
+
+.cm-warning-underline {
+    text-decoration: underline wavy orange;
+}
+
+.cm-info-underline {
+    text-decoration: underline dotted blue;
+}
+
+.cm-hint-underline {
+    text-decoration: underline dotted gray;
+}
+
+.logs-panel {
+    border-top: 1px solid #283747 !important;
+    background-color: #161e27;
+    color: #f1f3f5;
+}
+
+.logs-panel .logs-header {
+    background-color: #161e27;
+    color: #f1f3f5;
+}
+
+.logs-panel > .rc-button-wrapper {
+    border-bottom: 1px solid #283747 !important;
+}
+
+.logs-content {
+    background-color: #161e27;
+}
+
+.logs-panel > .rc-button-wrapper > button {
+    background-color: #161e27;
+    color: #f1f3f5;
+}
+
+.cm-highlight {
+    background-color: #ffff99; /* Lighter yellow for better visibility */
+}

@@ -1,12 +1,19 @@
 {:deps {:aliases [:dev]}
- :builds {:lib {:target :npm-module
-                :output-dir "dist/lib"
-                :entries [lib.core]
-                :exports {Editor lib.core/Editor}}
-          :ext {:target :npm-module
-                :output-dir "dist/ext"
-                :entries [ext.lang.rholang]
-                :exports {RholangExtension ext.lang.rholang/config}}
+ :builds {:libs {:target :esm
+                 :output-dir "dist/libs"
+                 :modules {:lib.core {:entries [lib.core]
+                                      :exports {Editor lib.core/Editor}}
+                           :ext.lang.rholang {:entries [ext.lang.rholang]
+                                              :depends-on #{:lib.core}
+                                              :exports {RholangExtension ext.lang.rholang/RholangExtension}}}
+                 :js-options {:resolve {"fs" false
+                                        "fs/promises" false
+                                        "path" false}
+                              :keep-as-import #{"react" "react-dom" "rxjs"
+                                                "@codemirror/autocomplete" "@codemirror/commands" "@codemirror/language" "@codemirror/state" "@codemirror/view"
+                                                "web-tree-sitter"}}
+                 :compiler-options {:closure-extra-annotations #{"@typedef" "@param" "@return" "@type" "@prop"}
+                                    :externs ["externs/libs.ext.js"]}}
           :app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"
@@ -19,6 +26,15 @@
                 :js-options {:resolve {"fs" false
                                        "fs/promises" false
                                        "path" false}}}
+          :demo {:target :browser
+                 :output-dir "resources/public/demo/js"
+                 :asset-path "/js"
+                 :modules {:main {:entries []}}
+                 :devtools {:http-root "resources/public/demo"
+                            :http-port 3001}
+                 :js-options {:resolve {"fs" false
+                                        "fs/promises" false
+                                        "path" false}}}
           :test {:target :browser-test
                  :test-dir "resources/public/js/test"
                  :ns-regexp "-test$"

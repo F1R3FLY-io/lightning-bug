@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "lightning-bug": [
+        "types/lib.d.ts"
+      ],
+      "lightning-bug/extensions": [
+        "types/ext.d.ts"
+      ]
+    },
+    "moduleResolution": "node",
+    "allowJs": true,
+    "noEmit": true,
+    "strict": true
+  },
+  "include": [
+    "types/**/*.test-d.ts"
+  ]
+}
