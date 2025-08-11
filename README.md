@@ -73,11 +73,11 @@ Features include file management, search, rename modals, LSP diagnostics in logs
 
 ## Demo App (:demo target)
 
-The demo app is a standalone HTML file located at `resources/public/demo/index.html`. It demonstrates importing and using the `Editor` component and `RholangExtension` in a browser environment without a server. The demo loads dependencies via an import map and ESM modules, including the compiled library from `node_modules/lightning-bug/dist/libs/`. This minimal setup is ideal for quick isolated testing of the core editor component. It is separate from the full Re-frame development app (:app target).
+The demo app is a standalone HTML file located at `resources/public/demo/index.html`. It demonstrates importing and using the `Editor` component and `RholangExtension` in a browser environment without a server. The demo loads dependencies via an import map and ESM modules, including the compiled library from `node_modules/@f1r3fly-io/lightning-bug/dist/libs/`. This minimal setup is ideal for quick isolated testing of the core editor component. It is separate from the full Re-frame development app (:app target).
 
 ### Building the Demo App
 
-To build the demo app (compiles the library and copies assets), run the build script: `./scripts/build-demo.sh`.
+To build the demo app (compiles the library and copies assets), run the build script: `node run build:demo`.
 
 This installs npm dependencies, compiles the `:libs` target to `dist/libs/`, installs demo-specific npm dependencies, and copies Tree-Sitter WASM and extensions to the demo directory.
 
@@ -89,7 +89,7 @@ For live-reloading during development (e.g., to test changes to the library), wa
 
 ### How the Demo App Works
 
-The demo app is a simple HTML file with embedded JavaScript (ES modules). It defines an import map to resolve dependencies like `react`, `react-dom`, `rxjs`, CodeMirror packages, and `web-tree-sitter` from CDNs or local node_modules. It imports the `Editor` component from `lightning-bug` and `RholangExtension` from `lightning-bug/extensions`. It creates a React root and renders the `Editor` with initial props (e.g., language "rholang", languages map with `RholangExtension`). It uses a ref to access imperative methods: checks `isReady()`, subscribes to events via `getEvents()`, and calls `openDocument()` to load content. It logs events to the console for demonstration.
+The demo app is a simple HTML file with embedded JavaScript (ES modules). It defines an import map to resolve dependencies like `react`, `react-dom`, `rxjs`, CodeMirror packages, and `web-tree-sitter` from CDNs or local node_modules. It imports the `Editor` component from `@f1r3fly-io/lightning-bug` and `RholangExtension` from `@f1r3fly-io/lightning-bug/extensions`. It creates a React root and renders the `Editor` with initial props (e.g., language "rholang", languages map with `RholangExtension`). It uses a ref to access imperative methods: checks `isReady()`, subscribes to events via `getEvents()`, and calls `openDocument()` to load content. It logs events to the console for demonstration.
 
 Key code snippet from `demo/index.html`:
 
@@ -103,8 +103,8 @@ Key code snippet from `demo/index.html`:
 
     const React = await import('react');
     const { createRoot } = await import('react-dom/client');
-    const { Editor } = await import('lightning-bug');
-    const { RholangExtension } = await import('lightning-bug-extensions');
+    const { Editor } = await import('@f1r3fly-io/lightning-bug');
+    const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
     const { defaultKeymap } = await import('@codemirror/commands');
     const customExtensions = [defaultKeymap];
     const root = createRoot(document.getElementById('app'));
@@ -140,17 +140,17 @@ The `Editor` component integrates seamlessly into React-based applications. It p
 
 ### Embedding and Initializing the Editor Component
 
-1. Install dependencies. Ensure your project has `react`, `react-dom`, `rxjs`, and `lightning-bug` installed. For language extensions like Rholang, include `lightning-bug/extensions`.
+1. Install dependencies. Ensure your project has `react`, `react-dom`, `rxjs`, and `@f1r3fly-io/lightning-bug` installed. For language extensions like Rholang, include `@f1r3fly-io/lightning-bug/extensions`.
 
    ```
-   npm install react react-dom rxjs lightning-bug
+   npm install react react-dom rxjs @f1r3fly-io/lightning-bug
    ```
 
 2. Import the component. In your React file, import the `Editor`:
 
    ```jsx
-   import { Editor } from 'lightning-bug';
-   import { RholangExtension } from 'lightning-bug/extensions'; // Optional for Rholang support
+   import { Editor } from '@f1r3fly-io/lightning-bug';
+   import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions'; // Optional for Rholang support
    ```
 
 3. Render the component. Use the `Editor` in your JSX. Provide initial props for content, language, and configurations. Use a React ref to access imperative methods.
@@ -259,8 +259,8 @@ The editor includes a default `"text"` language with basic support. To override 
 Example in JavaScript:
 
 ```js
-import { Editor } from 'lightning-bug';
-import { RholangExtension } from 'lightning-bug/extensions';
+import { Editor } from '@f1r3fly-io/lightning-bug';
+import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
 
 const customLanguages = {
   "rholang": {
@@ -378,16 +378,16 @@ The `Editor` component can be customized using props for initial setup and a Rea
          "react-dom": "https://esm.sh/react-dom@19",
          "react-dom/client": "https://esm.sh/react-dom@19/client",
          "rxjs": "https://esm.sh/rxjs@7",
-         "lightning-bug": "./node_modules/lightning-bug/dist/libs/lib.core.js",
-         "lightning-bug/extensions": "./node_modules/lightning-bug/dist/libs/ext.lang.rholang.js"
+         "@f1r3fly-io/lightning-bug": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/lib.core.js",
+         "@f1r3fly-io/lightning-bug/extensions": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/ext.lang.rholang.js"
        }
      }
    </script>
    <script type="module">
      import React from 'react';
      import { createRoot } from 'react-dom/client';
-     import { Editor } from 'lightning-bug';
-     import { RholangExtension } from 'lightning-bug/extensions';
+     import { Editor } from '@f1r3fly-io/lightning-bug';
+     import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
    </script>
    ```
 
@@ -460,8 +460,8 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
    ```typescript
    import React, { createRef } from 'react';
    import { createRoot } from 'react-dom/client';
-   import { Editor, EditorRef, LanguageConfig } from 'lightning-bug';
-   import { RholangExtension } from 'lightning-bug/extensions';
+   import { Editor, EditorRef, LanguageConfig } from '@f1r3fly-io/lightning-bug';
+   import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
    import { Observable } from 'rxjs';
 
    const languages: Record<string, LanguageConfig> = {
@@ -568,20 +568,12 @@ The library and demo app are compatible with React 19. Development tools like re
 
 ## Contribution Guidelines
 
-Follow the Clojure style guide. Use kebab-case for keys. Group and order imports (core first, local last).
-
-Use conventional commits (e.g., `feat: add X`, `fix: resolve Y`).
-
-Add unit, integration, and property-based tests. Ensure 100% coverage for new features. Use `test.check` for props with fixed seeds.
-
-Consolidate dependencies where possible. Prefer modern libraries.
-
-Keep comments and docs up-to-date. Add where missing. Do not remove existing unless improving readability.
-
-Apply security updates. Be mindful in LSP/WebSocket handling.
-
-Branch from `main` for PRs. Include tests/docs. Reference issues.
-
-Use labels (bug, enhancement) for issues. Provide repro steps.
-
-Require 1 approval for reviews. Focus on readability, maintainability, DRY, and separation of concerns.
+- Follow the Clojure style guide. Use kebab-case for keys. Group and order imports (core first, local last).
+- Use conventional commits (e.g., `feat: add X`, `fix: resolve Y`).
+- Add unit, integration, and property-based tests. Ensure 100% coverage for new features. Use `test.check` for props with fixed seeds.
+- Consolidate dependencies where possible. Prefer modern libraries.
+- Keep comments and docs up-to-date. Add where missing. Do not remove existing unless improving readability.
+- Apply security updates. Be mindful in LSP/WebSocket handling.
+- Branch from `main` for PRs. Include tests/docs. Reference issues.
+- Use labels (bug, enhancement) for issues. Provide repro steps.
+- Require 1 approval for reviews. Focus on readability, maintainability, DRY, and separation of concerns.
