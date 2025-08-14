@@ -5,6 +5,10 @@
 
 (def registry (atom {}))
 
+;; Atom to hold the configured default language key (string).
+;; If set to a key not in the registry at default-db init, falls back to the first registered or "text".
+(defonce default-lang (atom nil))
+
 (s/def ::grammar-wasm string?)
 (s/def ::highlight-query-path string?)
 (s/def ::indents-query-path string?)
@@ -24,6 +28,16 @@
                                  ::indent-size]))
 
 (s/def ::lang-key string?)
+
+(defn set-default-lang
+  "Sets the default language key. Should be called before app initialization.
+  Ensures the key is a string."
+  [lang-key]
+  (when-not (string? lang-key)
+    (log/warn "Attempted to set default-lang with non-string key:" lang-key))
+  (let [lang-key-str (if (keyword? lang-key) (name lang-key) lang-key)]
+    (reset! default-lang lang-key-str)
+    (log/info "Set default-lang to:" lang-key-str)))
 
 (defn register-language
   "Registers a language with the given key and configuration.

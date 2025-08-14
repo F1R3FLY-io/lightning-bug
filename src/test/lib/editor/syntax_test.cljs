@@ -55,6 +55,27 @@
         (is (nil? plugin) "Returns nil for invalid inputs")
         (done)))))
 
+(deftest highlighter-plugin-missing-state-field
+  (async done
+    (go
+      (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+            query-str (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
+            [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+            parser (doto (new Parser) (.setLanguage lang))
+            query (new (.-Query TreeSitter) lang query-str)
+            ;; Create a dummy state field that is not attached.
+            dummy-field (syntax/make-language-state parser)
+            plugin (syntax/make-highlighter-plugin dummy-field query)
+            ;; Create state without the field.
+            state (.create EditorState #js {:doc "test content" :extensions #js []})
+            view (EditorView. #js {:state state :parent js/document.body})
+            plugin-instance (.plugin view plugin)
+            decorations (.-decorations plugin-instance)]
+        (is (some? plugin-instance) "Plugin instance created")
+        (is (zero? (.-size decorations)) "Empty decorations when state field missing")
+        (.destroy view)
+        (done)))))
+
 (def gen-query (gen/let [captures (gen/vector (gen/elements (keys syntax/style-map)) 1 1)]
   (str/join "\n" (map #(str "(_" % ") @" %) captures))))
 
@@ -71,7 +92,7 @@
                 parser (doto (new Parser) (.setLanguage lang))
                 state-atom (atom {:language "rholang" :languages {"rholang" {:highlight-query query-str}}})
                 state (.create EditorState #js {:doc doc :extensions #js []})
-                view (new EditorView #js {:state state})
+                view (EditorView. #js {:state state :parent js/document.body})
                 result (<! (syntax/init-syntax view state-atom))]
             (.destroy view)
             (async/put! result-chan (= result :success)))
@@ -92,7 +113,7 @@
               parser (doto (new Parser) (.setLanguage lang))
               state-atom (atom {:language "rholang" :languages {"rholang" {:highlight-query invalid-query}}})
               state (.create EditorState #js {:doc "" :extensions #js []})
-              view (new EditorView #js {:state state})
+              view (EditorView. #js {:state state :parent js/document.body})
               result (<! (syntax/init-syntax view state-atom))]
           (.destroy view)
           (is (= result :missing-components) "Falls back for invalid query")
@@ -163,7 +184,7 @@
                                                      :highlight-query query-str
                                                      :extensions [".rho"]}}})
             state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-            view (new EditorView #js {:state state})
+            view (EditorView. #js {:state state :parent js/document.body})
             result (<! (syntax/init-syntax view state-atom))]
         (is (some? (get-in @state-atom [:languages "rholang"])) "Language config found with string key")
         (is (nil? (get-in @state-atom [:languages :rholang])) "No keyword key exists")
@@ -183,7 +204,7 @@
                                                     :highlight-query query-str
                                                     :extensions [".rho"]}}})
             state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-            view (new EditorView #js {:state state})
+            view (EditorView. #js {:state state :parent js/document.body})
             result (<! (syntax/init-syntax view state-atom))]
         (is (some? (get-in @state-atom [:languages "rholang"])) "Keyword key normalized to string")
         (is (nil? (get-in @state-atom [:languages :rholang])) "Keyword key removed")
@@ -201,7 +222,7 @@
                                                      :highlight-query query-str
                                                      :extensions [".rho"]}}})
             state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-            view (new EditorView #js {:state state})
+            view (EditorView. #js {:state state :parent js/document.body})
             result (<! (syntax/init-syntax view state-atom))]
         (is (= result :missing-components) "Falls back for invalid WASM path")
         (is (nil? (get @syntax/languages "rholang")) "Language not cached on failure")
@@ -217,7 +238,7 @@
                                                      :highlight-query-path "/invalid/path/highlights.scm"
                                                      :extensions [".rho"]}}})
             state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-            view (new EditorView #js {:state state})
+            view (EditorView. #js {:state state :parent js/document.body})
             result (<! (syntax/init-syntax view state-atom))]
         (is (= result :missing-components) "Falls back for invalid query path")
         (is (nil? (get @syntax/languages "rholang")) "Language not cached on query failure")
@@ -239,7 +260,7 @@
                                                      :indent-size 2
                                                      :extensions [".rho"]}}})
             state (.create EditorState #js {:doc "{ Nil }" :extensions #js []})
-            view (new EditorView #js {:state state})
+            view (EditorView. #js {:state state :parent js/document.body})
             result (<! (syntax/init-syntax view state-atom))]
         (is (= result :success) "Initialization succeeds with indents query")
         (.destroy view)
@@ -315,4 +336,22 @@
             pos (+ (str/last-index-of doc "|") 1) ; just after second '|' 
             ctx #js {:state state :pos pos :unit "  "}]
         (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after second '|' by 2 spaces, aligning with previous processes")
+        (done)))))
+
+(deftest indentation-demo-example
+  (async done
+    (go
+      (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+            indents-str (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm")
+            [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+            parser (doto (new Parser) (.setLanguage lang))
+            indents-query (new Query lang indents-str)
+            doc "new x in { x!(\"Hello\") | Nil }"
+            tree (.parse parser doc)
+            language-state-field (syntax/make-language-state parser)
+            state (.create EditorState #js {:doc doc
+                                            :extensions #js [language-state-field]})
+            pos 25 ; approximate position after '|' in the example code
+            ctx #js {:state state :pos pos :unit "  "}]
+        (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after '|' in demo example by 2 spaces")
         (done)))))

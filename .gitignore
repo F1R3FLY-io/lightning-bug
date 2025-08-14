@@ -5,18 +5,25 @@
 !*/
 
 # Include specific file patterns
+!/CHANGELOG.md
 !/deps.edn
+!/.github/workflows/*.yaml
 !/.gitignore
 !/LICENSE.txt
 !/NOTICE.txt
+!/.npmrc
 !/package.json
 !/README.md
-!/resources/public/css/**/*.css
+!/resources/public/**/*.css
 !/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
 !/resources/public/**/*.html
 !/scripts/**/*.sh
 !/shadow-cljs.edn
 !/src/**/*.cljs
+!/tsconfig.json
+!/types/**/*.d.ts
+!/types/**/*.test-d.ts
 
 # Exclude specific file patterns
 /resources/public/js/test/*
+/resources/public/demo/node_modules/*

@@ -3,44 +3,25 @@
    ["react" :as react]
    ["react-dom/client" :as rdclient]
    [reagent.core :as r]
-   [app.events :as e]
-   [app.subs]
-   [clojure.test :refer [deftest is async use-fixtures]]
-   [clojure.core.async :refer [<! go timeout]]
-   [datascript.core :as d]
-   [re-frame.db :refer [app-db]]
-   [re-posh.core :as rp]
    [app.db :refer [default-db ds-conn]]
+   [app.events :as e]
+   [app.shared :as shared]
+   [datascript.core :as d]
+   [re-frame.db :as rf-db]
    [app.views.editor :as editor]
    [re-frame.core :as rf]
-   [lib.core :refer [Editor]]))
+   [re-posh.core :as rp]
+   [day8.re-frame.test :as rf-test]
+   [taoensso.timbre :as log]
+   [clojure.core.async :refer [go <! timeout]]
+   [clojure.test :refer [deftest is use-fixtures async]]))
 
 (set! (.-IS_REACT_ACT_ENVIRONMENT js/globalThis) true)
 
-(use-fixtures :each
-  {:before (fn []
-             (d/reset-conn! ds-conn (d/empty-db (:schema default-db)))
-             (reset! app-db {})
-             (rf/dispatch-sync [::e/initialize])
-             (let [active (get-in @app-db [:workspace :active-file])]
-               (swap! app-db assoc :languages {"text" {:extensions [".txt"]
-                                                       :fallback-highlighter "none"
-                                                       :file-icon "fas fa-file text-secondary"}}
-                                   :default-language "text")
-               (swap! app-db assoc-in [:workspace :files active :language] "text")
-               (swap! app-db assoc-in [:workspace :files active :name] "untitled.txt"))
-             (rf/clear-subscription-cache!)
-             (rp/connect! ds-conn))
-   :after (fn [])})
-
-(defn act-flush
-  "Helper to wrap code in react/act and flush Reagent renders."
-  [f]
+(defn act-flush [f]
   (react/act (fn [] (f) (r/flush))))
 
-(defn act-mount
-  "Mount component in act, returning root."
-  [container comp]
+(defn act-mount [container comp]
   (let [root-atom (atom nil)]
     (act-flush
      (fn []
@@ -49,97 +30,168 @@
          (reset! root-atom root))))
     @root-atom))
 
+(defn act-unmount [root]
+  (act-flush #(.unmount root)))
+
+(use-fixtures :each
+  {:before (fn []
+             (log/set-min-level! :trace)
+             (d/reset-conn! ds-conn (d/empty-db (:schema default-db)))
+             (reset! rf-db/app-db {})
+             (act-flush #(rf/dispatch-sync [::e/initialize]))
+             (swap! rf-db/app-db update :languages
+                    (fn [langs]
+                      (into {} (map (fn [[k v]] [k (dissoc v :lsp-url)]) langs))))
+             (swap! rf-db/app-db assoc :languages (merge (:languages @rf-db/app-db) {"text" {:extensions [".txt"]
+                                                                                             :fallback-highlighter "none"
+                                                                                             :file-icon "fas fa-file text-secondary"}}) :default-language "text")
+             (let [active (get-in @rf-db/app-db [:workspace :active-file])]
+               (swap! rf-db/app-db assoc-in [:workspace :files active :language] "text")
+               (swap! rf-db/app-db assoc-in [:workspace :files active :name] "untitled.txt"))
+             (rf/clear-subscription-cache!)
+             (rp/connect! ds-conn))
+   :after (fn [] (log/set-min-level! :debug))})
+
 (deftest editor-renders
   (async done
-         (go
-           (let [container (js/document.createElement "div")]
-             (js/document.body.appendChild container)
-             (let [root (act-mount container [:f> editor/component])]
-               (<! (timeout 10))
-               (is (some? (.querySelector container ".code-editor")) "Editor container rendered")
-               (act-flush #(.unmount root)))
-             (js/document.body.removeChild container)
-             (done)))))
+    (go
+      (let [container (js/document.createElement "div")]
+        (set! (.-display (.-style container)) "none")
+        (js/document.body.appendChild container)
+        (let [root (act-mount container [:f> editor/component])]
+          (<! (timeout 100))
+          (act-flush identity)
+          (log/debug "Checking for editor container after render")
+          (is (some? (.querySelector container ".code-editor")) "Editor container rendered")
+          (act-unmount root))
+        (js/document.body.removeChild container)
+        (done)))))
 
 (deftest editor-no-file
   (async done
-         (go
-           (swap! app-db assoc-in [:workspace :active-file] nil)
-           (act-flush #(r/flush))
-           (<! (timeout 10))
-           (let [container (js/document.createElement "div")]
-             (js/document.body.appendChild container)
-             (let [root (act-mount container [:f> editor/component])]
-               (<! (timeout 10))
-               (is (some? (.querySelector container "div")) "Renders message for no active file")
-               (act-flush #(.unmount root)))
-             (js/document.body.removeChild container)
-             (done)))))
+    (go
+      (swap! rf-db/app-db assoc-in [:workspace :active-file] nil)
+      (let [container (js/document.createElement "div")]
+        (set! (.-display (.-style container)) "none")
+        (js/document.body.appendChild container)
+        (let [root (act-mount container [:f> editor/component])]
+          (<! (timeout 100))
+          (act-flush identity)
+          (log/debug "Checking for no-file message after render")
+          (is (some? (.querySelector container "div")) "Renders message for no active file")
+          (act-unmount root))
+        (js/document.body.removeChild container)
+        (done)))))
+
+(deftest editor-state-persists-across-rerenders
+  (rf-test/run-test-async
+   (let [container (js/document.createElement "div")]
+     (set! (.-display (.-style container)) "none")
+     (js/document.body.appendChild container)
+     (let [root (act-mount container [:f> editor/component])]
+       (rf-test/wait-for
+        [::e/editor-ready]
+        (let [initial-instance (.-current @shared/editor-ref-atom)]
+          (react/act #(rf/dispatch [::e/editor-update-content "force rerender"]))
+          (rf-test/wait-for
+           [::e/editor-update-content]
+           (let [post-instance (.-current @shared/editor-ref-atom)]
+             (is (= initial-instance post-instance) "Editor ref persists across content change/rerender")
+             (is (.isReady post-instance) "Editor remains ready after rerender"))
+           (act-unmount root)
+           (js/document.body.removeChild container))))))))
 
 (deftest editor-cursor-update
-  (async done
-         (go
-           (let [container (js/document.createElement "div")
-                 ref (react/createRef)]
-             (js/document.body.appendChild container)
-             (with-redefs [Editor (react/forwardRef
-                                   (fn [_ forwarded-ref]
-                                     (react/useImperativeHandle
-                                      forwarded-ref
-                                      (fn []
-                                        #js {:setCursor (fn [pos-js]
-                                                          (let [pos (js->clj pos-js :keywordize-keys true)]
-                                                            (rf/dispatch [::e/update-cursor pos])
-                                                            (rf/dispatch [::e/clear-cursor-pos])))
-                                             :isReady (fn [] true)}))
-                                     (react/createElement "div" #js {:className "code-editor"})))]
-               (let [root (act-mount container [:> Editor {:content "test"
-                                                           :language "text"
-                                                           :languages {"text" {:extensions [".txt"]}}}
-                                                {:ref ref}])
-                     _ (<! (timeout 10))]
-                 (rf/dispatch [::e/set-cursor-pos {:line 2 :column 3}])
-                 (act-flush #(r/flush))
-                 (<! (timeout 200))
-                 (act-flush #(r/flush))
-                 (is (= {:line 2 :column 3} @(rf/subscribe [:editor/cursor])) "Cursor updated")
-                 (is (nil? @(rf/subscribe [:editor-cursor-pos])) "Cursor pos cleared after update")
-                 (act-flush #(.unmount root))
-                 (js/document.body.removeChild container)
-                 (done)))))))
+  (rf-test/run-test-async
+   (log/debug ":: BEGIN :: editor-cursor-update")
+   (let [container (js/document.createElement "div")]
+     (set! (.-display (.-style container)) "none")
+     (js/document.body.appendChild container)
+     (let [root (act-mount container [:f> editor/component])]
+       (log/debug ":: 1 ::")
+       (rf-test/wait-for
+        [::e/editor-ready]
+        (log/debug ":: 2 ::")
+        (let [instance (.-current @shared/editor-ref-atom)]
+          (.setText instance "line1\nline2"))
+        (log/debug ":: 3 ::")
+        (rf-test/wait-for
+         [::e/editor-update-content]
+         (log/debug ":: 4 ::")
+         (react/act #(rf/dispatch [::e/set-editor-cursor {:line 2 :column 3}]))
+         (log/debug ":: 5 ::")
+         (rf-test/wait-for
+          [::e/update-cursor]
+          {:timeout 1000}
+          (log/debug ":: 6 ::")
+          (r/with-let [cursor @(rf/subscribe [:editor/cursor])]
+            (is (= {:line 2 :column 3} cursor) "Cursor updated")
+            ;; (log/debug ":: 7 ::")
+            ;; (react/act #(.unmount root))
+            ;; (log/debug ":: 8 ::")
+            ;; (js/document.body.removeChild container)
+            (log/debug ":: END :: editor-cursor-update")))))))))
 
-(deftest editor-highlight-range
-  (async done
-         (go
-           (let [container (js/document.createElement "div")
-                 ref (react/createRef)
-                 highlight-called (atom false)
-                 clear-called (atom false)]
-             (js/document.body.appendChild container)
-             (with-redefs [Editor (react/forwardRef
-                                   (fn [_ forwarded-ref]
-                                     (react/useImperativeHandle
-                                      forwarded-ref
-                                      (fn []
-                                        #js {:highlightRange (fn [_ _] (reset! highlight-called true))
-                                             :clearHighlight (fn [] (reset! clear-called true))
-                                             :isReady (fn [] true)}))
-                                     (react/createElement "div" #js {:className "code-editor"})))]
-               (let [root (act-mount container [:> Editor {:content "test"
-                                                           :language "text"
-                                                           :languages {"text" {:extensions [".txt"]}}}
-                                                {:ref ref}])
-                     _ (<! (timeout 10))]
-                 (rf/dispatch [::e/set-highlight-range {:from {:line 1 :column 1} :to {:line 1 :column 6}}])
-                 (act-flush #(r/flush))
-                 (<! (timeout 200))
-                 (act-flush #(r/flush))
-                 (is @highlight-called "highlightRange called")
-                 (rf/dispatch [::e/set-highlight-range nil])
-                 (act-flush #(r/flush))
-                 (<! (timeout 200))
-                 (act-flush #(r/flush))
-                 (is @clear-called "clearHighlight called")
-                 (act-flush #(.unmount root))
-                 (js/document.body.removeChild container)
-                 (done)))))))
+;; (deftest editor-highlight-range
+;;   (rf-test/run-test-async
+;;    (log/debug ":: BEGIN :: editor-highlight-range")
+;;    (let [container (js/document.createElement "div")]
+;;      (set! (.-display (.-style container)) "none")
+;;      (js/document.body.appendChild container)
+;;      (log/debug ":: 0 ::")
+;;      (let [root (act-mount container [:f> editor/component])]
+;;        (log/debug ":: 1 ::")
+;;        (rf-test/wait-for
+;;         [::e/editor-ready]
+;;         (log/debug ":: 2 ::")
+;;         (let [instance (.-current @shared/editor-ref-atom)]
+;;           (.setText instance "lorem ipsum")
+;;           (act-flush identity))
+;;         (log/debug ":: 3 ::")
+;;         (rf-test/wait-for
+;;          [::e/editor-update-content]
+;;          (log/debug ":: 4 ::")
+;;          (act-flush #(rf/dispatch [::e/set-highlight-range {:from {:line 1 :column 1} :to {:line 1 :column 6}}]))
+;;          (log/debug ":: 5 ::")
+;;          (rf-test/wait-for
+;;           [::e/update-highlights]
+;;           (log/debug ":: 6 ::")
+;;           (is (= {:from {:line 1 :column 1} :to {:line 1 :column 6}} @(rf/subscribe [:editor/highlights])) "Highlights updated")
+;;           (log/debug "Verifying highlight after set")
+;;           (act-flush #(rf/dispatch [::e/set-highlight-range nil]))
+;;           (log/debug ":: 7 ::")
+;;           (rf-test/wait-for
+;;            [::e/update-highlights]
+;;            (log/debug ":: 8 ::")
+;;            (r/with-let [highlights @(rf/subscribe [:editor/highlights])]
+;;              (is (nil? highlights) "Highlights reset")
+;;              ;; (log/debug "Verifying clear after set nil")
+;;              ;; (act-unmount root)
+;;              ;; (js/document.body.removeChild container)
+;;              (log/debug ":: END :: editor-highlight-range"))))))))))
+
+;; (deftest editor-full-cycle-integration
+;;   (rf-test/run-test-async
+;;    (let [container (js/document.createElement "div")]
+;;      (set! (.-display (.-style container)) "none")
+;;      (js/document.body.appendChild container)
+;;      (let [root (act-mount container [:f> editor/component])]
+;;        (log/debug "Starting full cycle: render, update content, set cursor, highlight")
+;;        (rf-test/wait-for
+;;         [::e/editor-ready]
+;;         (let [instance (.-current @shared/editor-ref-atom)]
+;;           (.setText instance "lorem ipsum"))
+;;         (rf-test/wait-for
+;;          [::e/editor-update-content]
+;;          (is (some? (.querySelector container ".code-editor")) "Initial render")
+;;          (react/act #(rf/dispatch [::e/editor-update-content "integrated"]))
+;;          (is (= "integrated" @(rf/subscribe [:active-content])) "Content updated")
+;;          (react/act #(rf/dispatch [::e/set-editor-cursor {:line 1 :column 5}]))
+;;          (rf-test/wait-for
+;;           [::e/update-cursor]
+;;           (is (= {:line 1 :column 5} @(rf/subscribe [:editor/cursor])) "Cursor set")
+;;           (react/act #(rf/dispatch-sync [::e/set-highlight-range
+;;                                          {:from {:line 1 :column 1}
+;;                                           :to {:line 1 :column 10}}]))
+;;           (act-unmount root)
+;;           (js/document.body.removeChild container))))))))

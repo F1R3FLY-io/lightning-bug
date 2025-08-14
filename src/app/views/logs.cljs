@@ -1,35 +1,28 @@
 (ns app.views.logs
   (:require
-   ["react" :as react]
-   [app.events :as e]
-   [app.utils :as u]
-   [re-com.core :as rc]
-   [re-frame.core :as rf]
-   [reagent.core :as r]
-   [taoensso.timbre :as log]))
+    ["react" :as react]
+    [app.events :as e]
+    [re-com.core :as rc]
+    [re-frame.core :as rf]
+    [reagent.core :as r]))
 
 (defn logs-content
   "Inner React functional component for rendering the logs content.
-   Uses React hooks for resize observation."
+  Uses React hooks for resize observation."
   [{:keys [visible? diagnostics height on-resize]}]
   (let [content-ref (react/useRef nil)]
     (react/useEffect
-     (fn []
-       (log/trace "useEffect in logs-content triggered, visible?:" visible?)
-       (if (and visible? (.-current content-ref))
-         (let [observer (js/ResizeObserver.
-                         (fn [entries]
-                           (let [new-height (.-offsetHeight (.-target (first entries)))]
-                             (log/trace "ResizeObserver detected new height:" new-height)
-                             (on-resize new-height))))]
-           (.observe observer (.-current content-ref))
-           (fn []
-             (log/trace "Cleaning up ResizeObserver in logs-content")
-             (.disconnect observer)))
-         (do
-           (log/trace "useEffect skipped: not visible or no ref")
-           js/undefined)))
-     #js [visible?])
+      (fn []
+        (if (and visible? (.-current content-ref))
+          (let [observer (js/ResizeObserver.
+                           (fn [entries]
+                             (let [new-height (.-offsetHeight (.-target (first entries)))]
+                               (on-resize new-height))))]
+            (.observe observer (.-current content-ref))
+            (fn []
+              (.disconnect observer)))
+          js/undefined))
+      #js [visible?])
     [:div.logs-content
      {:ref content-ref
       :style {:overflow-y "auto"
@@ -42,38 +35,34 @@
       :children (if (empty? diagnostics)
                   [[:label.text-muted "No diagnostics available"]]
                   (for [d diagnostics]
-                    (let [range (:range d)
-                          start (:start range)
-                          end (:end range)
-                          line (inc (:line start))
-                          col (inc (:character start))
-                          msg (:message d)
-                          sev (:severity d)
+                    (let [line (inc (:diagnostic/start-line d 0))
+                          col (inc (:diagnostic/start-char d 0))
+                          msg (:diagnostic/message d)
+                          sev (:diagnostic/severity d)
                           cls (case sev
                                 1 "text-danger"
                                 2 "text-warning"
                                 3 "text-info"
                                 4 "text-muted"
-                                "")]
+                                "")
+                          from {:line line :column col}
+                          to {:line (inc (:diagnostic/end-line d 0)) :column (inc (:diagnostic/end-char d 0))}]
                       ^{:key (str line "-" col "-" msg)}
                       [:label {:class cls
                                :style {:cursor "pointer"
                                        :display "block"}
-                               :on-click #(rf/dispatch [::e/set-cursor-pos {:line line :column col}])
-                               :on-mouse-enter #(rf/dispatch [::e/set-highlight-range
-                                                             {:from {:line (inc (:line start)) :column (inc (:character start))}
-                                                              :to {:line (inc (:line end)) :column (inc (:character end))}}])
+                               :on-click #(rf/dispatch [::e/set-editor-cursor from])
+                               :on-mouse-enter #(rf/dispatch [::e/set-highlight-range {:from from :to to}])
                                :on-mouse-leave #(rf/dispatch [::e/set-highlight-range nil])}
                        msg])))]]))
 
 (defn component
   "Renders the collapsible logs panel displaying LSP diagnostics.
-   Wraps the logs-content React component, integrating with Reagent."
+  Wraps the logs-content React component, integrating with Reagent."
   []
   (let [visible? @(rf/subscribe [:logs-visible?])
         diags @(rf/subscribe [:lsp/diagnostics])
         height @(rf/subscribe [:logs-height])]
-    (log/debug "Rendering logs panel, visible?:" visible? ", diagnostics count:" (count diags))
     [:div.logs-panel
      {:style {:display "flex"
               :flex-direction "column-reverse"

@@ -9,6 +9,7 @@
    [re-frame.db :refer [app-db]]
    ["react" :as react]
    [taoensso.timbre :as log]
+   [lib.db :as lib-db]
    [app.db :as db :refer [default-db]]
    [app.events :as e]
    [app.subs]
@@ -34,7 +35,7 @@
 (deftest root-component-renders
   (async done
          (reset! app-db default-db)
-         (set! db/ds-conn (d/create-conn db/schema))
+         (set! db/ds-conn (d/create-conn lib-db/schema))
          (rf/dispatch-sync [::e/initialize])
          (let [container (js/document.createElement "div")]
            (js/document.body.appendChild container)
@@ -50,29 +51,39 @@
 (deftest error-boundary-catches-error
   (async done
          (reset! app-db default-db)
-         (set! db/ds-conn (d/create-conn db/schema))
+         (set! db/ds-conn (d/create-conn lib-db/schema))
          (rf/dispatch-sync [::e/initialize])
          (let [container (js/document.createElement "div")
-               captured-logs (atom nil)]
+               captured-logs (atom nil)
+               throw? (atom true)
+               original-onerror js/window.onerror]
+           (set! js/window.onerror (fn [msg url line col error]
+                                     (if (str/includes? msg "Test error")
+                                       (do
+                                         (log/debug "Ignored intentional test error")
+                                         true) ; Prevent default propagation/logging as uncaught.
+                                       (when original-onerror (original-onerror msg url line col error)))))
            (log/with-config (assoc log/*config* :appenders {:capture {:enabled? true
                                                                       :fn (fn [data] (swap! captured-logs conj data))}})
-             (with-redefs [editor/component (fn [] (throw (js/Error. "Test error")))]
+             (with-redefs [editor/component (fn [] (when @throw? (throw (js/Error. "Test error"))) [:div.code-editor])]
                (js/document.body.appendChild container)
                (let [root (act-mount container [main/root-component])]
                  (is (some? (.querySelector container ".text-danger")) "Error boundary fallback UI rendered")
                  (is (some #(str/includes? (str/join " " (:vargs %)) "Error boundary caught") @captured-logs) "Error boundary logged the error")
                  (let [retry-button (.querySelector container ".btn-primary")]
+                   (reset! throw? false) ;; Disable throwing before retry to allow successful re-render.
                    (act-flush #(.dispatchEvent retry-button (js/MouseEvent. "click")))
                    (is (nil? (.querySelector container ".text-danger")) "Retry clears error state")
                    (is (some? (.querySelector container ".code-editor")) "Editor re-rendered after retry")
                    (act-flush #(.unmount root))
                    (js/document.body.removeChild container)
+                   (set! js/window.onerror original-onerror)
                    (done))))))))
 
 (deftest editor-unmount-remount
   (async done
          (reset! app-db default-db)
-         (set! db/ds-conn (d/create-conn db/schema))
+         (set! db/ds-conn (d/create-conn lib-db/schema))
          (rf/dispatch-sync [::e/initialize])
          (let [container (js/document.createElement "div")]
            (js/document.body.appendChild container)

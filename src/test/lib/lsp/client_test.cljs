@@ -2,12 +2,12 @@
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
    [clojure.string :as str]
-   [clojure.core.async :refer [go <!]]
    [datascript.core :as d]
    [posh.reagent :as p] ;; For verifying Posh atom attachment.
    [reagent.core :as r]
    ["rxjs" :as rxjs]
    [taoensso.timbre :as log]
+   [lib.db :refer [flatten-symbols]]
    [lib.lsp.client :as lsp]))
 
 (use-fixtures :each
@@ -24,8 +24,19 @@
       (is (some? @lsp/ws)))))
 
 (deftest flatten-symbols-basic
-  (let [syms [{:name "a" :children [{:name "b"}]}]
-        flat (lsp/flatten-symbols syms nil)
+  (let [syms [{:name "a"
+               :kind 12 ;; Function
+               :range {:start {:line 0 :character 0}
+                       :end {:line 0 :character 10}}
+               :selectionRange {:start {:line 0 :character 0}
+                                :end {:line 0 :character 1}}
+               :children [{:name "b"
+                           :kind 13 ;; Method
+                           :range {:start {:line 1 :character 2}
+                                   :end {:line 1 :character 3}}
+                           :selectionRange {:start {:line 1 :character 2}
+                                            :end {:line 1 :character 3}}}]}]
+        flat (flatten-symbols syms nil)
         conn (d/create-conn {:parent {:db/valueType :db.type/ref}})]
     (is (= 2 (count flat)))
     (d/transact! conn flat)

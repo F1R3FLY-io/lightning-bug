@@ -1,72 +1,42 @@
 (ns lib.editor.diagnostics
   (:require
-   ["@codemirror/state" :refer [Annotation StateField RangeSetBuilder]]
-   ["@codemirror/view" :refer [Decoration ViewPlugin]]
-   [clojure.string :as str]
-   [lib.utils :as u]
-   [taoensso.timbre :as log]))
+   ["@codemirror/lint" :refer [lintGutter linter]]
+   ["@codemirror/state" :refer [StateField StateEffect]]
+   [lib.utils :as u]))
 
-;; Annotation to mark transactions that update diagnostics in the StateField.
-(def diagnostic-annotation (.define Annotation))
+;; StateEffect to set new diagnostics in the field.
+(def set-diagnostic-effect (.define StateEffect))
 
-;; StateField to hold the current list of LSP diagnostics.
+;; StateField to hold the current list of LSP diagnostics (array).
 (def diagnostic-field
   (.define StateField
-    #js {:create (fn [_] #js []) ;; Initial empty array of diagnostics.
-         :update (fn [value ^js tr]
-                   ;; Update with new diagnostics if the transaction has the annotation, else keep current.
-                   (if-let [new-diags (.annotation tr diagnostic-annotation)]
-                     new-diags
-                     value))}))
+           #js {:create (fn [_] #js [])
+                :update (fn [^js value
+                            ^js tr]
+                          (reduce (fn [v ^js e]
+                                    (if (.is e set-diagnostic-effect)
+                                      (.-value e)
+                                      v))
+                                  value (.-effects tr)))}))
 
-(defn severity-class
-  "Maps LSP diagnostic severity to a CSS class for underlining.
-  - 1: Error (red wavy)
-  - 2: Warning (orange wavy)
-  - 3: Information (blue dotted)
-  - 4: Hint (gray dotted)"
-  [severity]
-  (case severity
-    1 "cm-error-underline"
-    2 "cm-warning-underline"
-    3 "cm-info-underline"
-    4 "cm-hint-underline"
-    ""))
+(def diagnostic-lint
+  (linter (fn [view]
+            (let [diags (.field (.-state view) diagnostic-field false)]
+              (clj->js (map (fn [^js diag]
+                              #js {:from (u/pos-to-offset (.-doc (.-state view))
+                                                          {:line (inc (.-startLine diag))
+                                                           :column (inc (.-startChar diag))}
+                                                          true)
+                                   :to (u/pos-to-offset (.-doc (.-state view))
+                                                        {:line (inc (.-endLine diag))
+                                                         :column (inc (.-endChar diag))}
+                                                        true)
+                                   :severity (case (.-severity diag)
+                                               1 "error"
+                                               2 "warning"
+                                               3 "info"
+                                               "hint")
+                                   :message (.-message diag)})
+                            diags))))))
 
-(defn build-decorations
-  "Builds a RangeSet of decorations for underlining diagnostics in the visible viewport."
-  [^js view]
-  (let [builder (RangeSetBuilder.)
-        diags (.field (.-state view) diagnostic-field)
-        ^js doc (.-doc (.-state view))]
-    (doseq [^js diag diags]
-      (let [^js range (.-range diag)]
-        (if (or (nil? range) (nil? (.-start range)) (nil? (.-end range)))
-          (log/warn "Invalid diagnostic range; skipping decoration:" diag)
-          (let [^js start (.-start range)
-                ^js end (.-end range)
-                from (u/pos-to-offset doc {:line (or (.-line start) 0)
-                                           :column (or (.-character start) 0)} false)
-                to (u/pos-to-offset doc {:line (or (.-line end) 0)
-                                         :column (or (.-character end) 0)} false)
-                cls (severity-class (or (.-severity diag) 0))]
-            (if (or (nil? from) (nil? to) (> from to) (str/blank? cls))
-              (log/trace "Skipping invalid decoration for diag:" diag)
-              (.add builder from to (.mark Decoration #js {:class cls})))))))
-    (.finish builder)))
-
-(def diagnostic-plugin
-  "ViewPlugin that renders underlines for diagnostics using decorations."
-  (let [PluginClass (fn [^js view]
-                      (this-as ^js this
-                        (set! (.-decorations this) (build-decorations view))
-                        this))]
-    (set! (.-prototype ^js PluginClass) (js/Object.create js/Object.prototype))
-    (set! (.-update (.-prototype ^js PluginClass))
-          (fn [^js update]
-            (this-as ^js this
-              (when (or (.-docChanged update) (.-viewportChanged update)
-                        (not= (.field (.-startState update) diagnostic-field)
-                              (.field (.-state update) diagnostic-field)))
-                (set! (.-decorations this) (build-decorations (.-view update)))))))
-    (.fromClass ViewPlugin PluginClass #js {:decorations (fn [^js instance] (.-decorations instance))})))
+(def extensions #js [diagnostic-field diagnostic-lint (lintGutter)])
