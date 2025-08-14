@@ -8,13 +8,15 @@ This project is licensed under the Apache License 2.0. See the [LICENSE.txt](LIC
 
 ## GitHub Repositories
 
-- Lightning Bug: [http://github.com/f1R3FLY-io/lightning-bug](http://github.com/f1R3FLY-io/lightning-bug)
-- Rholang Tree-Sitter Grammar: [https://github.com/dylon/rholang-rs](https://github.com/dylon/rholang-rs) (use branch: `dylon/comments`)
-- Rholang Language Server: [https://github.com/f1R3FLY-io/rholang-language-server](https://github.com/f1R3FLY-io/rholang-language-server)
+| Repository                  | URL                                          |
+|-----------------------------|----------------------------------------------|
+| Lightning Bug              | [https://github.com/f1R3FLY-io/lightning-bug](https://github.com/f1R3FLY-io/lightning-bug) |
+| Rholang Tree-Sitter Grammar| [https://github.com/dylon/rholang-rs](https://github.com/dylon/rholang-rs) (use branch: `dylon/comments`) |
+| Rholang Language Server    | [https://github.com/f1R3FLY-io/rholang-language-server](https://github.com/f1R3FLY-io/rholang-language-server) |
 
 ## Installing Rholang Tree-Sitter Parser from NPM
 
-The Tree-Sitter parser for Rholang is available as an NPM package `@f1r3fly-io/tree-sitter-rholang-js`. It is listed as a dependency in `package.json`.
+The Tree-Sitter parser for Rholang is available as an NPM package `@f1r3fly-io/tree-sitter-rholang-js-with-comments`. It is listed as a dependency in `package.json`.
 
 To install the dependencies, run the following command:
 
@@ -22,12 +24,12 @@ To install the dependencies, run the following command:
 npm install
 ```
 
-The postinstall script (`scripts/postinstall.sh`) automatically copies the WASM file to the appropriate locations in the project. These locations include `resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm`, as well as the demo and test directories.
+The postinstall script (`scripts/postinstall.js`) automatically copies the WASM file to the appropriate locations in the project. These locations include `resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm`, as well as the demo and test directories.
 
 If you need to copy the file manually after installation, run the following command:
 
 ```
-cp node_modules/@f1r3fly-io/tree-sitter-rholang-js/tree-sitter-rholang.wasm resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm
+cp node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/tree-sitter-rholang.wasm resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm
 ```
 
 ## Installation and Compilation
@@ -38,9 +40,12 @@ Install the Clojure CLI tools. Install Node.js dependencies with `npm install`. 
 
 ### Compiling and Watching Targets
 
-Use `shadow-cljs` for building. Targets include `:libs` (core library and extensions), `:app` (full development app with Re-frame UI), `:demo` (minimal standalone demo), and `:test` (browser tests).
-
-To compile a target (e.g., `:app`), run `npx shadow-cljs compile app`. To watch a target (e.g., `:app`), run `npx shadow-cljs watch app`. To create a release build (e.g., `:libs`), run `npx shadow-cljs release libs`.
+| Target | Description | Compile Command | Watch Command | Release Command |
+|--------|-------------|-----------------|---------------|-----------------|
+| `:libs` | Core library and extensions | `npx shadow-cljs compile libs` | `npx shadow-cljs watch libs` | `npx shadow-cljs release libs` |
+| `:app` | Full development app with Re-frame UI | `npx shadow-cljs compile app` | `npx shadow-cljs watch app` | - |
+| `:demo` | Minimal standalone demo | - | `npx shadow-cljs watch demo` | - |
+| `:test` | Browser tests | - | `npx shadow-cljs watch test` | - |
 
 For multiple targets, run `npx shadow-cljs watch libs app test`.
 
@@ -77,7 +82,7 @@ The demo app is a standalone HTML file located at `resources/public/demo/index.h
 
 ### Building the Demo App
 
-To build the demo app (compiles the library and copies assets), run the build script: `node run build:demo`.
+To build the demo app (compiles the library and copies assets), run the build script: `npm run build:demo`.
 
 This installs npm dependencies, compiles the `:libs` target to `dist/libs/`, installs demo-specific npm dependencies, and copies Tree-Sitter WASM and extensions to the demo directory.
 
@@ -111,7 +116,6 @@ Key code snippet from `demo/index.html`:
     const editorRef = React.createRef();
     root.render(React.createElement(Editor, {
       ref: editorRef,
-      language: "rholang",
       languages: {"rholang": RholangExtension},
       extraExtensions: customExtensions
     }));
@@ -122,10 +126,31 @@ Key code snippet from `demo/index.html`:
           console.log('Event:', event.type, event.data);
         });
         editorRef.current.openDocument(
-          "inmemory://demo.rho",
+          "demo.rho",
           "new x in { x!(\"Hello\") | Nil }",
           "rholang"
         );
+        console.log('Text:', editorRef.current.getText());
+        console.log('File path:', editorRef.current.getFilePath());
+        console.log('File URI:', editorRef.current.getFileUri());
+        editorRef.current.openDocument("second.rho", "Nil", "rholang", false); // Example with make-active false
+        editorRef.current.setActiveDocument("demo.rho");
+        editorRef.current.renameDocument("renamed.rho", "second.rho");
+        editorRef.current.setCursor({ line: 1, column: 3 });
+        console.log('Cursor after set:', editorRef.current.getCursor());
+        editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+        console.log('Selection after set:', editorRef.current.getSelection());
+        editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 });
+        editorRef.current.clearHighlight();
+        editorRef.current.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 });
+        editorRef.current.setText("setText text");
+        console.log('Text after setText:', editorRef.current.getText());
+        editorRef.current.setText("setText updated");
+        console.log('Text after setText:', editorRef.current.getText());
+        editorRef.current.saveDocument();
+        console.log('State:', editorRef.current.getState());
+        editorRef.current.closeDocument();
+        subscription.unsubscribe();
       }
     }, 100);
   })();
@@ -153,7 +178,7 @@ The `Editor` component integrates seamlessly into React-based applications. It p
    import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions'; // Optional for Rholang support
    ```
 
-3. Render the component. Use the `Editor` in your JSX. Provide initial props for content, language, and configurations. Use a React ref to access imperative methods.
+3. Render the component. Use the `Editor` in your JSX. Provide initial props for languages and configurations. Use a React ref to access imperative methods.
 
    ```jsx
    import React, { useRef } from 'react';
@@ -164,24 +189,21 @@ The `Editor` component integrates seamlessly into React-based applications. It p
      return (
        <Editor
          ref={editorRef}
-         content="initial code"
-         language="rholang"
          languages={{ rholang: RholangExtension }}
-         onContentChange={(content) => console.log('Content changed:', content)}
        />
      );
    }
    ```
 
-   Props include `content` (initial text as string), `language` (starting language key as string, e.g., `"rholang"`), `languages` (map of language configurations as object), `onContentChange` (callback for content updates as function(content)), and `extraExtensions` (array of additional CodeMirror extensions, optional).
+   Props include `languages` (map of language configurations as object), and `extraExtensions` (array of additional CodeMirror extensions, optional).
 
 For a complete example, refer to the demo app's `resources/public/demo/index.html`. It uses `React.createElement` to render the `Editor` and demonstrates initialization with a ref.
 
 ### Customizing the Editor
 
-Customize the editor using props for initial setup, a ref for commands, and RxJS for events. For detailed examples in JavaScript and TypeScript, see the sections below.
+Customize the editor using a ref for commands, and RxJS for events. For detailed examples in JavaScript and TypeScript, see the sections below.
 
-Use the imperative API (via ref) to access methods like `openDocument(uri, content, lang)`, `setCursor(pos)`, `highlightRange(from, to)`. See "Public API" for the full list.
+Use the imperative API (via ref) to access methods like `openDocument(uri, content?, lang?, makeActive?)`, `setCursor(pos)`, `highlightRange(from, to)`, `getText(uri?)`. See "Public API" for the full list.
 
 For language customization, override or add languages in the `languages` prop. For example, add LSP URL or change indent size.
 
@@ -207,7 +229,7 @@ useEffect(() => {
 }, [editorRef]);
 ```
 
-Key events include `ready` (editor initialized), `content-change` (content updated with {content}), `selection-change` (cursor/selection changed with {cursor, selection}), `document-open` (document opened with {uri, language}), `lsp-initialized` (LSP connection initialized), `diagnostics` (diagnostics updated as array), `symbols-update` (symbols updated as array), and `highlight-change` (highlight range updated or cleared with {from, to} or null).
+Key events include `ready` (editor initialized), `content-change` (content updated with {content, uri}), `selection-change` (cursor/selection changed with {cursor, selection, uri}), `document-open` (document opened with {uri, content, language, activated}), `document-close` (document closed with {uri}), `document-rename` (document renamed with {old-uri, new-uri}), `document-save` (document saved with {uri, content}), `lsp-message` (raw LSP message with {method, params, ...}), `lsp-initialized` (LSP connection initialized), `diagnostics` (diagnostics updated as array with uri in each), `symbols` (symbols updated as array with uri in each), `log` (log message with {message}), `connect` (LSP connected), `disconnect` (LSP disconnected), `lsp-error` (LSP error with {code, message}), `highlight-change` (highlight range updated or cleared with {from, to} or null).
 
 For a practical example, see the demo app's interval-based check for `isReady()` and subscription to events.
 
@@ -241,14 +263,16 @@ Lightning Bug supports pluggable language extensions via the `languages` prop. T
 
 Each language configuration can include the following attributes:
 
-- `grammarWasm`: String path to the Tree-Sitter grammar WASM file for syntax parsing.
-- `highlightQueryPath`: String path to the SCM query file for syntax highlighting captures.
-- `indentsQueryPath`: String path to the SCM query file for indentation rules.
-- `lspUrl`: String WebSocket URL for connecting to a Language Server Protocol (LSP) server (optional, enables advanced features like diagnostics and symbols).
-- `extensions`: Array of strings representing file extensions associated with the language (required, e.g., `[".rho"]`).
-- `fileIcon`: String CSS class for the file icon in the UI (optional, e.g., `"fas fa-code"`).
-- `fallbackHighlighter`: String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `"none"`).
-- `indentSize`: Integer specifying the number of spaces for indentation (optional, defaults to 2).
+| Attribute              | Type      | Required | Description                                                                 |
+|------------------------|-----------|----------|-----------------------------------------------------------------------------|
+| `grammarWasm`          | `string`    | No       | Path to the Tree-Sitter grammar WASM file for syntax parsing.               |
+| `highlightQueryPath`   | `string`    | No       | Path to the SCM query file for syntax highlighting captures.                |
+| `indentsQueryPath`     | `string`    | No       | Path to the SCM query file for indentation rules.                           |
+| `lspUrl`               | `string`    | No       | WebSocket URL for connecting to a Language Server Protocol (LSP) server (optional, enables advanced features like diagnostics and symbols). |
+| `extensions`           | `string[]`  | Yes      | Array of strings representing file extensions associated with the language (required, e.g., `[\".rho\"]`). |
+| `fileIcon`             | `string`    | No       | String CSS class for the file icon in the UI (optional, e.g., `\"fas fa-code\"`). |
+| `fallbackHighlighter`  | `string`    | No       | String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `\"none\"`). |
+| `indentSize`           | `integer`   | No       | Integer specifying the number of spaces for indentation (optional, defaults to 2). |
 
 For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` during postinstall.
 
@@ -280,7 +304,7 @@ const customLanguages = {
   }
 };
 
-<Editor languages={customLanguages} language="customLang" ... />
+<Editor languages={customLanguages} />
 ```
 
 In TypeScript, use the provided types for validation.
@@ -289,82 +313,132 @@ This configuration is normalized internally (camelCase to kebab-case). Invalid c
 
 ## Public API
 
-### Editor Component
+The public API consists of the `Editor` React component's props, imperative methods accessible via a React ref, and RxJS events emitted for lifecycle and state changes. All types are defined in `types/lib.d.ts` for TypeScript users.
 
-The `Editor` is a React component exported from the `:libs` target. Props (camelCase in JS) include:
+### Editor Component Props
 
-- `content`: Initial content (string).
-- `language`: Language key (string, e.g., `"rholang"`).
-- `languages`: Map of language configs (object, e.g., `{"rholang": RholangExtension}`).
-- `onContentChange`: Callback for content changes (function(content)).
-- `extraExtensions`: Array of additional CodeMirror extensions to extend/override defaults.
+The `Editor` component accepts the following props for initialization and configuration.
 
-Example (JSX/JS):
+| Prop Name          | Type                                      | Required | Description                                                                                            |
+|--------------------|-------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|
+| `languages`        | `Record<string, LanguageConfig>`          | No       | Map of language keys to their configurations. Merges with built-in defaults like `"text"`.             |
+| `extraExtensions`  | `Extension[]`                             | No       | Array of additional CodeMirror extensions (from `@codemirror/*` packages) to extend/override defaults. |
 
-```jsx
-<Editor
-  content="new x in { x!('Hello') }"
-  language="rholang"
-  languages={{ rholang: RholangExtension }}
-  extraExtensions={[myCustomExtension]}
-  onContentChange={(content) => console.log(content)}
-/>
+#### LanguageConfig Schema
+
+```typescript
+interface LanguageConfig {
+  grammarWasm?: string;          // Path to Tree-Sitter grammar WASM file.
+  highlightQueryPath?: string;   // Path to SCM query file for syntax highlighting.
+  indentsQueryPath?: string;     // Path to SCM query file for indentation rules.
+  lspUrl?: string;               // WebSocket URL for LSP server (enables diagnostics/symbols).
+  extensions: string[];          // File extensions associated with the language (required, e.g., [".rho"]).
+  fileIcon?: string;             // CSS class for file icon (e.g., "fas fa-code").
+  fallbackHighlighter?: string;  // Fallback mode if Tree-Sitter fails (e.g., "none").
+  indentSize?: number;           // Spaces per indent level (defaults to 2).
+}
 ```
 
-### Imperative Methods (via React ref)
+### Imperative Methods (via React Ref)
 
-- `getState()`: Returns editor state (object with `content`, `language`, `diagnostics`, `symbols`).
-- `setContent(content)`: Sets content.
-- `getEvents()`: Returns RxJS observable for events.
-- `getCursor()`: Returns cursor position `{line, column}`.
-- `setCursor(pos)`: Sets cursor `{line, column}`.
-- `getSelection()`: Returns selection `{from: {line, column}, to: {line, column}, text}` or null.
-- `setSelection(from, to)`: Sets selection range.
-- `openDocument(uri, content, lang)`: Opens a document.
-- `closeDocument()`: Closes current document.
-- `renameDocument(newName)`: Renames current document.
-- `saveDocument()`: Saves (notifies LSP via `didSave`).
-- `isReady()`: Returns boolean if editor is initialized.
-- `highlightRange(from, to)`: Highlights range `{line, column}`.
-- `clearHighlight()`: Clears highlight.
-- `centerOnRange(from, to)`: Scrolls to center on range.
-- `setText(text)`: Replaces the entire editor text (similar to setContent but directly updates the document).
+Use a React ref to access these methods for runtime control. All positions are 1-based (line/column starting at 1).
+
+| Method Name       | Parameters                                                                           | Return Type                                                                                             | Description                                                                                             | Example |
+|-------------------|--------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|---------|
+| `getState`        | none                                                                                 | `EditorState`                                                                                           | Returns the full current state (workspace, diagnostics, symbols, etc.).                                 | editor.getState(); |
+| `getEvents`       | none                                                                                 | `Observable<{ type: string; data: any }>`                                                               | Returns RxJS observable for subscribing to events.                                                      | editor.getEvents().subscribe(event => console.log(event.type, event.data)); |
+| `getCursor`       | none                                                                                 | `{ line: number; column: number }`                                                                      | Returns current cursor position (1-based) for active document.                                          | editor.getCursor(); |
+| `setCursor`       | `pos: { line: number; column: number }`                                              | `void`                                                                                                  | Sets cursor position for active document (triggers `selection-change` event).                           | editor.setCursor({ line: 1, column: 3 }); |
+| `getSelection`    | none                                                                                 | `{ from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null` | Returns current selection range and text for active document, or `null` if no selection.                | editor.getSelection(); |
+| `setSelection`    | `from`: `{ line: number; column: number }`, `to`: `{ line: number; column: number }` | `void`                                                                                                  | Sets selection range for active document (triggers `selection-change` event).                           | editor.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 }); |
+| `openDocument`    | `uri`: `string`, `content?`: `string`, `lang?`: `string`, `makeActive?`: `boolean` = `true` | `void`                                                                                                  | Opens or activates a document with URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. | editor.openDocument("demo.rho", "content", "rholang");<br>editor.openDocument("demo.rho"); // activates existing<br>editor.openDocument("demo.rho", null, null, false); // opens without activating |
+| `closeDocument`   | `uri?`: `string`                                                                     | `void`                                                                                                  | Closes the specified or active document (triggers `document-close`). Notifies LSP if open.              | editor.closeDocument();<br>editor.closeDocument("specific-uri"); |
+| `renameDocument`  | `newName: string`, `oldUri?`: `string`                                               | `void`                                                                                                  | Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.       | editor.renameDocument("new-name.rho");<br>editor.renameDocument("new-name.rho", "old-uri"); |
+| `saveDocument`    | `uri?`: `string`                                                                     | `void`                                                                                                  | Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.          | editor.saveDocument();<br>editor.saveDocument("specific-uri"); |
+| `isReady`         | none                                                                                 | `boolean`                                                                                               | Returns `true` if editor is initialized and ready for methods.                                          | editor.isReady(); |
+| `highlightRange`  | `from`: `{ line: number; column: number }`, `to`: `{ line: number; column: number }` | `void`                                                                                                  | Highlights a range in active document (triggers `highlight-change` with range).                         | editor.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 }); |
+| `clearHighlight`  | none                                                                                 | `void`                                                                                                  | Clears highlight in active document (triggers `highlight-change` with `null`).                          | editor.clearHighlight(); |
+| `centerOnRange`   | `from`: `{ line: number; column: number }`, `to`: `{ line: number; column: number }` | `void`                                                                                                  | Scrolls to center on a range in active document.                                                        | editor.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 }); |
+| `getText`         | `uri?`: `string`                                                                     | `string | null`                                                                                         | Returns text for specified or active document, or `null` if not found.                                 | editor.getText();<br>editor.getText("specific-uri"); |
+| `setText`         | `text: string`, `uri?`: `string`                                                     | `void`                                                                                                  | Replaces entire text for specified or active document (triggers `content-change`).                      | editor.setText("new text");<br>editor.setText("new text", "specific-uri"); |
+| `getFilePath`     | `uri?`: `string`                                                                     | `string | null`                                                                                         | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.                       | editor.getFilePath();<br>editor.getFilePath("specific-uri"); |
+| `getFileUri`      | `uri?`: `string`                                                                     | `string | null`                                                                                         | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.           | editor.getFileUri();<br>editor.getFileUri("specific-uri"); |
+| `setActiveDocument` | `uri: string`                                                                      | `void`                                                                                                  | Sets the active document if exists, loads content to view, opens in LSP if not.                         | editor.setActiveDocument("demo.rho"); |
+
+#### EditorState Schema (Return Value for getState)
+
+```typescript
+interface EditorState {
+  workspace: {
+    documents: Record<string, {
+      content: string;
+      language: string;
+      version: number;
+      dirty: boolean;
+      opened: boolean;
+    }>;
+    activeUri: string | null;
+  };
+  cursor: { line: number; column: number };
+  selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null;
+  lsp: {
+    connection: boolean;
+    url: string | null;
+    pending: Record<number, string>;
+    initialized?: boolean;
+    logs: Array<{ message: string }>;
+  };
+  languages: Record<string, LanguageConfig>;
+  diagnostics: Array<{
+    document: { uri: string; version?: number };
+    diagnostic: { message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number };
+    type: 'diagnostic';
+  }>;
+  symbols: Array<{
+    symbol: {
+      name: string;
+      kind: number;
+      startLine: number;
+      startChar: number;
+      endLine: number;
+      endChar: number;
+      selectionStartLine: number;
+      selectionStartChar: number;
+      selectionEndLine: number;
+      selectionEndChar: number;
+      parent?: number;
+    };
+    type: 'symbol';
+  }>;
+}
+```
 
 ### RxJS Events
 
-Subscribe to events via `editorRef.current.getEvents().subscribe(event => { ... })`.
+Subscribe to events via `getEvents()` for reactive updates. Each event is an object with `type` (string) and `data` (object or null).
 
-Available events (`event.type`) include:
-
-- `ready`: Editor initialized.
-- `content-change`: Content updated ({content}).
-- `selection-change`: Selection/cursor changed ({cursor: {line, column}, selection}).
-- `document-open`: Document opened ({uri, language}).
-- `document-close`: Document closed ({uri}).
-- `document-rename`: Document renamed ({old-uri, new-uri, name}).
-- `document-save`: Document saved ({uri, content}).
-- `lsp-message`: Raw LSP message ({method, params, ...}).
-- `lsp-initialized`: LSP initialized.
-- `diagnostics`: Diagnostics updated (array).
-- `symbols-update`: Symbols updated (array).
-- `log`: Log message ({message}).
-- `connect`: LSP connected.
-- `disconnect`: LSP disconnected.
-- `lsp-error`: LSP error ({code, message}).
-- `highlight-change`: Highlight range updated ({from: {line, column}, to: {line, column}}) or `null` on clear.
-
-Subscribe example:
-
-```js
-const subscription = editorRef.current.getEvents().subscribe(event => {
-  console.log(event.type, event.data);
-});
-subscription.unsubscribe(); // Cleanup
-```
+| Event Type           | Data Schema                                                                   | Description                   |
+|----------------------|-------------------------------------------------------------------------------|-------------------------------|
+| `ready`              | `null`                                                                        | Editor initialized and ready. |
+| `content-change`     | `{ content: string, uri: string }`                                            | Content updated (e.g., typing or setText). |
+| `selection-change`   | `{ cursor: { line: number; column: number }; selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null, uri: string }` | Cursor or selection changed. |
+| `document-open`      | `{ uri: string; content: string; language: string; activated: boolean }`                          | Document opened or activated (activated true if made active). |
+| `document-close`     | `{ uri: string }`                                                             | Document closed. |
+| `document-rename`    | `{ old-uri: string; new-uri: string }`                                        | Document renamed. |
+| `document-save`      | `{ uri: string; content: string }`                                            | Document saved (LSP notified). |
+| `lsp-message`        | `{ method: string; params?: any; id?: number; result?: any; error?: any }`    | Raw LSP message received. |
+| `lsp-initialized`    | `null`                                                                        | LSP connection initialized. |
+| `diagnostics`        | `Array<{ uri: string; message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number }>` | Diagnostics updated from LSP. |
+| `symbols`            | `Array<{ uri: string; name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number }>` | Symbols updated from LSP. |
+| `log`                | `{ message: string }`                                                         | Log message from LSP. |
+| `connect`            | `null`                                                                        | LSP connected. |
+| `disconnect`         | `null`                                                                        | LSP disconnected. |
+| `lsp-error`          | `{ code: number; message: string }`                                           | LSP error occurred. |
+| `highlight-change`   | `{ from: { line: number; column: number }; to: { line: number; column: number } } | null` | Highlight range updated or cleared. |
 
 ## Customizing the Editor Component
 
-The `Editor` component can be customized using props for initial setup and a React ref for imperative control. This allows dynamic interactions without modifying the Lightning Bug source code. Below are step-by-step guides for vanilla JavaScript and TypeScript.
+The `Editor` can be customized using props for initial setup and a React ref for imperative control. This allows dynamic interactions without modifying the Lightning Bug source code. Below are step-by-step guides for vanilla JavaScript and TypeScript.
 
 ### Customizing with Vanilla JavaScript
 
@@ -398,10 +472,7 @@ The `Editor` component can be customized using props for initial setup and a Rea
    const editorRef = React.createRef();
    root.render(React.createElement(Editor, {
      ref: editorRef,
-     content: 'initial content',
-     language: 'rholang',
-     languages: { rholang: RholangExtension },
-     onContentChange: (content) => console.log('Content changed:', content)
+     languages: { rholang: RholangExtension }
    }));
    ```
 
@@ -414,12 +485,12 @@ The `Editor` component can be customized using props for initial setup and a Rea
        // Subscribe to events
        const sub = editorRef.current.getEvents().subscribe(event => console.log(event.type, event.data));
        // Open a document
-       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!("Hello") }', 'rholang');
+       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!(\"Hello\") }', 'rholang');
        // Get state
        const state = editorRef.current.getState();
-       console.log('State:', state.content, state.language);
+       console.log('State:', state.workspace.documents, state.workspace.activeUri);
        // Set content
-       editorRef.current.setContent('updated content');
+       editorRef.current.setText('updated');
        // Get cursor
        const cursor = editorRef.current.getCursor();
        console.log('Cursor:', cursor.line, cursor.column);
@@ -434,7 +505,7 @@ The `Editor` component can be customized using props for initial setup and a Rea
        editorRef.current.closeDocument();
        // Rename document (after reopening)
        editorRef.current.openDocument('inmemory://old.rho', 'content', 'rholang');
-       editorRef.current.renameDocument('new.rho');
+       editorRef.current.renameDocument('new.rho', 'inmemory://old.rho');
        // Save document
        editorRef.current.saveDocument();
        // Highlight range
@@ -443,8 +514,13 @@ The `Editor` component can be customized using props for initial setup and a Rea
        editorRef.current.clearHighlight();
        // Center on range
        editorRef.current.centerOnRange({ line: 2, column: 1 }, { line: 2, column: 10 });
+       // Get text
+       const text = editorRef.current.getText();
+       console.log('Text:', text);
        // Set text (replace all)
        editorRef.current.setText('new text');
+       // Switch active
+       editorRef.current.setActiveDocument('inmemory://new.rho');
        // Unsubscribe
        sub.unsubscribe();
      }
@@ -470,7 +546,7 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
 
    const root = createRoot(document.getElementById('app')!);
    const editorRef = createRef<EditorRef>();
-   root.render(<Editor ref={editorRef} content="initial" language="rholang" languages={languages} onContentChange={(content) => console.log(content)} />);
+   root.render(<Editor ref={editorRef} languages={languages} />);
    ```
 
 2. Use ref methods. Type-safe access to methods.
@@ -480,10 +556,10 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
      if (editorRef.current && editorRef.current.isReady()) {
        clearInterval(interval);
        const sub: Subscription = editorRef.current.getEvents().subscribe((event: { type: string; data: any }) => console.log(event.type, event.data));
-       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!("Hello") }', 'rholang');
+       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!(\"Hello\") }', 'rholang');
        const state = editorRef.current.getState();
-       console.log('State:', state.content, state.language);
-       editorRef.current.setContent('updated');
+       console.log('State:', state.workspace.documents, state.workspace.activeUri);
+       editorRef.current.setText('updated');
        const cursor = editorRef.current.getCursor();
        console.log('Cursor:', cursor.line, cursor.column);
        editorRef.current.setCursor({ line: 1, column: 5 });
@@ -492,12 +568,15 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
        editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
        editorRef.current.closeDocument();
        editorRef.current.openDocument('inmemory://old.rho', 'content', 'rholang');
-       editorRef.current.renameDocument('new.rho');
+       editorRef.current.renameDocument('new.rho', 'inmemory://old.rho');
        editorRef.current.saveDocument();
        editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 5 });
        editorRef.current.clearHighlight();
        editorRef.current.centerOnRange({ line: 2, column: 1 }, { line: 2, column: 10 });
+       const text = editorRef.current.getText();
+       console.log('Text:', text);
        editorRef.current.setText('new text');
+       editorRef.current.setActiveDocument('inmemory://new.rho');
        sub.unsubscribe();
      }
    }, 100);
@@ -509,16 +588,28 @@ The `Editor` can be styled using CSS classes and Bootstrap utilities without mod
 
 ### Customizable CSS Classes
 
-- `.code-editor`: Wrapper for the entire editor (set height/width).
-- `.cm-editor`: CodeMirror editor container (background, borders).
-- `.cm-content`: Editable content area (font, padding, colors).
-- `.cm-gutters`: Gutter for line numbers (background, alignment).
-- `.cm-lineNumbers .cm-gutterElement`: Individual line numbers (text alignment, padding).
-- `.status-bar`: Bottom status bar (background, padding, colors).
-- `.cm-keyword`, `.cm-number`, `.cm-string`, `.cm-boolean`, `.cm-variable`, `.cm-comment`, `.cm-operator`, `.cm-type`, `.cm-function`, `.cm-constant`: Syntax highlighting classes.
-- `.cm-error-underline`, `.cm-warning-underline`, `.cm-info-underline`, `.cm-hint-underline`: Diagnostic underlines.
-- `.cm-highlight`: Highlighted range background.
-- `.logs-panel`, `.logs-header`, `.logs-content`: Logs panel components.
+| Class                         | Description                                      |
+|-------------------------------|--------------------------------------------------|
+| `.code-editor`                | Wrapper for the entire editor (set height/width).|
+| `.cm-editor`                  | CodeMirror editor container (background, borders). |
+| `.cm-content`                 | Editable content area (font, padding, colors).   |
+| `.cm-gutters`                 | Gutter for line numbers (background, alignment).|
+| `.cm-lineNumbers .cm-gutterElement` | Individual line numbers (text alignment, padding). |
+| `.cm-keyword`                 | Keyword syntax highlighting.                     |
+| `.cm-number`                  | Number syntax highlighting.                      |
+| `.cm-string`                  | String syntax highlighting.                      |
+| `.cm-boolean`                 | Boolean syntax highlighting.                     |
+| `.cm-variable`                | Variable syntax highlighting.                    |
+| `.cm-comment`                 | Comment syntax highlighting.                     |
+| `.cm-operator`                | Operator syntax highlighting.                    |
+| `.cm-type`                    | Type syntax highlighting.                        |
+| `.cm-function`                | Function syntax highlighting.                    |
+| `.cm-constant`                | Constant syntax highlighting.                    |
+| `.cm-error-underline`         | Error diagnostic underline.                      |
+| `.cm-warning-underline`       | Warning diagnostic underline.                    |
+| `.cm-info-underline`          | Info diagnostic underline.                       |
+| `.cm-hint-underline`          | Hint diagnostic underline.                       |
+| `.cm-highlight`               | Highlighted range background.                    |
 
 ### Styling with CSS
 

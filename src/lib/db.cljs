@@ -3,7 +3,8 @@
    [clojure.spec.alpha :as s]
    [taoensso.timbre :as log]))
 
-(def schema {:symbol/parent {:db/valueType :db.type/ref}})
+(def schema {:symbol/parent {:db/valueType :db.type/ref}
+             :document/uri {:db/unique :db.unique/identity}})
 
 (s/def :document/uri string?)
 (s/def :document/version nat-int?)
@@ -68,8 +69,8 @@
 
 (defn flatten-symbols
   "Flattens hierarchical LSP symbols into a list for datascript transaction,
-  assigning negative db/ids to avoid conflicts."
-  [symbols parent-id]
+  assigning negative db/ids to avoid conflicts. Adds uri to each."
+  [symbols parent-id uri]
   (let [id-counter (atom -1)]
     (letfn [(flatten-rec [syms parent]
               (mapcat (fn [s]
@@ -91,7 +92,8 @@
                                                 :symbol/selection-start-line (:line sel-start 0)
                                                 :symbol/selection-start-char (:character sel-start 0)
                                                 :symbol/selection-end-line (:line sel-end 0)
-                                                :symbol/selection-end-char (:character sel-end 0))
+                                                :symbol/selection-end-char (:character sel-end 0)
+                                                :document/uri uri)
                                    parent (assoc :symbol/parent parent))
                               children (:children s)]
                           (cons s' (when children (flatten-rec children sid)))))
@@ -135,8 +137,9 @@
     valid-tx))
 
 (defn symbols-tx
-  [hier-symbols]
-  (let [tx (map (fn [s]
+  [hier-symbols uri]
+  (let [flat (flatten-symbols hier-symbols nil uri)
+        tx (map (fn [s]
                   (cond-> {:symbol/name (:symbol/name s)
                            :symbol/kind (:symbol/kind s)
                            :symbol/start-line (:symbol/start-line s)
@@ -148,8 +151,9 @@
                            :symbol/selection-end-line (:symbol/selection-end-line s)
                            :symbol/selection-end-char (:symbol/selection-end-char s)
                            :db/id (:db/id s)
+                           :document/uri (:document/uri s)
                            :type :symbol}
-                    (:symbol/parent s) (assoc :symbol/parent (:symbol/parent s)))) hier-symbols)
+                    (:symbol/parent s) (assoc :symbol/parent (:symbol/parent s)))) flat)
         valid-tx (filter valid-symbol? tx)]
     (when-not (= (count tx) (count valid-tx))
       (log/warn "Filtered" (- (count tx) (count valid-tx)) "invalid symbols"))

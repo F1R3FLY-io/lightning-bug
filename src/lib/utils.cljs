@@ -16,3 +16,18 @@
             c (if one-based? (dec col) col)
             max-c (.-length line)]
         (+ (.-from line) (min (max c 0) max-c))))))
+
+(defn debounce
+  "Returns a debounced version of function f that delays invocation by ms milliseconds.
+  Clears any existing timer before scheduling a new one."
+  [f ms]
+  (let [timer (atom nil)]
+    (fn [& args]
+      (when @timer (js/clearTimeout @timer))
+      (reset! timer (js/setTimeout #(apply f args) ms)))))
+
+(defn split-uri
+  "Splits a URI into its protocol and file path"
+  [uri]
+  (let [[_ protocol path] (re-find #"^([a-zA-Z]+:/{0,2})?(.*)$" uri)]
+    [protocol path]))

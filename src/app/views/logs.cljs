@@ -4,8 +4,7 @@
     [app.events :as e]
     [re-com.core :as rc]
     [re-frame.core :as rf]
-    [reagent.core :as r]
-    [taoensso.timbre :as log]))
+    [reagent.core :as r]))
 
 (defn logs-content
   "Inner React functional component for rendering the logs content.
@@ -14,20 +13,15 @@
   (let [content-ref (react/useRef nil)]
     (react/useEffect
       (fn []
-        (log/trace "useEffect in logs-content triggered, visible?:" visible?)
         (if (and visible? (.-current content-ref))
           (let [observer (js/ResizeObserver.
                            (fn [entries]
                              (let [new-height (.-offsetHeight (.-target (first entries)))]
-                               (log/trace "ResizeObserver detected new height:" new-height)
                                (on-resize new-height))))]
             (.observe observer (.-current content-ref))
             (fn []
-              (log/trace "Cleaning up ResizeObserver in logs-content")
               (.disconnect observer)))
-          (do
-            (log/trace "useEffect skipped: not visible or no ref")
-            js/undefined)))
+          js/undefined))
       #js [visible?])
     [:div.logs-content
      {:ref content-ref
@@ -69,7 +63,6 @@
   (let [visible? @(rf/subscribe [:logs-visible?])
         diags @(rf/subscribe [:lsp/diagnostics])
         height @(rf/subscribe [:logs-height])]
-    (log/debug "Rendering logs panel, visible?:" visible? ", diagnostics count:" (count diags))
     [:div.logs-panel
      {:style {:display "flex"
               :flex-direction "column-reverse"

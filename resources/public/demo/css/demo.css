@@ -37,15 +37,6 @@ html, body, #app {
     padding-left: 1em !important; /* Add padding for better spacing */
 }
 
-/* Style for the status bar */
-.status-bar {
-    background-color: #1e2936 !important;
-    border-top: 1px solid #283747 !important;
-    padding: 0.5em 1em;
-    color: #83b0be !important;
-    font-family: monospace;
-}
-
 .cm-keyword { color: #00bfff; }
 .cm-number { color: #c71585; }
 .cm-string { color: #32cd32; }
@@ -71,30 +62,6 @@ html, body, #app {
 
 .cm-hint-underline {
     text-decoration: underline dotted gray;
-}
-
-.logs-panel {
-    border-top: 1px solid #283747 !important;
-    background-color: #161e27;
-    color: #f1f3f5;
-}
-
-.logs-panel .logs-header {
-    background-color: #161e27;
-    color: #f1f3f5;
-}
-
-.logs-panel > .rc-button-wrapper {
-    border-bottom: 1px solid #283747 !important;
-}
-
-.logs-content {
-    background-color: #161e27;
-}
-
-.logs-panel > .rc-button-wrapper > button {
-    background-color: #161e27;
-    color: #f1f3f5;
 }
 
 .cm-highlight {

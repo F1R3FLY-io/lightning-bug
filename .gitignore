@@ -5,14 +5,17 @@
 !*/
 
 # Include specific file patterns
+!/CHANGELOG.md
 !/deps.edn
+!/.github/workflows/*.yaml
 !/.gitignore
 !/LICENSE.txt
 !/NOTICE.txt
+!/.npmrc
 !/package.json
 !/README.md
-!/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
 !/resources/public/**/*.css
+!/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
 !/resources/public/**/*.html
 !/scripts/**/*.sh
 !/shadow-cljs.edn

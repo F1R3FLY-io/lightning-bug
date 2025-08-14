@@ -21,16 +21,13 @@
   Creates React root only once; reuses for updates/hot-reloads.
   Clears subscription cache before rendering."
   []
-  (log/info "Mounting/updating root component with React 18")
+  (log/info "Mounting/updating root component")
   (rf/clear-subscription-cache!)
   (let [container (js/document.getElementById "app")]
     (when container
       (when (nil? app-root)
-        (set! app-root (rd/createRoot container))
-        (log/debug "Created new React root for container"))
-      (log/debug "Rendering root component to DOM")
-      (.render app-root (r/as-element [root-component]))
-      (log/info "Root component rendered/updated successfully"))
+        (set! app-root (rd/createRoot container)))
+      (.render app-root (r/as-element [root-component])))
     (when-not container
       (log/warn "No target container for mount; skipping"))))
 

@@ -41,12 +41,12 @@
       const { Editor } = await import('@f1r3fly-io/lightning-bug');
       const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
       const { defaultKeymap } = await import('@codemirror/commands');  // Real import example
-      const customExtensions = [defaultKeymap];  // Use the valid export
+      const { keymap } = await import('@codemirror/view');  // Import keymap for wrapping
+      const customExtensions = [keymap.of(defaultKeymap)];  // Wrap with keymap.of
       const root = createRoot(document.getElementById('app'));
       const editorRef = React.createRef();
       root.render(React.createElement(Editor, {
         ref: editorRef,
-        language: "rholang",
         languages: {"rholang": RholangExtension},
         extraExtensions: customExtensions
       }));
@@ -57,10 +57,31 @@
             console.log('Event:', event.type, event.data);
           });
           editorRef.current.openDocument(
-            "inmemory://demo.rho",
+            "demo.rho",
             "new x in { x!(\"Hello\") | Nil }",
             "rholang"
           );
+          console.log('Text:', editorRef.current.getText());
+          console.log('File path:', editorRef.current.getFilePath());
+          console.log('File URI:', editorRef.current.getFileUri());
+          editorRef.current.openDocument("second.rho", "Nil");
+          editorRef.current.setActiveDocument("demo.rho");
+          editorRef.current.renameDocument("renamed.rho", "second.rho");
+          editorRef.current.setCursor({ line: 1, column: 3 });
+          console.log('Cursor after set:', editorRef.current.getCursor());
+          editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+          console.log('Selection after set:', editorRef.current.getSelection());
+          editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 });
+          editorRef.current.clearHighlight();
+          editorRef.current.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 });
+          editorRef.current.setText("setText text");
+          console.log('Text after setText:', editorRef.current.getText());
+          editorRef.current.setText("setText updated");
+          console.log('Text after setText:', editorRef.current.getText());
+          editorRef.current.saveDocument();
+          console.log('State:', editorRef.current.getState());
+          editorRef.current.closeDocument();
+          subscription.unsubscribe();
         }
       }, 100);
     })();
