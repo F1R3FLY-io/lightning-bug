@@ -11,6 +11,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      GITHUB_NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     permissions:
       packages: write
@@ -38,5 +40,3 @@ jobs:
 
       - name: Publish to GitHub Packages
         run: npm publish --access public
-        env:
-          GITHUB_NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
