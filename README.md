@@ -44,7 +44,7 @@ Install the Clojure CLI tools. Install Node.js dependencies with `npm install`. 
 |--------|-------------|-----------------|---------------|-----------------|
 | `:libs` | Core library and extensions | `npx shadow-cljs compile libs` | `npx shadow-cljs watch libs` | `npx shadow-cljs release libs` |
 | `:app` | Full development app with Re-frame UI | `npx shadow-cljs compile app` | `npx shadow-cljs watch app` | - |
-| `:demo` | Minimal standalone demo | - | `npx shadow-cljs watch demo` | - |
+| `:demo` | Minimal standalone demo | `npm run build:demo` | `npx shadow-cljs watch demo` | - |
 | `:test` | Browser tests | - | `npx shadow-cljs watch test` | - |
 
 For multiple targets, run `npx shadow-cljs watch libs app test`.
