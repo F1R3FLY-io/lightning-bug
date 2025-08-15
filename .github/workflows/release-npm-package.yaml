@@ -29,6 +29,11 @@ jobs:
           node-version: "20"
           cache: npm
 
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@master
+        with:
+          cli: latest
+
       - name: Install dependencies
         run: npm install
 
