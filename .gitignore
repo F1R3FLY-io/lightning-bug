@@ -13,6 +13,7 @@
 !/NOTICE.txt
 !/.npmrc
 !/package.json
+!/package-lock.json
 !/README.md
 !/resources/public/**/*.css
 !/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
