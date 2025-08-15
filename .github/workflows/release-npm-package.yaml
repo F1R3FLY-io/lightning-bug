@@ -29,17 +29,29 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+          cache-dependency-path: package.json
 
-      - name: Setup Java
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '23'
 
-      - name: Setup Clojure
+      - name: Set up Clojure
         uses: DeLaGuardo/setup-clojure@master
         with:
           cli: latest
+
+      - name: Cache clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+            .cpcache
+          key: cljdeps-${{ hashFiles('deps.edn') }}
+          restore-keys: cljdeps-
 
       - name: Install dependencies
         run: npm install
@@ -51,4 +63,4 @@ jobs:
         run: npx shadow-cljs release libs
 
       - name: Publish to GitHub Packages
-        run: npm publish --no-git-checks --access public
+        run: npm publish --access public
