@@ -127,7 +127,7 @@ Key code snippet from `demo/index.html`:
         });
         editorRef.current.openDocument(
           "demo.rho",
-          "new x in { x!(\"Hello\") | Nil }",
+          'new x in { x!("Hello") | Nil }',
           "rholang"
         );
         console.log('Text:', editorRef.current.getText());
@@ -269,9 +269,9 @@ Each language configuration can include the following attributes:
 | `highlightQueryPath`   | `string`    | No       | Path to the SCM query file for syntax highlighting captures.                |
 | `indentsQueryPath`     | `string`    | No       | Path to the SCM query file for indentation rules.                           |
 | `lspUrl`               | `string`    | No       | WebSocket URL for connecting to a Language Server Protocol (LSP) server (optional, enables advanced features like diagnostics and symbols). |
-| `extensions`           | `string[]`  | Yes      | Array of strings representing file extensions associated with the language (required, e.g., `[\".rho\"]`). |
-| `fileIcon`             | `string`    | No       | String CSS class for the file icon in the UI (optional, e.g., `\"fas fa-code\"`). |
-| `fallbackHighlighter`  | `string`    | No       | String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `\"none\"`). |
+| `extensions`           | `string[]`  | Yes      | Array of strings representing file extensions associated with the language (required, e.g., `[".rho"]`). |
+| `fileIcon`             | `string`    | No       | String CSS class for the file icon in the UI (optional, e.g., `"fas fa-code"`). |
+| `fallbackHighlighter`  | `string`    | No       | String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `"none"`). |
 | `indentSize`           | `integer`   | No       | Integer specifying the number of spaces for indentation (optional, defaults to 2). |
 
 For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` during postinstall.
@@ -485,7 +485,7 @@ The `Editor` can be customized using props for initial setup and a React ref for
        // Subscribe to events
        const sub = editorRef.current.getEvents().subscribe(event => console.log(event.type, event.data));
        // Open a document
-       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!(\"Hello\") }', 'rholang');
+       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!("Hello") }', 'rholang');
        // Get state
        const state = editorRef.current.getState();
        console.log('State:', state.workspace.documents, state.workspace.activeUri);
@@ -556,7 +556,7 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
      if (editorRef.current && editorRef.current.isReady()) {
        clearInterval(interval);
        const sub: Subscription = editorRef.current.getEvents().subscribe((event: { type: string; data: any }) => console.log(event.type, event.data));
-       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!(\"Hello\") }', 'rholang');
+       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!("Hello") }', 'rholang');
        const state = editorRef.current.getState();
        console.log('State:', state.workspace.documents, state.workspace.activeUri);
        editorRef.current.setText('updated');
