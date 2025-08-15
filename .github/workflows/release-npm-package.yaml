@@ -29,7 +29,13 @@ jobs:
           node-version: "20"
           cache: npm
 
-      - name: Install Clojure
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '23'
+
+      - name: Setup Clojure
         uses: DeLaGuardo/setup-clojure@master
         with:
           cli: latest
