@@ -166,7 +166,7 @@
   (let [style-js (clj->js style-map)
         build-decorations (fn [view-or-update]
                             (let [view (if (.-view view-or-update) (.-view view-or-update) view-or-update)
-                                  state (.-state view)
+                                  ^js state (.-state view)
                                   ^js lang-state (.field state language-state-field false)
                                   tree (when lang-state (.-tree lang-state))
                                   doc (.-doc state)
@@ -178,7 +178,7 @@
                                       captures (.captures ^js highlight-query (.-rootNode ^js tree) start-point end-point)]
                                   (doseq [capture captures]
                                     (let [cls (aget style-js (.-name capture))
-                                          node (.-node capture)]
+                                          node ^js (.-node capture)]
                                       (when cls
                                         (.add builder (.-startIndex node) (.-endIndex node) (.mark Decoration #js {:class cls})))))
                                   (.finish builder)))))]

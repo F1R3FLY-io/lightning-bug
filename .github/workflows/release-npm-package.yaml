@@ -15,6 +15,7 @@ jobs:
       GITHUB_NPM_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     permissions:
+      contents: write
       packages: write
 
     steps:
@@ -26,7 +27,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
 
       - name: Setup Java
@@ -50,4 +51,4 @@ jobs:
         run: npx shadow-cljs release libs
 
       - name: Publish to GitHub Packages
-        run: npm publish --access public
+        run: npm publish --no-git-checks --access public

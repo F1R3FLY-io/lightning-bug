@@ -21,13 +21,13 @@
 
 (def diagnostic-lint
   (linter (fn [view]
-            (let [diags (.field (.-state view) diagnostic-field false)]
+            (let [diags (.field ^js (.-state view) diagnostic-field false)]
               (clj->js (map (fn [^js diag]
-                              #js {:from (u/pos-to-offset (.-doc (.-state view))
+                              #js {:from (u/pos-to-offset (.-doc ^js (.-state view))
                                                           {:line (inc (.-startLine diag))
                                                            :column (inc (.-startChar diag))}
                                                           true)
-                                   :to (u/pos-to-offset (.-doc (.-state view))
+                                   :to (u/pos-to-offset (.-doc ^js (.-state view))
                                                         {:line (inc (.-endLine diag))
                                                          :column (inc (.-endChar diag))}
                                                         true)
