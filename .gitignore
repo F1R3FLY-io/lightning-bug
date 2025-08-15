@@ -18,6 +18,7 @@
 !/resources/public/**/*.css
 !/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
 !/resources/public/**/*.html
+!/scripts/**/*.js
 !/scripts/**/*.sh
 !/shadow-cljs.edn
 !/src/**/*.cljs
