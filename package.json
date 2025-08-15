@@ -2,7 +2,10 @@
   "name": "@f1r3fly-io/lightning-bug",
   "version": "0.2.0",
   "description": "A modern, extensible text editor built with ClojureScript and CodeMirror 6.",
-  "repository": "https://github.com/f1r3fly-io/lightning-bug.git",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/f1r3fly-io/lightning-bug.git"
+  },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com/"
   },
