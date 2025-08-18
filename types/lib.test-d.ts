@@ -32,7 +32,7 @@ if (ref.current) {
   expectType<void>(ref.current.setText('new text', 'uri'));
   expectType<string | null>(ref.current.getFilePath('uri'));
   expectType<string | null>(ref.current.getFileUri('uri'));
-  expectType<void>(ref.current.setActiveDocument('uri'));
+  expectType<void>(ref.current.activateDocument('uri'));
 }
 
 // Check state shape

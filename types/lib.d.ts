@@ -159,7 +159,7 @@ export interface EditorRef {
   /** Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none. */
   getFileUri(uri?: string): string | null;
   /** Sets the active document if exists, loads content to view, opens in LSP if not. */
-  setActiveDocument(uri: string): void;
+  activateDocument(uri: string): void;
 }
 
 /**

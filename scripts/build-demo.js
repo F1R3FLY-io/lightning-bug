@@ -13,7 +13,8 @@ function runCmd(cmd, cwd = baseDir) {
 
 // Install deps and build libs in base dir.
 runCmd('npm install', baseDir);
-runCmd('npx shadow-cljs release libs', baseDir);
+// runCmd('npx shadow-cljs release libs', baseDir);
+runCmd('npx shadow-cljs compile libs', baseDir);
 
 // In demo dir: install deps.
 runCmd('npm install', demoDir);

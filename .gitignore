@@ -7,6 +7,7 @@
 # Include specific file patterns
 !/CHANGELOG.md
 !/deps.edn
+!/externs/**/*.js
 !/.github/workflows/*.yaml
 !/.gitignore
 !/LICENSE.txt

@@ -96,7 +96,10 @@
                 (log/warn "No root node in parse tree")
                 0)
               (let [bias-pos (max 0 (if (> pos 0) (dec pos) pos))
-                    ^js node (or (.descendantForIndex ^js root bias-pos bias-pos) root)]
+                    ^js node (or (.descendantForIndex ^js root bias-pos bias-pos)
+                                 (when (> bias-pos 0)
+                                   (.descendantForIndex ^js root (dec bias-pos) (dec bias-pos)))
+                                 root)]
                 (if (or (nil? node) (#{"ERROR" "MISSING"} (.-type node)))
                   (do
                     (log/warn "Invalid node for indentation at pos" pos "node-type" (.-type node))
@@ -145,17 +148,17 @@
                                              #js {:tree new-tree :parser (.-parser ^js value)})
                                            (do
                                              (.iterChanges changes
-                                                          (fn [fromA toA _fromB toB _]
-                                                            (let [start (index-to-point old-doc fromA)
-                                                                  old-end (index-to-point old-doc toA)
-                                                                  new-end (index-to-point new-doc toB)]
-                                                              (.edit ^js edited-tree #js {:startIndex fromA
-                                                                                          :oldEndIndex toA
-                                                                                          :newEndIndex toB
-                                                                                          :startPosition start
-                                                                                          :oldEndPosition old-end
-                                                                                          :newEndPosition new-end})))
-                                                          false)
+                                                           (fn [fromA toA _fromB toB _]
+                                                             (let [start (index-to-point old-doc fromA)
+                                                                   old-end (index-to-point old-doc toA)
+                                                                   new-end (index-to-point new-doc toB)]
+                                                               (.edit ^js edited-tree #js {:startIndex fromA
+                                                                                           :oldEndIndex toA
+                                                                                           :newEndIndex toB
+                                                                                           :startPosition start
+                                                                                           :oldEndPosition old-end
+                                                                                           :newEndPosition new-end})))
+                                                           false)
                                              (let [new-tree (.parse (.-parser ^js value) (.toString new-doc) edited-tree)]
                                                #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
 
@@ -198,7 +201,9 @@
   "Creates an indentService extension for CodeMirror using Tree-Sitter indentation queries."
   [indents-query indent-size language-state-field]
   (.of indentService (fn [ctx]
-                       (calculate-indent ctx nil indents-query indent-size language-state-field))))
+                       (let [indent (calculate-indent ctx nil indents-query indent-size language-state-field)]
+                         (log/debug ":: indent =>" indent)
+                         indent))))
 
 (defn fallback-extension
   "Returns a fallback extension when Tree-Sitter is unavailable (e.g., basic indentation)."
@@ -264,6 +269,7 @@
                                               (do
                                                 (log/error "Failed to fetch indents query for" lang-key ":" (.-message resp))
                                                 nil)))))
+                  _ (log/debug "indents-query-str" indents-query-str)
                   lang (or (:lang cached)
                            (when wasm-path
                              (let [[tag val] (<! (promise->chan (.load Language wasm-path)))]
@@ -272,6 +278,7 @@
                                  (do
                                    (log/error "Failed to load language WASM for" lang-key ":" (.-message val))
                                    nil)))))
+                  _ (log/debug "lang" lang)
                   parser (or (:parser cached)
                              (when lang
                                (doto (new Parser)
@@ -291,6 +298,7 @@
                   language-state-field (when (and lang parser) (make-language-state parser))
                   highlight-plugin (when highlight-query (make-highlighter-plugin language-state-field highlight-query))
                   indent-ext (when indents-query (make-indent-ext indents-query indent-size language-state-field))
+                  _ (log/debug "indent-ext" indent-ext)
                   extensions (cond-> []
                                language-state-field (conj language-state-field)
                                highlight-plugin (conj highlight-plugin)

@@ -69,7 +69,7 @@
 (rf/reg-event-db
  ::lsp-set-connection
  (fn [db [_ lang connected?]]
-   (assoc-in db [:lsp lang :connection] connected?)))
+   (assoc-in db [:lsp lang :connected?] connected?)))
 
 (rp/reg-event-fx
  ::lsp-diagnostics-update

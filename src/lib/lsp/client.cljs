@@ -1,5 +1,6 @@
 (ns lib.lsp.client
   (:require
+   [clojure.core.async :as async :refer [put!]]
    [datascript.core :as d]
    [lib.db :refer [diagnostics-tx symbols-tx flatten-diags flatten-symbols]]
    [taoensso.timbre :as log]))
@@ -18,6 +19,8 @@
         json-str (js/JSON.stringify (clj->js msg))
         header (str "Content-Length: " (.-length json-str) "\r\n\r\n")
         full (str header json-str)]
+    (log/info "Sending LSP message for lang" lang ":" (:method msg) "id" id)
+    (log/debug "Full LSP send message:" full)
     (when id
       (swap! state-atom assoc-in [:lsp lang :pending id] (if (:uri msg) {:type (:response-type msg) :uri (:uri msg)} (:response-type msg))))
     (if-let [ws (get-in @state-atom [:lsp lang :ws])]
@@ -47,69 +50,79 @@
           (let [parsed-js (js/JSON.parse body)
                 parsed (js->clj parsed-js :keywordize-keys true)
                 parsed-with-lang (assoc parsed :lang lang)]
+            (log/info "Received LSP message for lang" lang ":" (:method parsed) "id" (:id parsed))
+            (log/debug "Full LSP received message:" parsed)
             (.next events (clj->js {:type "lsp-message" :data parsed-with-lang})) ;; Emit all LSP messages with lang.
-              (if-let [id (:id parsed)]
-                (let [pending (get-in @state-atom [:lsp lang :pending id])
-                      type (if (map? pending) (:type pending) pending)
-                      pending-uri (:uri pending)]
-                  (when type
-                    (swap! state-atom update-in [:lsp lang :pending] dissoc id)
-                    (if (:error parsed)
-                      (do
-                        (log/error "LSP response error for lang" lang ":" (:error parsed))
-                        (.next events (clj->js {:type "lsp-error" :data (assoc (:error parsed) :lang lang)})))
-                      (case type
-                        :initialize (do
-                                      (log/info "LSP initialized for lang" lang)
-                                      (send lang {:method "initialized" :params {}} state-atom)
-                                      (swap! state-atom assoc-in [:lsp lang :initialized?] true)
-                                      (.next events (clj->js {:type "lsp-initialized" :data {:lang lang}}))
-                                      (doseq [[uri doc] (get-in @state-atom [:workspace :documents])]
-                                        (when (and (= lang (:language doc)) (not (:opened? doc)))
-                                          (send lang {:method "textDocument/didOpen"
-                                                      :params {:textDocument {:uri uri
-                                                                              :languageId lang
-                                                                              :version (:version doc)
-                                                                              :text (:content doc)}}} state-atom)
-                                          (request-symbols lang uri state-atom)
-                                          (swap! state-atom assoc-in [:workspace :documents uri :opened?] true))))
-                        :document-symbol (let [hier-symbols (:result parsed)
-                                               symbols (flatten-symbols hier-symbols nil pending-uri)]
-                                           (d/transact! (:conn @state-atom) (symbols-tx hier-symbols pending-uri))
-                                           (.next events (clj->js {:type "symbols" :data symbols})))
-                        (log/warn "Unhandled response type for lang" lang ":" type)))))
-                (case (:method parsed)
-                  "window/logMessage" (let [log-entry (:params parsed)]
-                                        (swap! state-atom update :logs conj (assoc log-entry :lang lang))
-                                        (.next events (clj->js {:type "log" :data (assoc log-entry :lang lang)})))
-                  "textDocument/publishDiagnostics" (let [diag-params (:params parsed)
-                                                          diags (flatten-diags diag-params)]
-                                                      (d/transact! (:conn @state-atom) (diagnostics-tx diags))
-                                                      (.next events (clj->js {:type "diagnostics" :data diags})))
-                  (log/info "Unhandled notification for lang" lang ":" (:method parsed))))))))))
+            (if-let [id (:id parsed)]
+              (let [pending (get-in @state-atom [:lsp lang :pending id])
+                    type (if (map? pending) (:type pending) pending)
+                    pending-uri (:uri pending)]
+                (when type
+                  (swap! state-atom update-in [:lsp lang :pending] dissoc id)
+                  (if (:error parsed)
+                    (do
+                      (log/error "LSP response error for lang" lang ":" (:error parsed))
+                      (.next events (clj->js {:type "lsp-error" :data (assoc (:error parsed) :lang lang)})))
+                    (case type
+                      :initialize (do
+                                    (log/info "LSP initialized for lang" lang)
+                                    (send lang {:method "initialized" :params {}} state-atom)
+                                    (swap! state-atom assoc-in [:lsp lang :initialized?] true)
+                                    (.next events (clj->js {:type "lsp-initialized" :data {:lang lang}}))
+                                    (doseq [[uri doc] (:documents (:workspace @state-atom))]
+                                      (when (and (= lang (:language doc)) (not (:opened? doc)))
+                                        (send lang {:method "textDocument/didOpen"
+                                                    :params {:textDocument {:uri uri :languageId lang :version (:version doc) :text (:content doc)}}} state-atom)
+                                        (request-symbols lang uri state-atom)
+                                        (swap! state-atom assoc-in [:workspace :documents uri :opened?] true))))
+                      :document-symbol (let [hier-symbols (:result parsed)
+                                             symbols (flatten-symbols hier-symbols nil pending-uri)]
+                                         (d/transact! (:conn @state-atom) (symbols-tx hier-symbols pending-uri))
+                                         (.next events (clj->js {:type "symbols" :data symbols})))
+                      (log/warn "Unhandled response type for lang" lang ":" type)))))
+              (case (:method parsed)
+                "window/logMessage" (let [log-entry (:params parsed)]
+                                      (swap! state-atom update :logs conj (assoc log-entry :lang lang))
+                                      (.next events (clj->js {:type "log" :data (assoc log-entry :lang lang)})))
+                "textDocument/publishDiagnostics" (let [diag-params (:params parsed)
+                                                        diags (flatten-diags diag-params)]
+                                                    (d/transact! (:conn @state-atom) (diagnostics-tx diags))
+                                                    (.next events (clj->js {:type "diagnostics" :data diags})))
+                (log/info "Unhandled notification for lang" lang ":" (:method parsed))))))))))
 
 (defn connect
   "Establishes a WebSocket connection to the LSP server for a specific language.
-  Sets up event handlers and initializes the LSP for that lang."
-  [lang config state-atom events]
+  Sets up event handlers and initializes the LSP for that lang.
+  Puts :success or :error on the provided channel."
+  [lang config state-atom events ch]
   (let [url (:url config)]
-    (when-let [existing (get-in @state-atom [:lsp lang :ws])]
-      (.close existing))
+    (if-let [existing (get-in @state-atom [:lsp lang :ws])]
+      (.close existing)
+      (log/debug "No existing WS to close for lang" lang))
     (let [socket (js/WebSocket. url)]
       (set! (.-binaryType socket) "arraybuffer")
-      (set! (.-onopen socket) #(do (log/info "LSP WS open for lang" lang)
-                                   (send lang {:method "initialize" :params {:capabilities {}} :response-type :initialize} state-atom)
-                                   (swap! state-atom assoc-in [:lsp lang :connection] true)
-                                   (.next events (clj->js {:type "connect" :data {:lang lang}}))))
-      (set! (.-onmessage socket) #(handle-message lang (.-data %) state-atom events))
-      (set! (.-onclose socket) #(do (log/warn "LSP WS closed for lang" lang)
-                                    (swap! state-atom update :lsp dissoc lang)
-                                    (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
-      (set! (.-onerror socket) #(do (log/error "LSP connection error for lang" lang ":" %)
-                                    (js/window.console.debug %)
-                                    (.next events (clj->js {:type "lsp-error" :data (assoc % :lang lang)}))))
       (swap! state-atom update-in [:lsp lang] assoc
              :ws socket
              :pending {}
              :initialized? false
-             :url url))))
+             :url url)
+      (set! (.-onopen socket) #(do (log/info "LSP WS open for lang" lang)
+                                   (swap! state-atom update-in [:lsp lang] assoc
+                                          :connected? true
+                                          :connecting false)
+                                   (.next events (clj->js {:type "connect" :data {:lang lang}}))
+                                   (send lang {:method "initialize"
+                                               :params {:capabilities {}}
+                                               :id (rand-int 10000)
+                                               :response-type :initialize} state-atom)))
+      (set! (.-onmessage socket) #(handle-message lang (.-data %) state-atom events))
+      (set! (.-onclose socket) #(do (log/warn "LSP WS closed for lang" lang)
+                                    (swap! state-atom update-in [:lsp lang]
+                                           :connected? false
+                                           :connecting false)
+                                    (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
+      (set! (.-onerror socket) #(do (log/error "LSP connection error for lang" lang ":" %)
+                                    (js/window.console.debug %)
+                                    (.next events (clj->js {:type "lsp-error" :data {:message "WebSocket connection error" :lang lang}}))
+                                    (put! ch :error)))))
+  ch)

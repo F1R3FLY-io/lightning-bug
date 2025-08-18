@@ -39,7 +39,7 @@
 (rf/reg-sub :lsp/connected?
   (fn [db _]
     (let [lang (get-in db [:workspace :files (get-in db [:workspace :active-file]) :language] "text")]
-      (get-in db [:lsp lang :connection]))))
+      (get-in db [:lsp lang :connected?]))))
 
 (rf/reg-sub :search/visible?
   (fn [db _] (:visible? (:search db))))

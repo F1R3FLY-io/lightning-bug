@@ -134,7 +134,7 @@ Key code snippet from `demo/index.html`:
         console.log('File path:', editorRef.current.getFilePath());
         console.log('File URI:', editorRef.current.getFileUri());
         editorRef.current.openDocument("second.rho", "Nil", "rholang", false); // Example with make-active false
-        editorRef.current.setActiveDocument("demo.rho");
+        editorRef.current.activateDocument("demo.rho");
         editorRef.current.renameDocument("renamed.rho", "second.rho");
         editorRef.current.setCursor({ line: 1, column: 3 });
         console.log('Cursor after set:', editorRef.current.getCursor());
@@ -363,7 +363,7 @@ Use a React ref to access these methods for runtime control. All positions are 1
 | `setText`         | <table><tr><td>`text: string`</td></tr><tr><td>`uri?`: `string`</td></tr></table>                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Replaces entire text for specified or active document (triggers `content-change`).                      | <table><tr><td>`editor.setText("new text");`</td></tr><tr><td>`editor.setText("new text", "specific-uri");`</td></tr></table> |
 | `getFilePath`     | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.                       | <table><tr><td>`editor.getFilePath();`</td></tr><tr><td>`editor.getFilePath("specific-uri");`</td></tr></table> |
 | `getFileUri`      | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.           | <table><tr><td>`editor.getFileUri();`</td></tr><tr><td>`editor.getFileUri("specific-uri");`</td></tr></table> |
-| `setActiveDocument` | <table><tr><td>`uri: string`</td></tr></table>                                                                      | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets the active document if exists, loads content to view, opens in LSP if not.                         | <table><tr><td>`editor.setActiveDocument("demo.rho");`</td></tr></table> |
+| `activateDocument` | <table><tr><td>`uri: string`</td></tr></table>                                                                      | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets the active document if exists, loads content to view, opens in LSP if not.                         | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
 
 #### EditorState Schema (Return Value for getState)
 
@@ -520,7 +520,7 @@ The `Editor` can be customized using props for initial setup and a React ref for
        // Set text (replace all)
        editorRef.current.setText('new text');
        // Switch active
-       editorRef.current.setActiveDocument('inmemory://new.rho');
+       editorRef.current.activateDocument('inmemory://new.rho');
        // Unsubscribe
        sub.unsubscribe();
      }
@@ -576,7 +576,7 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
        const text = editorRef.current.getText();
        console.log('Text:', text);
        editorRef.current.setText('new text');
-       editorRef.current.setActiveDocument('inmemory://new.rho');
+       editorRef.current.activateDocument('inmemory://new.rho');
        sub.unsubscribe();
      }
    }, 100);
