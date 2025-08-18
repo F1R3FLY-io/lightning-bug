@@ -1,6 +1,6 @@
 {
   "name": "@f1r3fly-io/lightning-bug",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A modern, extensible text editor built with ClojureScript and CodeMirror 6.",
   "repository": {
     "type": "git",
