@@ -6,7 +6,8 @@
    ["@codemirror/state" :refer [Compartment RangeSetBuilder StateField Text]]
    ["@codemirror/language" :refer [indentService indentUnit]]
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
-   ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]))
+   ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
+   [lib.db :as db]))
 
 ;; Compartment for dynamic reconfiguration of the syntax highlighting extension.
 (def syntax-compartment (Compartment.))
@@ -201,9 +202,7 @@
   "Creates an indentService extension for CodeMirror using Tree-Sitter indentation queries."
   [indents-query indent-size language-state-field]
   (.of indentService (fn [ctx]
-                       (let [indent (calculate-indent ctx nil indents-query indent-size language-state-field)]
-                         (log/debug ":: indent =>" indent)
-                         indent))))
+                       (calculate-indent ctx nil indents-query indent-size language-state-field))))
 
 (defn fallback-extension
   "Returns a fallback extension when Tree-Sitter is unavailable (e.g., basic indentation)."
@@ -218,9 +217,8 @@
    Falls back to basic mode on failure."
   [^js view state-atom]
   (go
-    (try
-      (let [active-uri (get-in @state-atom [:workspace :active-uri])
-            lang-key (or (get-in @state-atom [:workspace :documents active-uri :language]) "text")]
+    (let [lang-key (or (db/active-lang) "text")]
+      (try
         (when-not (string? lang-key)
           (log/warn "Language key is not a string:" lang-key))
         (let [lang-config (get-in @state-atom [:languages lang-key])]
@@ -269,7 +267,6 @@
                                               (do
                                                 (log/error "Failed to fetch indents query for" lang-key ":" (.-message resp))
                                                 nil)))))
-                  _ (log/debug "indents-query-str" indents-query-str)
                   lang (or (:lang cached)
                            (when wasm-path
                              (let [[tag val] (<! (promise->chan (.load Language wasm-path)))]
@@ -278,7 +275,6 @@
                                  (do
                                    (log/error "Failed to load language WASM for" lang-key ":" (.-message val))
                                    nil)))))
-                  _ (log/debug "lang" lang)
                   parser (or (:parser cached)
                              (when lang
                                (doto (new Parser)
@@ -298,7 +294,6 @@
                   language-state-field (when (and lang parser) (make-language-state parser))
                   highlight-plugin (when highlight-query (make-highlighter-plugin language-state-field highlight-query))
                   indent-ext (when indents-query (make-indent-ext indents-query indent-size language-state-field))
-                  _ (log/debug "indent-ext" indent-ext)
                   extensions (cond-> []
                                language-state-field (conj language-state-field)
                                highlight-plugin (conj highlight-plugin)
@@ -323,8 +318,8 @@
                 (do
                   (log/debug "Missing required components for" lang-key ": lang=" (boolean lang) ", parser=" (boolean parser) ", highlight-query=" (boolean highlight-query) "; falling back to basic mode")
                   (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension lang-config))})
-                  :missing-components))))))
-      (catch js/Error e
-        (log/error "Failed to initialize Tree-Sitter syntax for" (:language @state-atom) ":" (.-message e) "- falling back to basic mode")
-        (when view (.dispatch view #js {:effects (.reconfigure syntax-compartment #js [])}))
-        :error))))
+                  :missing-components)))))
+        (catch js/Error e
+          (log/error "Failed to initialize Tree-Sitter syntax for" lang-key ":" (.-message e) "- falling back to basic mode")
+          (when view (.dispatch view #js {:effects (.reconfigure syntax-compartment #js [])}))
+          :error)))))

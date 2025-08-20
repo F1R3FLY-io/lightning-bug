@@ -5,17 +5,16 @@
    [day8.re-frame.test :as rf-test]
    [re-frame.core :as rf]
    [re-posh.core :as rp]
-   [app.db :as app-db :refer [ds-conn]]
    [app.events :as e]
    [app.subs]
-   [lib.db :as lib-db :refer [flatten-diags flatten-symbols]]
+   [lib.db :as lib-db :refer [conn flatten-diags flatten-symbols]]
    [taoensso.timbre :as log]))
 
 (use-fixtures :each
   {:before (fn []
              (log/set-min-level! :info)
-             (d/reset-conn! ds-conn (d/empty-db lib-db/schema))
-             (rp/connect! ds-conn)
+             (d/reset-conn! conn (d/empty-db lib-db/schema))
+             (rp/connect! conn)
              (rf/dispatch-sync [::e/initialize]))
    :after (fn [] (log/set-min-level! :debug))})
 
@@ -92,7 +91,7 @@
 (deftest log-append
   (rf-test/run-test-sync
    (rf/dispatch [::e/log-append {:message "test log"}])
-   (let [logs @(rf/subscribe [:lsp/logs])]
+   (let [logs @(rf/subscribe [:logs])]
      (is (= 1 (count logs)))
      (is (= "test log" (:message (first logs)))))))
 
@@ -162,7 +161,7 @@
                                                              :character 2}
                                                      :end {:line 1
                                                            :character 7}}}]}]
-         symbols (flatten-symbols hier-symbols nil)]
+         symbols (flatten-symbols hier-symbols nil "test-uri")]
      (rp/dispatch [::e/lsp-symbols-update symbols])
      (let [stored-syms @(rf/subscribe [:lsp/symbols])]
        (is (= 2 (count stored-syms)))
@@ -184,3 +183,30 @@
    (rf/dispatch [::e/run-agent])
    (rf-test/wait-for [::e/validate-agent]
      (is (= :running @(rf/subscribe [:status]))))))
+
+(deftest handle-editor-event-diagnostics
+  (rf-test/run-test-sync
+   (let [data [{:uri "file://test"
+                :message "error"
+                :severity 1
+                :startLine 0
+                :startChar 0
+                :endLine 0
+                :endChar 5}]]
+     (rf/dispatch [::e/handle-editor-event {:type "diagnostics" :data data}])
+     (rf-test/wait-for [::e/lsp-diagnostics-update]
+       (let [stored-diags @(rf/subscribe [:lsp/diagnostics])]
+         (is (= 1 (count stored-diags)))
+         (is (= "error" (:diagnostic/message (first stored-diags))))
+         (is (= :error @(rf/subscribe [:status]))))))))
+
+(deftest handle-editor-event-symbols
+  (rf-test/run-test-sync
+   (let [data [{:name "root" :kind 1 :startLine 0 :startChar 0 :endLine 2 :endChar 0
+                :selectionStartLine 0 :selectionStartChar 0 :selectionEndLine 0 :selectionEndChar 4
+                :parent nil}]]
+     (rf/dispatch [::e/handle-editor-event {:type "symbols" :data data}])
+     (rf-test/wait-for [::e/lsp-symbols-update]
+       (let [stored-syms @(rf/subscribe [:lsp/symbols])]
+         (is (= 1 (count stored-syms)))
+         (is (= "root" (:symbol/name (first stored-syms)))))))))

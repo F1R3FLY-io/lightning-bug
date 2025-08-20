@@ -12,7 +12,7 @@
    [clojure.string :as str]
    [datascript.core :as d]
    [reagent.core :as r]
-   [lib.db :refer [schema]]
+   [lib.db :as db :refer [conn]]
    [lib.editor.diagnostics :as diagnostics :refer [set-diagnostic-effect]]
    [lib.editor.highlight :as highlight]
    [lib.editor.syntax :as syntax]
@@ -24,7 +24,7 @@
 (defonce ^:const default-languages {"text" {:extensions [".txt"]
                                             :fallback-highlighter "none"}})
 
-;; Language configuration specs (moved from app.languages)
+;; Language configuration specs
 (s/def ::grammar-wasm string?)
 (s/def ::highlight-query-path string?)
 (s/def ::indents-query-path string?)
@@ -105,18 +105,15 @@
   Ensures language keys are strings and falls back to 'text' if no language is provided."
   [props]
   (let [languages (normalize-languages (merge default-languages (:languages props)))
-        extra-extensions (:extraExtensions props #js [])]  ;; New: store extra extensions from props (JS array)
+        extra-extensions (:extraExtensions props #js [])]
     (when-not (every? string? (keys languages))
       (log/warn "Non-string keys found in languages map:" (keys languages)))
-    {:workspace {:documents {} :active-uri nil}
-     :cursor {:line 1 :column 1}
+    {:cursor {:line 1 :column 1}
      :selection nil
      :lsp {}
-     :logs []
      :languages languages
      :extra-extensions extra-extensions
-     :debounce-timer nil  ;; Timer for debouncing LSP didChange notifications.
-     :conn (d/create-conn schema)}))
+     :debounce-timer nil}))
 
 (defn- update-editor-state
   "Updates the internal state-atom with cursor and selection info from CodeMirror state.
@@ -133,35 +130,36 @@
                     from-pos (u/offset-to-pos doc from true)
                     to-pos (u/offset-to-pos doc to true)
                     text (.sliceString doc from to)]
-                {:from from-pos :to to-pos :text text}))]
+                {:from from-pos :to to-pos :text text}))
+        uri (db/active-uri)]
     (swap! state-atom assoc :cursor cursor-pos :selection sel)
-    (.next events (clj->js {:type "selection-change" :data {:cursor cursor-pos :selection sel :uri (get-in @state-atom [:workspace :active-uri])}}))))
+    (.next events (clj->js {:type "selection-change" :data {:cursor cursor-pos :selection sel :uri uri}}))))
 
 (defn- get-extensions
   "Returns the array of CodeMirror extensions, including dynamic syntax compartment,
   static diagnostic compartment. Appends extra-extensions from state. Removes highlight-plugin from defaults."
   [state-atom events]
   (let [debounced-lsp (u/debounce (fn []
-                                    (let [uri (get-in @state-atom [:workspace :active-uri])
-                                          content (get-in @state-atom [:workspace :documents uri :content])
-                                          lang (get-in @state-atom [:workspace :documents uri :language])]
-                                      (when uri
-                                        (swap! state-atom update-in [:workspace :documents uri :version] inc)
-                                        (lsp/send lang {:method "textDocument/didChange"
-                                                        :params {:textDocument {:uri uri :version (get-in @state-atom [:workspace :documents uri :version])}
-                                                                 :contentChanges [{:text content}]}} state-atom)))) 300)
+                                    (let [[uri text lang] (db/active-uri-text-lang)]
+                                      (when text
+                                        (let [version (db/inc-document-version-by-uri! uri)]
+                                          (lsp/send lang
+                                                    {:method "textDocument/didChange"
+                                                     :params {:textDocument {:uri uri :version version}
+                                                              :contentChanges [{:text text}]}}
+                                                    state-atom)))))
+                                  200)
         update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              (when (or (.-docChanged u) (.-selectionSet u))
                                (update-editor-state (.-state u) state-atom events))
                              (when (.-docChanged u)
-                               (let [new-content (.toString (.-doc (.-state u)))
-                                     uri (get-in @state-atom [:workspace :active-uri])]
-                                 (when uri
-                                   (swap! state-atom assoc-in [:workspace :documents uri :content] new-content)
-                                   (swap! state-atom assoc-in [:workspace :documents uri :dirty?] true)
-                                   (.next events (clj->js {:type "content-change" :data {:content new-content :uri uri}}))
-                                   (when (get-in @state-atom [:workspace :documents uri :opened?])
+                               (when-let [uri (db/active-uri)]
+                                 (let [new-text (.toString (.-doc (.-state u)))]
+                                   (db/update-document-text-by-uri! uri new-text)
+                                   (.next events (clj->js {:type "content-change" :data {:content new-text
+                                                                                         :uri uri}}))
+                                   (when (db/document-opened-by-uri? uri)
                                      (debounced-lsp))))))))
         default-exts [(lineNumbers)
                       (bracketMatching)
@@ -178,49 +176,57 @@
 (defn- ensure-lsp-document-opened
   "Ensures the document is opened in LSP if configured, connecting if necessary.
   Sends didOpen and requests symbols on success."
-  [lang uri content version state-atom events]
-  (when-let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
-    (let [connected? (get-in @state-atom [:lsp lang :connected?])
-          initialized? (get-in @state-atom [:lsp lang :initialized?])]
-      (go
-        (when-not (and connected? initialized?)
-          (let [conn-ch (or (get-in @state-atom [:lsp lang :connect-chan])
-                            (let [new-ch (chan)]
-                              (swap! state-atom assoc-in [:lsp lang :connect-chan] new-ch)
-                              (lsp/connect lang {:url lsp-url} state-atom events new-ch)
-                              new-ch))
-                res (<! conn-ch)]
-            ;; Replay the message
-            (put! conn-ch res)
-            (when (= res :error)
-              (log/error "Failed to connect and initialize LSP for lang" lang))))
-        (when (and (get-in @state-atom [:lsp lang :connected?])
-                   (get-in @state-atom [:lsp lang :initialized?])
-                   (not (get-in @state-atom [:workspace :documents uri :opened?])))
-          (lsp/send lang {:method "textDocument/didOpen"
-                          :params {:textDocument {:uri uri :languageId lang :version version :text content}}} state-atom)
-          (lsp/request-symbols lang uri state-atom)
-          (swap! state-atom assoc-in [:workspace :documents uri :opened?] true))))))
+  [lang uri state-atom events]
+  (let [[text version] (db/doc-text-version-by-uri uri)]
+    (when-let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
+      (let [connected? (get-in @state-atom [:lsp lang :connected?])
+            initialized? (get-in @state-atom [:lsp lang :initialized?])]
+        (go
+          (when-not (and connected? initialized?)
+            (let [conn-ch (or (get-in @state-atom [:lsp lang :connect-chan])
+                              (let [new-ch (chan)]
+                                (swap! state-atom assoc-in [:lsp lang :connect-chan] new-ch)
+                                (lsp/connect lang {:url lsp-url} state-atom events new-ch)
+                                new-ch))
+                  res (<! conn-ch)]
+              ;; Replay the message
+              (put! conn-ch res)
+              (when (= res :error)
+                (log/error "Failed to connect and initialize LSP for lang" lang))))
+          (when (and (get-in @state-atom [:lsp lang :connected?])
+                     (get-in @state-atom [:lsp lang :initialized?])
+                     (not (db/document-opened-by-uri? uri)))
+            (lsp/send lang
+                      {:method "textDocument/didOpen"
+                       :params {:textDocument {:uri uri
+                                               :languageId lang
+                                               :version version
+                                               :text text}}}
+                      state-atom)
+            (lsp/request-symbols lang uri state-atom)
+            (db/document-opened-by-uri! uri)))))))
 
 (defn- activate-document
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
   Also handles LSP open if not already opened."
   [uri state-atom view-ref events]
-  (let [old-lang (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :language])]
-    (swap! state-atom assoc-in [:workspace :active-uri] uri)
-    (let [content (get-in @state-atom [:workspace :documents uri :content] "")
-          lang (get-in @state-atom [:workspace :documents uri :language])
-          version (get-in @state-atom [:workspace :documents uri :version])]
+  (let [old-lang (db/active-lang)]
+    (db/update-active-uri! uri)
+    (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
       (when-let [view (.-current view-ref)]
         (let [current-doc (.-doc (.-state view))
               current-length (.-length current-doc)]
-          (.dispatch view #js {:changes #js {:from 0 :to current-length :insert content}})))
-      (when (not= old-lang lang)
+          (.dispatch view #js {:changes #js {:from 0
+                                             :to current-length
+                                             :insert text}})))
+      (when (not= old-lang new-lang)
         (syntax/init-syntax (.-current view-ref) state-atom))
-      (let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
-        (when lsp-url
-          (ensure-lsp-document-opened lang uri content version state-atom events)))
-      (.next events (clj->js {:type "document-open" :data {:uri uri :content content :language lang :activated true}})))))
+      (when (get-in @state-atom [:languages new-lang :lsp-url])
+        (ensure-lsp-document-opened new-lang uri state-atom events))
+      (.next events (clj->js {:type "document-open" :data {:uri uri
+                                                           :content text
+                                                           :language new-lang
+                                                           :activated true}})))))
 
 ;; Inner React functional component, handling CodeMirror integration and state management.
 (let [inner (fn [js-props forwarded-ref]
@@ -240,12 +246,11 @@
                         ;; Example: (.getState editor)
                         :getState (fn []
                                     (clj->js (assoc @state-atom
-                                                    :diagnostics (d/q '[:find (pull ?e [*])
-                                                                        :where [?e :type :diagnostic]]
-                                                                      @(:conn @state-atom))
-                                                    :symbols (d/q '[:find (pull ?e [*])
-                                                                    :where [?e :type :symbol]]
-                                                                  @(:conn @state-atom)))))
+                                                    :workspace {:documents (db/documents)
+                                                                :activeUri (db/active-uri)}
+                                                    :logs (db/logs)
+                                                    :diagnostics (db/diagnostics)
+                                                    :symbols (db/symbols))))
                         ;; Returns RxJS observable for subscribing to events.
                         ;; Example: (.subscribe (.getEvents editor) (fn [evt] (js/console.log (.-type evt) (.-data evt))))
                         :getEvents (fn [] events)
@@ -283,87 +288,86 @@
                         ;; Example: (.openDocument editor "demo.rho" "new x in { x!(\"Hello\") | Nil }" "rholang")
                         ;;          (.openDocument editor "demo.rho") ; activates existing
                         ;;          (.openDocument editor "demo.rho" nil nil false) ; opens without activating
-                        :openDocument (fn [uri-js content-js lang-js & [make-active-js]]
+                        :openDocument (fn [uri-js text-js lang-js & [make-active-js]]
                                         (let [uri-str (js->clj uri-js :keywordize-keys true)
-                                              content (js->clj content-js :keywordize-keys true)
+                                              text (js->clj text-js :keywordize-keys true)
                                               lang (js->clj lang-js :keywordize-keys true)
                                               make-active (if (nil? make-active-js) true (boolean make-active-js))
                                               [protocol path] (split-uri uri-str)
                                               ext (get-ext-from-path path)
                                               effective-uri (str (or protocol "inmemory://") path)
-                                              exists? (contains? (get-in @state-atom [:workspace :documents]) effective-uri)
-                                              current-doc (if exists? (get-in @state-atom [:workspace :documents effective-uri]) {})
-                                              effective-lang (or lang (:language current-doc) (when ext (get-lang-from-ext (:languages @state-atom) ext)) "text")
-                                              effective-content (or content (:content current-doc) "")]
-                                          (if exists?
-                                            (do
-                                              (when content
-                                                (swap! state-atom assoc-in [:workspace :documents effective-uri :content] effective-content)
-                                                (swap! state-atom assoc-in [:workspace :documents effective-uri :dirty?] true)
-                                                (when (get-in @state-atom [:workspace :documents effective-uri :opened?])
-                                                  (swap! state-atom update-in [:workspace :documents effective-uri :version] inc)
-                                                  (lsp/send effective-lang {:method "textDocument/didChange"
-                                                                            :params {:textDocument {:uri effective-uri :version (get-in @state-atom [:workspace :documents effective-uri :version])}
-                                                                                     :contentChanges [{:text effective-content}]}} state-atom)))
-                                              (when lang
-                                                (swap! state-atom assoc-in [:workspace :documents effective-uri :language] effective-lang)
-                                                (when-let [view (.-current view-ref)]
-                                                  (syntax/init-syntax view state-atom))))
-                                            (swap! state-atom assoc-in [:workspace :documents effective-uri] {:content effective-content :language effective-lang :version 1 :dirty? false :opened? false}))
+                                              [id current-text current-lang] (db/doc-id-text-lang-by-uri effective-uri)
+                                              effective-lang (or lang
+                                                                 current-lang
+                                                                 (when ext
+                                                                   (get-lang-from-ext (:languages @state-atom) ext))
+                                                                 "text")
+                                              effective-text (or text current-text "")]
+                                          (if id
+                                            (db/update-document-text-language-by-id! id effective-text effective-lang)
+                                            (db/create-documents! [{:uri effective-uri
+                                                                    :text effective-text
+                                                                    :language effective-lang
+                                                                    :version 1
+                                                                    :dirty false
+                                                                    :opened false}]))
+                                          (when (and text (db/document-opened-by-uri? effective-uri))
+                                            (let [version (db/inc-document-version-by-uri! effective-uri)]
+                                              (lsp/send effective-lang
+                                                        {:method "textDocument/didChange"
+                                                         :params {:textDocument {:uri effective-uri
+                                                                                 :version version}
+                                                                  :contentChanges [{:text effective-text}]}}
+                                                        state-atom)))
                                           (when make-active
                                             (activate-document effective-uri state-atom view-ref events))))
                         ;; Closes the specified or active document (triggers `document-close`). Notifies LSP if open.
                         ;; Example: (.closeDocument editor)
                         ;;          (.closeDocument editor "specific-uri")
                         :closeDocument (fn [uri-js]
-                                         (let [uri (or uri-js (get-in @state-atom [:workspace :active-uri]))
-                                               doc (get-in @state-atom [:workspace :documents uri])
-                                               lang (:language doc)]
+                                         (let [uri (or uri-js (db/active-uri))
+                                               [id lang opened?] (db/document-id-lang-opened-by-uri uri)]
                                            (when uri
-                                             (when (:opened? doc)
+                                             (when opened?
                                                (lsp/send lang {:method "textDocument/didClose"
                                                                :params {:textDocument {:uri uri}}} state-atom))
-                                             (d/transact! (:conn @state-atom) [[:db/retractEntity [:document/uri uri]]])
-                                             (swap! state-atom update-in [:workspace :documents] dissoc uri)
-                                             (when (= uri (get-in @state-atom [:workspace :active-uri]))
-                                               (let [new-active (first (keys (get-in @state-atom [:workspace :documents])))
-                                                     new-content (get-in @state-atom [:workspace :documents new-active :content] "")]
-                                                 (activate-document new-active state-atom view-ref events)))
+                                             (db/delete-document-by-id! id)
+                                             (when (db/active-uri? uri)
+                                               (let [next-uri (db/first-document-uri)]
+                                                 (activate-document next-uri state-atom view-ref events)))
                                              (.next events (clj->js {:type "document-close" :data {:uri uri}})))))
                         ;; Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.
                         ;; Example: (.renameDocument editor "new-name.rho")
                         ;;          (.renameDocument editor "new-name.rho" "old-uri")
                         :renameDocument (fn [new-uri-js old-uri-js]
                                           (let [new-uri-str (js->clj new-uri-js :keywordize-keys true)
-                                                old-uri (or old-uri-js (get-in @state-atom [:workspace :active-uri]))
-                                                [old-protocol old-path] (split-uri old-uri)
+                                                old-uri (or old-uri-js (db/active-uri))
+                                                [old-protocol _old-path] (split-uri old-uri)
                                                 effective-new-uri (str (or old-protocol "inmemory://") new-uri-str)
                                                 new-ext (get-ext-from-path new-uri-str)
                                                 potential-new-lang (when new-ext (get-lang-from-ext (:languages @state-atom) new-ext))
-                                                doc (get-in @state-atom [:workspace :documents old-uri])
-                                                old-lang (:language doc)
-                                                lang-changed? (and potential-new-lang (not= potential-new-lang old-lang))
-                                                new-doc (if lang-changed? (assoc doc :language potential-new-lang :opened? false) doc)]
-                                            (when (and old-uri (contains? (get-in @state-atom [:workspace :documents]) old-uri))
-                                              (when-not (contains? (get-in @state-atom [:workspace :documents]) effective-new-uri)
-                                                (when (:opened? doc)
+                                                [id old-lang opened?] (db/document-id-lang-opened-by-uri old-uri)
+                                                lang-changed? (and potential-new-lang (not= potential-new-lang old-lang))]
+                                            (when (and old-uri id)
+                                              (when-not (db/document-id-by-uri effective-new-uri)
+                                                (when opened?
                                                   (lsp/send old-lang {:method "textDocument/didClose"
                                                                       :params {:textDocument {:uri old-uri}}} state-atom)
                                                   (when-not lang-changed?
-                                                    (lsp/send old-lang {:method "workspace/didRenameFiles"
-                                                                        :params {:files [{:oldUri old-uri :newUri effective-new-uri}]}} state-atom)))
-                                                (swap! state-atom update-in [:workspace :documents] assoc effective-new-uri new-doc)
-                                                (swap! state-atom update-in [:workspace :documents] dissoc old-uri)
-                                                (when (= old-uri (get-in @state-atom [:workspace :active-uri]))
-                                                  (swap! state-atom assoc-in [:workspace :active-uri] effective-new-uri)
-                                                  (when-let [view (.-current view-ref)]
-                                                    (let [current-doc (.-doc (.-state view))
-                                                          current-length (.-length current-doc)]
-                                                      (.dispatch view #js {:changes #js {:from 0 :to current-length :insert (:content new-doc)}})))
+                                                    (lsp/send old-lang
+                                                              {:method "workspace/didRenameFiles"
+                                                               :params {:files [{:oldUri old-uri
+                                                                                 :newUri effective-new-uri}]}}
+                                                              state-atom)))
+                                                (if lang-changed?
+                                                  (db/update-document-uri-language-by-id!
+                                                   id effective-new-uri potential-new-lang)
+                                                  (db/update-document-uri-by-id! id effective-new-uri))
+                                                (when (= old-uri (db/active-uri))
+                                                  (db/update-active-uri! effective-new-uri)
                                                   (syntax/init-syntax (.-current view-ref) state-atom))
-                                                (when-not (get-in @state-atom [:workspace :documents effective-new-uri :opened?])
-                                                  (ensure-lsp-document-opened potential-new-lang effective-new-uri (:content new-doc) (:version new-doc) state-atom events))
-                                                (d/transact! (:conn @state-atom) [[:db/retractEntity [:document/uri old-uri]]])
+                                                (when-not (db/document-opened-by-uri? effective-new-uri)
+                                                  (ensure-lsp-document-opened potential-new-lang effective-new-uri state-atom events))
                                                 (.next events (clj->js {:type "document-rename"
                                                                         :data {:old-uri old-uri
                                                                                :new-uri effective-new-uri}}))))))
@@ -371,16 +375,20 @@
                         ;; Example: (.saveDocument editor)
                         ;;          (.saveDocument editor "specific-uri")
                         :saveDocument (fn [uri-js]
-                                        (let [uri (or uri-js (get-in @state-atom [:workspace :active-uri]))
-                                              doc (get-in @state-atom [:workspace :documents uri])
-                                              lang (:language doc)]
-                                          (when (and uri (:dirty? doc))
+                                        (let [uri (or uri-js (db/active-uri))
+                                              id (db/document-id-by-uri uri)
+                                              [text lang dirty] (db/doc-text-lang-dirty-by-uri uri)]
+                                          (when (and uri dirty)
                                             (when (get-in @state-atom [:lsp lang :connected?])
-                                              (lsp/send lang {:method "textDocument/didSave"
-                                                              :params {:textDocument {:uri uri}
-                                                                       :text (:content doc)}} state-atom))
-                                            (swap! state-atom assoc-in [:workspace :documents uri :dirty?] false)
-                                            (.next events (clj->js {:type "document-save" :data {:uri uri :content (:content doc)}})))))
+                                              (lsp/send lang
+                                                        {:method "textDocument/didSave"
+                                                         :params {:textDocument {:uri uri}
+                                                                  :text text}}
+                                                        state-atom))
+                                            (db/update-document-dirty-by-id! id false)
+                                            (.next events (clj->js {:type "document-save"
+                                                                    :data {:uri uri
+                                                                           :content text}})))))
                         ;; Returns `true` if editor is initialized and ready for methods.
                         ;; Example: (.isReady editor)
                         :isReady (fn [] (boolean (.-current view-ref)))
@@ -395,9 +403,13 @@
                                                     to-offset (u/pos-to-offset doc to true)]
                                                 (if (and from-offset to-offset (<= from-offset to-offset))
                                                   (do
-                                                    (.dispatch ^js (.-current view-ref) #js {:annotations (.of highlight/highlight-annotation (clj->js {:from from :to to}))})
-                                                    (.next events (clj->js {:type "highlight-change" :data {:from from :to to}})) ;; Emit highlight-change event with range
-                                                    )
+                                                    (.dispatch
+                                                     ^js (.-current view-ref)
+                                                     #js {:annotations (.of highlight/highlight-annotation
+                                                                            (clj->js {:from from :to to}))})
+                                                    (.next events (clj->js {:type "highlight-change"
+                                                                            :data {:from from
+                                                                                   :to to}})))
                                                   (log/warn "Cannot highlight range: invalid offsets")))
                                               (log/warn "Cannot highlight range: view-ref is nil"))))
                         ;; Clears highlight in active document (triggers `highlight-change` with `null`).
@@ -405,9 +417,10 @@
                         :clearHighlight (fn []
                                           (if (.-current view-ref)
                                             (do
-                                              (.dispatch ^js (.-current view-ref) #js {:annotations (.of highlight/highlight-annotation nil)})
-                                              (.next events (clj->js {:type "highlight-change" :data nil})) ;; Emit highlight-change event with nil
-                                              )
+                                              (.dispatch
+                                               ^js (.-current view-ref)
+                                               #js {:annotations (.of highlight/highlight-annotation nil)})
+                                              (.next events (clj->js {:type "highlight-change" :data nil})))
                                             (log/warn "Skipping clear highlight: view-ref not ready")))
                         ;; Scrolls to center on a range in active document.
                         ;; Example: (.centerOnRange editor #js {:line 1 :column 1} #js {:line 1 :column 6})
@@ -419,86 +432,112 @@
                                                    from-offset (u/pos-to-offset doc from true)
                                                    to-offset (u/pos-to-offset doc to true)]
                                                (if (and from-offset to-offset)
-                                                 (.dispatch ^js (.-current view-ref) #js {:effects (EditorView.scrollIntoView (.range EditorSelection from-offset to-offset) #js {:y "center"})})
+                                                 (.dispatch
+                                                  ^js (.-current view-ref)
+                                                  #js {:effects (EditorView.scrollIntoView
+                                                                 (.range EditorSelection from-offset to-offset)
+                                                                 #js {:y "center"})})
                                                  (log/warn "Cannot center on range: invalid offsets")))
                                              (log/warn "Cannot center on range: view-ref not ready"))))
                         ;; Returns text for specified or active document, or `null` if not found.
                         ;; Example: (.getText editor)
                         ;;          (.getText editor "specific-uri")
                         :getText (fn [uri-js]
-                                   (let [uri (or uri-js (get-in @state-atom [:workspace :active-uri]))
-                                         content (get-in @state-atom [:workspace :documents uri :content])]
-                                     (or content nil)))
+                                   (let [uri (or uri-js (db/active-uri))
+                                         text (db/document-text-by-uri uri)]
+                                     (or text nil)))
                         ;; Replaces entire text for specified or active document (triggers `content-change`).
                         ;; Example: (.setText editor "new text")
                         ;;          (.setText editor "new text" "specific-uri")
                         :setText (fn [text-js uri-js]
                                    (let [text (js->clj text-js :keywordize-keys true)
-                                         uri (or uri-js (get-in @state-atom [:workspace :active-uri]))
-                                         lang (get-in @state-atom [:workspace :documents uri :language])]
+                                         uri (or uri-js (db/active-uri))
+                                         id (db/document-id-by-uri uri)
+                                         [lang opened?] (db/document-language-opened-by-uri uri)]
                                      (when uri
-                                       (swap! state-atom assoc-in [:workspace :documents uri :content] text)
-                                       (swap! state-atom assoc-in [:workspace :documents uri :dirty?] true)
-                                       (when (= uri (get-in @state-atom [:workspace :active-uri]))
+                                       (db/update-document-text-by-id! id text)
+                                       (when (= uri (db/active-uri))
                                          (if (.-current view-ref)
                                            (let [^js v (.-current view-ref)
                                                  ^js doc (.-doc ^js (.-state ^js v))
                                                  len (.-length doc)]
                                              (.dispatch v #js {:changes #js {:from 0 :to len :insert text}}))
                                            (log/warn "Cannot set editor text: view not ready")))
-                                       (when (and lang (get-in @state-atom [:workspace :documents uri :opened?])
-                                                  (get-in @state-atom [:lsp lang :connected?]))
-                                         (lsp/send lang {:method "textDocument/didChange"
-                                                         :params {:textDocument {:uri uri :version (inc (get-in @state-atom [:workspace :documents uri :version]))}
-                                                                  :contentChanges [{:text text}]}} state-atom))
+                                       (when (and lang opened? (get-in @state-atom [:lsp lang :connected?]))
+                                         (let [version (db/inc-document-version-by-id! id)]
+                                           (lsp/send lang
+                                                     {:method "textDocument/didChange"
+                                                      :params {:textDocument {:uri uri
+                                                                              :version version}
+                                                               :contentChanges [{:text text}]}}
+                                                     state-atom)))
                                        (.next events (clj->js {:type "content-change" :data {:content text :uri uri}})))))
                         ;; Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.
                         ;; Example: (.getFilePath editor)
                         ;;          (.getFilePath editor "specific-uri")
                         :getFilePath (fn [uri-js]
-                                       (let [uri (or uri-js (get-in @state-atom [:workspace :active-uri]))
+                                       (let [uri (or uri-js (db/active-uri))
                                              [_ path] (split-uri uri)]
                                          (or path nil)))
                         ;; Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.
                         ;; Example: (.getFileUri editor)
                         ;;          (.getFileUri editor "specific-uri")
                         :getFileUri (fn [uri-js]
-                                      (let [uri (or uri-js (get-in @state-atom [:workspace :active-uri]))]
+                                      (let [uri (or uri-js (db/active-uri))]
                                         (or uri nil)))
                         ;; Activates the document with the given URI, loading content to view, opens in LSP if not.
                         ;; Example: (.activateDocument editor "demo.rho")
                         :activateDocument (fn [uri-js]
                                             (let [uri (js->clj uri-js :keywordize-keys true)]
-                                              (when (contains? (get-in @state-atom [:workspace :documents]) uri)
-                                                (when (not= uri (get-in @state-atom [:workspace :active-uri]))
-                                                  (activate-document uri state-atom view-ref events)))))})
+                                              (if (db/document-id-by-uri uri)
+                                                (when (not= uri (db/active-uri))
+                                                  (activate-document uri state-atom view-ref events))
+                                                (log/warn "Document not found for activation" uri))))
+                        ;; Queries the internal DataScript database with the given query and optional params.
+                        ;; Returns the result as JS array.
+                        ;; Example: (.query editor '[:find ?uri :where [?e :document/uri ?uri]])
+                        :query (fn [query-js params-js]
+                                 (let [query (js->clj query-js :keywordize-keys true)
+                                       params (if params-js (js->clj params-js) [])]
+                                   (clj->js (apply d/q query @conn params))))
+                        ;; Returns the DataScript connection object for direct access (advanced use).
+                        ;; Example: (.getDb editor)
+                        :getDb (fn [] conn)})
                  #js [@state-atom (.-current view-ref)])
                 (react/useEffect
                  (fn []
-                   (let [prop-lang (:language props)]
-                     (when (not= prop-lang (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :language]))
-                       (swap! state-atom assoc-in [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :language] prop-lang)
+                   (when-let [prop-lang (:language props)]
+                     (when (not= prop-lang (db/active-lang))
+                       (let [uri (db/active-uri)
+                             id (db/document-id-by-uri uri)]
+                         (db/update-document-language-by-id! id prop-lang))
                        (syntax/init-syntax (.-current view-ref) state-atom)))
                    js/undefined)
                  #js [(:language props)])
                 (react/useEffect
                  (fn []
-                   (let [prop-content (:content props)]
-                     (when (and (not= prop-content (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :content])) (not (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :dirty?])))
-                       (swap! state-atom assoc-in [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :content] prop-content)
-                       (swap! state-atom assoc-in [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :dirty?] false)))
+                   (let [prop-text (:content props)
+                         uri (db/active-uri)]
+                     (when (and (not= prop-text (db/active-text))
+                                (not (db/document-dirty-by-uri? uri)))
+                       (db/update-document-text-by-uri! uri prop-text)))
                    js/undefined)
                  #js [(:content props)])
                 (react/useEffect
                  (fn []
                    (when (.-current view-ref)
-                     (let [current-doc (.toString (.-doc ^js (.-state ^js (.-current view-ref))))]
-                       (when (not= (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :content]) current-doc)
-                         (.dispatch ^js (.-current view-ref) #js {:changes #js {:from 0 :to (.length current-doc) :insert (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :content])}})
+                     (let [current-doc (.toString (.-doc ^js (.-state ^js (.-current view-ref))))
+                           active-text (db/active-text)]
+                       (when (not= active-text current-doc)
+                         (.dispatch
+                          ^js (.-current view-ref)
+                          #js {:changes #js {:from 0
+                                             :to (.length current-doc)
+                                             :insert active-text}})
                          (when on-content-change
-                           (on-content-change (get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :content]))))))
+                           (on-content-change active-text)))))
                    js/undefined)
-                 #js [(get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :content])])
+                 #js [(db/active-text)])
                 (react/useEffect
                  (fn []
                    ;; Internal subscription to events for handling diagnostics updates by dispatching
@@ -509,7 +548,10 @@
                                                  type (:type evt)]
                                              (when (and (= type "diagnostics") (.-current view-ref))
                                                (let [diags (:data evt)]
-                                                 (.dispatch ^js (.-current view-ref) #js {:changes #js {:from 0 :to 0} :effects #js [(.of set-diagnostic-effect (clj->js diags))]}))))))]
+                                                 (.dispatch
+                                                  ^js (.-current view-ref)
+                                                  #js {:changes #js {:from 0 :to 0}
+                                                       :effects #js [(.of set-diagnostic-effect (clj->js diags))]}))))))]
                      (fn [] (.unsubscribe sub))))
                  #js [(.-current view-ref)])
                 (react/useEffect
@@ -528,7 +570,7 @@
                        (when-let [v (.-current view-ref)]
                          (.destroy v))
                        (set! (.-current view-ref) nil))))
-                 #js [(get-in @state-atom [:workspace :documents (get-in @state-atom [:workspace :active-uri]) :language]) (:extra-extensions @state-atom) container-ref])
+                 #js [(db/active-lang) (:extra-extensions @state-atom) container-ref])
                 (react/createElement "div" #js {:ref container-ref :className "code-editor flex-grow-1"})))]
   (def editor-comp (react/forwardRef inner))
-  (def Editor editor-comp))
+  (def ^:export Editor editor-comp))

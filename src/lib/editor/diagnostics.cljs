@@ -12,12 +12,26 @@
   (.define StateField
            #js {:create (fn [_] #js [])
                 :update (fn [^js value
-                            ^js tr]
+                             ^js tr]
                           (reduce (fn [v ^js e]
                                     (if (.is e set-diagnostic-effect)
                                       (.-value e)
                                       v))
                                   value (.-effects tr)))}))
+
+(defn severity-class
+  "Maps LSP diagnostic severity to a CSS class for underlining.
+  - 1: Error (red wavy)
+  - 2: Warning (orange wavy)
+  - 3: Information (blue dotted)
+  - 4: Hint (gray dotted)"
+  [severity]
+  (case severity
+    1 "error"
+    2 "warning"
+    3 "info"
+    4 "hint"
+    ""))
 
 (def diagnostic-lint
   (linter (fn [view]
@@ -31,11 +45,7 @@
                                                         {:line (inc (.-endLine diag))
                                                          :column (inc (.-endChar diag))}
                                                         true)
-                                   :severity (case (.-severity diag)
-                                               1 "error"
-                                               2 "warning"
-                                               3 "info"
-                                               "hint")
+                                   :severity (severity-class (.-severity diag))
                                    :message (.-message diag)})
                             diags))))))
 

@@ -17,6 +17,8 @@
 !/package-lock.json
 !/README.md
 !/resources/public/**/*.css
+!/resources/public/demo/package.json
+!/resources/public/demo/package-lock.json
 !/resources/public/extensions/lang/rholang/tree-sitter/queries/*.scm
 !/resources/public/**/*.html
 !/scripts/**/*.js

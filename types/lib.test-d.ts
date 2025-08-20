@@ -33,6 +33,10 @@ if (ref.current) {
   expectType<string | null>(ref.current.getFilePath('uri'));
   expectType<string | null>(ref.current.getFileUri('uri'));
   expectType<void>(ref.current.activateDocument('uri'));
+  expectType<any>(ref.current.query('query'));
+  expectType<any>(ref.current.query('query', [1, 'param']));
+  expectType<any>(ref.current.query('query', []));
+  expectType<any>(ref.current.getDb());
 }
 
 // Check state shape
@@ -46,8 +50,30 @@ const state: EditorState = {
   lsp: { "text": { connection: false, url: null, pending: {}, initialized: false } },
   logs: [],
   languages: { text: { extensions: ['.txt'] } },
-  diagnostics: [],
-  symbols: [],
+  diagnostics: [{
+    uri: 'test',
+    version: 1,
+    message: 'err',
+    severity: 1,
+    startLine: 0,
+    startChar: 0,
+    endLine: 0,
+    endChar: 5
+  }],
+  symbols: [{
+    uri: 'test',
+    name: 'sym',
+    kind: 1,
+    startLine: 0,
+    startChar: 0,
+    endLine: 0,
+    endChar: 1,
+    selectionStartLine: 0,
+    selectionStartChar: 0,
+    selectionEndLine: 0,
+    selectionEndChar: 1,
+    parent: 0
+  }],
 };
 expectType<EditorState>(state);
 

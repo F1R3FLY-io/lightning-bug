@@ -120,22 +120,27 @@
           (done)))
       true)))
 
+(defn get-root-node
+  "Helper to extract root node with type hint preserved."
+  [^js tree]
+  (.rootNode tree))
+
 (deftest incremental-parse
   (async done
      (go
        (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
              query-str (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
              [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-             parser (doto (new Parser) (.setLanguage lang))
-             query (new (.-Query TreeSitter) lang query-str)
+             ^js parser (doto (Parser.) (.setLanguage lang))
+             query (new Query lang query-str)
              initial-str "let x = 1"
              language-state-field (syntax/make-language-state parser)
              highlighter-ext (syntax/make-highlighter-plugin language-state-field query)
              state (.create EditorState #js {:doc initial-str :extensions #js [language-state-field highlighter-ext]})
              initial-doc (.-doc state)
-             view (EditorView. #js {:state state :parent js/document.body})
+             ^js view (EditorView. #js {:state state :parent js/document.body})
              plugin-instance (.plugin view highlighter-ext)
-             old-tree (.-tree plugin-instance)
+             ^js old-tree (.-tree plugin-instance)
              change-spec #js {:from 9 :to 9 :insert " in y"}
              changes (.of ChangeSet change-spec (.-length initial-doc))
              new-str (str (subs initial-str 0 9) " in y" (subs initial-str 9))
@@ -146,11 +151,11 @@
                               :state #js {:doc new-doc}
                               :view view}
              _ ((.-update (.-prototype (.-constructor plugin-instance))) mock-update plugin-instance)
-             new-tree ^js (.-tree plugin-instance)]
-         (is (not= old-tree new-tree) "Tree updated")
-         (is (= (.toString new-doc) (.-text ^js (.-rootNode ^js new-tree))) "New tree matches new doc")
-         (.destroy view)
-         (done)))))
+             ^js new-tree (.-tree plugin-instance)]
+           (is (not= old-tree new-tree) "Tree updated")
+           (is (= (.toString new-doc) (.-text ^js (get-root-node new-tree)) "New tree matches new doc"))
+           (.destroy view)
+           (done)))))
 
 (deftest empty-document-handling
   (async done

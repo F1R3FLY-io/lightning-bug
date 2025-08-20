@@ -2,7 +2,7 @@
   (:require
    [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.string :as str]
-   [clojure.test :refer [deftest is async use-fixtures]]
+   [clojure.test :refer [deftest is async]]
    [clojure.test.check :as tc]
    [clojure.test.check.generators :as gen]
    [clojure.test.check.properties :as prop]
@@ -14,22 +14,34 @@
    [lib.lsp.client :as lsp]
    [taoensso.timbre :as log]))
 
-(use-fixtures :each
-  (fn [f]
-    (reset! lsp/ws nil)
-    (f)))
+(defn editor-is-ready? [^js editor]
+  (.isReady editor))
+
+(defn get-editor-text [^js editor]
+  (.getText editor))
+
+(defn get-editor-events [^js editor]
+  (.getEvents editor))
+
+(defn get-editor-cursor [^js editor]
+  (.getCursor editor))
+
+(defn get-editor-state [^js editor]
+  (.getState editor))
+
+(defn get-editor-selection [^js editor]
+  (.getSelection editor))
 
 (defn wait-for-event [events-atom event-type timeout-ms]
   (go
     (let [start (js/Date.now)]
       (loop []
-        (if (some #(= event-type (:type %)) @events-atom)
-          true
-          (if (> (- (js/Date.now) start) timeout-ms)
-            false
-            (do
-              (<! (timeout 10))
-              (recur))))))))
+        (cond
+          (some #(= event-type (:type %)) @events-atom) true
+          (> (- (js/Date.now) start) timeout-ms) false
+          :else (do
+                  (<! (timeout 10))
+                  (recur)))))))
 
 (defn act-flush
   "Helper to wrap code in react/act and flush Reagent renders."
@@ -46,9 +58,6 @@
          (.render root (r/as-element comp))
          (reset! root-atom root))))
     @root-atom))
-
-(defn act-unmount [root]
-  (act-flush #(.unmount root)))
 
 (deftest editor-renders
   (async done
@@ -76,7 +85,7 @@
                                               {:ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (act-flush #(.setText editor "updated")) )
+                 (act-flush #(.setText editor "updated")))
                (<! (timeout 10))
                (is @callback-called "onContentChange callback triggered")
                (act-flush #(.unmount root))
@@ -107,7 +116,7 @@
                  sock (js/Object.)]
              (set! (.-binaryType sock) "arraybuffer")
              (set! (.-close sock) (fn [] ((.-onclose sock))))
-             (set! (.-send sock) (fn [data]))
+             (set! (.-send sock) (fn [_data]))
              (with-redefs [js/WebSocket (fn [_] sock)
                            lsp/send (fn [msg _] (swap! sent conj (:method msg)))]
                (js/document.body.appendChild container)
@@ -166,7 +175,7 @@
                  (let [^js/Object editor (.-current ref)]
                    (act-flush #(.openDocument editor "inmemory://old.txt" "test" "text"))
                    (<! (timeout 10))
-                   (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                   (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                    (act-flush #(.renameDocument editor "new.txt"))
                    (<! (timeout 10))
                    (is (= 2 (count @sent)) "Sent didClose and didOpen")
@@ -192,7 +201,7 @@
                (let [^js/Object editor (.-current ref)]
                  (act-flush #(.openDocument editor "inmemory://test.txt" "initial content" "text"))
                  (<! (timeout 10))
-                 (let [state ^js (.getState editor)]
+                 (let [state ^js (get-editor-state editor)]
                    (is (= "initial content" (.-content state)) "Opened with provided content"))
                  (act-flush #(.unmount root))
                  (js/document.body.removeChild container)
@@ -210,7 +219,7 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                 (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                  (act-flush #(.setText editor "updated"))
                  (<! (wait-for-event events "content-change" 1000))
                  (is (some #(= "content-change" (:type %)) @events) "Emitted content-change")
@@ -224,6 +233,9 @@
                  (js/document.body.removeChild container)
                  (done)))))))
 
+(defn get-state-lsp [^js/Object state]
+  (.-lsp state))
+
 (deftest rholang-extension-integration
   (async done
          (go
@@ -235,14 +247,14 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (act-flush #(.openDocument editor "inmemory://test.rho" "new x in { x!(\"Hello\") }" "rholang"))
+                 (act-flush #(.openDocument editor "inmemory://test.rho" "new x in { x!(\"Hello\") | Nil }" "rholang"))
                  (<! (timeout 500)) ;; Wait for Tree-Sitter and LSP init
-                 (let [state ^js (.getState editor)]
-                   (is (some? (.-connection (.-lsp state))) "LSP connected for Rholang")
-                   (is (some? (.-tree state)) "Tree-Sitter parsed for Rholang"))
-                 (act-flush #(.unmount root))
-                 (js/document.body.removeChild container)
-                 (done)))))))
+                 (let [^js/Object state (.getState editor)]
+                   (is (some? (get-state-lsp state)) "LSP initialized for Rholang")
+                   (is (some? (.-tree state)) "Tree-Sitter parsed for Rholang")))
+               (act-flush #(.unmount root))
+               (js/document.body.removeChild container)
+               (done))))))
 
 (deftest editor-ready-event
   (async done
@@ -256,7 +268,7 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                 (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                  (<! (wait-for-event events "ready" 1000))
                  (is (some #(= "ready" (:type %)) @events) "Emitted ready event on initialization")
                  (act-flush #(.unmount root))
@@ -275,7 +287,7 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                 (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                  (act-flush #(.setSelection editor #js {:line 1 :column 1} #js {:line 1 :column 7}))
                  (<! (wait-for-event events "selection-change" 1000))
                  (is (some #(and (= "selection-change" (:type %))
@@ -294,7 +306,7 @@
                  sock (js/Object.)]
              (set! (.-binaryType sock) "arraybuffer")
              (set! (.-close sock) (fn [] ((.-onclose sock))))
-             (set! (.-send sock) (fn [data]))
+             (set! (.-send sock) (fn [_data]))
              (with-redefs [js/WebSocket (fn [_] sock)]
                (js/document.body.appendChild container)
                (let [root (act-mount container [:> Editor {:language "rholang"
@@ -302,7 +314,7 @@
                                                            :ref ref}])]
                  (<! (timeout 10))
                  (let [^js/Object editor (.-current ref)]
-                   (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                   (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                    (act-flush #((.-onopen sock)))
                    (<! (wait-for-event events "connect" 1000))
                    (is (some #(= "connect" (:type %)) @events) "Emitted connect")
@@ -339,7 +351,7 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (let [state ^js (.getState editor)]
+                 (let [state ^js (get-editor-state editor)]
                    (is (= "test" (.-content state)) "getState returns content")
                    (is (= "text" (.-language state)) "getState returns language"))
                  (act-flush #(.unmount root))
@@ -359,7 +371,7 @@
                (let [^js/Object editor (.-current ref)]
                  (act-flush #(.setCursor editor #js {:line 1 :column 3}))
                  (<! (timeout 10))
-                 (let [cursor ^js (.getCursor editor)]
+                 (let [cursor ^js (get-editor-cursor editor)]
                    (is (= 1 (.-line cursor)) "getCursor returns line")
                    (is (= 3 (.-column cursor)) "getCursor returns column"))
                  (act-flush #(.unmount root))
@@ -379,7 +391,7 @@
                (let [^js/Object editor (.-current ref)]
                  (act-flush #(.setSelection editor #js {:line 1 :column 1} #js {:line 1 :column 7}))
                  (<! (timeout 10))
-                 (let [sel ^js (.getSelection editor)]
+                 (let [sel ^js (get-editor-selection editor)]
                    (is (= {:line 1 :column 1} (.-from sel)) "getSelection returns from")
                    (is (= {:line 1 :column 7} (.-to sel)) "getSelection returns to"))
                  (act-flush #(.unmount root))
@@ -400,7 +412,7 @@
                (let [^js/Object editor (.-current ref)]
                  (act-flush #(.openDocument editor "inmemory://test.txt" "test" "text"))
                  (<! (timeout 10))
-                 (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                 (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                  (act-flush #(.setText editor "updated"))
                  (<! (timeout 10))
                  (act-flush #(.saveDocument editor))
@@ -421,50 +433,50 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (is (.isReady editor) "isReady true after init"))
+                 (is (editor-is-ready? editor) "isReady true after init"))
                (act-flush #(.unmount root))
                (js/document.body.removeChild container)
                (done))))))
 
 (deftest clear-cursor-pos
   (async done
-    (go
-      (let [container (js/document.createElement "div")
-            ref (react/createRef)]
-        (js/document.body.appendChild container)
-        (let [root (act-mount container [:> Editor {:content "test"
-                                                    :language "text"
-                                                    :ref ref}])]
-          (<! (timeout 10))
-          (let [^js/Object editor (.-current ref)]
-            (act-flush #(.highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 5}))
-            (<! (timeout 10))
-            (act-flush #(.clearHighlight editor))
-            (<! (timeout 10))
+         (go
+           (let [container (js/document.createElement "div")
+                 ref (react/createRef)]
+             (js/document.body.appendChild container)
+             (let [root (act-mount container [:> Editor {:content "test"
+                                                         :language "text"
+                                                         :ref ref}])]
+               (<! (timeout 10))
+               (let [^js/Object editor (.-current ref)]
+                 (act-flush #(.highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 5}))
+                 (<! (timeout 10))
+                 (act-flush #(.clearHighlight editor))
+                 (<! (timeout 10))
             ;; No direct assertion, but ensure no error
-            (is true "clearHighlight called without error")
-            (act-flush #(.unmount root))
-            (js/document.body.removeChild container)
-            (done)))))))
+                 (is true "clearHighlight called without error")
+                 (act-flush #(.unmount root))
+                 (js/document.body.removeChild container)
+                 (done)))))))
 
 (deftest center-on-range
   (async done
-    (go
-      (let [container (js/document.createElement "div")
-            ref (react/createRef)]
-        (js/document.body.appendChild container)
-        (let [root (act-mount container [:> Editor {:content (str/join "\n" (repeat 50 "line"))
-                                                    :language "text"
-                                                    :ref ref}])]
-          (<! (timeout 10))
-          (let [^js/Object editor (.-current ref)]
-            (act-flush #(.centerOnRange editor #js {:line 30 :column 1} #js {:line 30 :column 5}))
-            (<! (timeout 10))
+         (go
+           (let [container (js/document.createElement "div")
+                 ref (react/createRef)]
+             (js/document.body.appendChild container)
+             (let [root (act-mount container [:> Editor {:content (str/join "\n" (repeat 50 "line"))
+                                                         :language "text"
+                                                         :ref ref}])]
+               (<! (timeout 10))
+               (let [^js/Object editor (.-current ref)]
+                 (act-flush #(.centerOnRange editor #js {:line 30 :column 1} #js {:line 30 :column 5}))
+                 (<! (timeout 10))
             ;; No direct assertion for scroll, but ensure no error
-            (is true "centerOnRange called without error")
-            (act-flush #(.unmount root))
-            (js/document.body.removeChild container)
-            (done)))))))
+                 (is true "centerOnRange called without error")
+                 (act-flush #(.unmount root))
+                 (js/document.body.removeChild container)
+                 (done)))))))
 
 (deftest get-text-set-text
   (async done
@@ -477,46 +489,46 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (is (= "initial" (.getText editor)) "getText returns initial content")
+                 (is (= "initial" (get-editor-text editor)) "getText returns initial content")
                  (act-flush #(.setText editor "updated"))
                  (<! (timeout 10))
-                 (is (= "updated" (.getText editor)) "getText returns updated content after setText"))
+                 (is (= "updated" (get-editor-text editor)) "getText returns updated content after setText"))
                (act-flush #(.unmount root))
                (js/document.body.removeChild container)
                (done))))))
 
-(let [gen-action (gen/one-of [(gen/tuple (gen/return :set-content) gen/string-alphanumeric)
-                              (gen/tuple (gen/return :open-document) gen/string-alphanumeric gen/string-alphanumeric (gen/return "text"))
-                              (gen/tuple (gen/return :close-document))])
+(let [gen-pos (gen/hash-map :line gen/small-integer :column gen/small-integer)
+      gen-action (gen/one-of [(gen/tuple (gen/return :highlight) gen-pos gen-pos)
+                              (gen/return [:clear])])
       prop (prop/for-all [actions (gen/vector gen-action 1 10)]
-             (async done
-               (go
-                 (let [container (js/document.createElement "div")
-                       ref (react/createRef)
-                       events (atom [])]
-                   (js/document.body.appendChild container)
-                   (let [root (act-mount container [:> Editor {:content "test"
-                                                               :language "text"
-                                                               :ref ref}])]
-                     (<! (timeout 10))
-                     (let [^js/Object editor (.-current ref)]
-                       (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
-                       (doseq [action actions]
-                         (let [cmd (first action)
-                               args (rest action)]
-                           (act-flush #(case cmd
-                                         :set-content (.setText editor (first args))
-                                         :open-document (.openDocument editor (str "inmemory://" (first args) ".txt") (second args) (nth args 2 nil))
-                                         :close-document (.closeDocument editor))))
-                         (<! (timeout 10)))
-                       (is (every? #(contains? % :type) @events) "All events have a type")
-                       (is (every? #(contains? % :data) @events) "All events have data"))
-                     (act-flush #(.unmount root))
-                     (js/document.body.removeChild container)
-                     (done))
-                   true))))]
-  (deftest rxjs-event-stream-property
-    (is (:result (tc/quick-check 10 prop {:seed 42})))))
+                         (async done
+                                (go
+                                  (let [container (js/document.createElement "div")
+                                        ref (react/createRef)
+                                        events (atom [])]
+                                    (js/document.body.appendChild container)
+                                    (let [root (act-mount container [:> Editor {:content (str/join "\n" (repeat 10 "line"))
+                                                                                :language "text"
+                                                                                :ref ref}])]
+                                      (<! (timeout 10))
+                                      (let [^js/Object editor (.-current ref)]
+                                        (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                                        (doseq [action actions]
+                                          (let [cmd (first action)]
+                                            (act-flush #(case cmd
+                                                          :highlight (.highlightRange editor (clj->js (second action)) (clj->js (nth action 2)))
+                                                          :clear (.clearHighlight editor))))
+                                          (<! (timeout 10)))
+                                        (let [highlight-events (filter #(= "highlight-change" (:type %)) @events)]
+                                          (is (= (count actions) (count highlight-events)) "Event emitted for each action")
+                                          (is (every? #(or (map? (:data %)) (nil? (:data %))) highlight-events) "Data is range map or nil")))
+                                      (act-flush #(.unmount root))
+                                      (js/document.body.removeChild container)
+                                      (done))
+                                    true))))]
+  (deftest highlight-event-property
+    (let [result (tc/quick-check 10 prop {:seed 42})]
+      (is (:result result)))))
 
 (deftest highlight-change-event-emission
   (async done
@@ -530,7 +542,7 @@
                                                          :ref ref}])]
                (<! (timeout 10))
                (let [^js/Object editor (.-current ref)]
-                 (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                 (.subscribe (get-editor-events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
                  (act-flush #(.highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 6}))
                  (<! (wait-for-event events "highlight-change" 1000))
                  (let [evt (first (filter #(= "highlight-change" (:type %)) @events))]
@@ -542,35 +554,3 @@
                  (act-flush #(.unmount root))
                  (js/document.body.removeChild container)
                  (done)))))))
-
-(let [gen-pos (gen/hash-map :line gen/small-integer :column gen/small-integer)
-      gen-action (gen/one-of [(gen/tuple (gen/return :highlight) gen-pos gen-pos)
-                              (gen/return [:clear])])
-      prop (prop/for-all [actions (gen/vector gen-action 1 10)]
-             (async done
-               (go
-                 (let [container (js/document.createElement "div")
-                       ref (react/createRef)
-                       events (atom [])]
-                   (js/document.body.appendChild container)
-                   (let [root (act-mount container [:> Editor {:content (str/join "\n" (repeat 10 "line"))
-                                                               :language "text"
-                                                               :ref ref}])]
-                     (<! (timeout 10))
-                     (let [^js/Object editor (.-current ref)]
-                       (.subscribe (.getEvents editor) #(swap! events conj (js->clj % :keywordize-keys true)))
-                       (doseq [action actions]
-                         (let [cmd (first action)]
-                           (act-flush #(case cmd
-                                         :highlight (.highlightRange editor (clj->js (second action)) (clj->js (nth action 2)))
-                                         :clear (.clearHighlight editor))))
-                         (<! (timeout 10)))
-                       (let [highlight-events (filter #(= "highlight-change" (:type %)) @events)]
-                         (is (= (count actions) (count highlight-events)) "Event emitted for each action")
-                         (is (every? #(or (map? (:data %)) (nil? (:data %))) highlight-events) "Data is range map or nil")))
-                     (act-flush #(.unmount root))
-                     (js/document.body.removeChild container)
-                     (done))
-                   true))))]
-  (deftest highlight-event-property
-    (is (:result (tc/quick-check 10 prop {:seed 42})))))

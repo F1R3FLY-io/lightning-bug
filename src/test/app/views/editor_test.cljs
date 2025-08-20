@@ -3,9 +3,10 @@
    ["react" :as react]
    ["react-dom/client" :as rdclient]
    [reagent.core :as r]
-   [app.db :refer [default-db ds-conn]]
+   [lib.db :refer [conn]]
+   [app.db :refer [default-db]]
    [app.events :as e]
-   [app.shared :as shared]
+   [app.shared :refer [editor-ref-atom]]
    [datascript.core :as d]
    [re-frame.db :as rf-db]
    [app.views.editor :as editor]
@@ -17,6 +18,17 @@
    [clojure.test :refer [deftest is use-fixtures async]]))
 
 (set! (.-IS_REACT_ACT_ENVIRONMENT js/globalThis) true)
+
+;; Mock WebSocket to prevent real LSP connections during tests, avoiding connection errors.
+(def mock-socket (js/Object.))
+(set! (.-binaryType mock-socket) "arraybuffer")
+(set! (.-onopen mock-socket) (fn []))
+(set! (.-onmessage mock-socket) (fn []))
+(set! (.-onclose mock-socket) (fn []))
+(set! (.-onerror mock-socket) (fn []))
+(set! (.-send mock-socket) (fn [_]))
+
+(def old-ws js/WebSocket)
 
 (defn act-flush [f]
   (react/act (fn [] (f) (r/flush))))
@@ -35,10 +47,12 @@
 
 (use-fixtures :each
   {:before (fn []
+             (set! js/WebSocket (fn [_] mock-socket)) ;; Existing mock.
              (log/set-min-level! :trace)
-             (d/reset-conn! ds-conn (d/empty-db (:schema default-db)))
+             (d/reset-conn! conn (d/empty-db (:schema default-db)))
              (reset! rf-db/app-db {})
              (act-flush #(rf/dispatch-sync [::e/initialize]))
+             ;; Remove :lsp-url from all languages to prevent any connection attempts.
              (swap! rf-db/app-db update :languages
                     (fn [langs]
                       (into {} (map (fn [[k v]] [k (dissoc v :lsp-url)]) langs))))
@@ -49,8 +63,10 @@
                (swap! rf-db/app-db assoc-in [:workspace :files active :language] "text")
                (swap! rf-db/app-db assoc-in [:workspace :files active :name] "untitled.txt"))
              (rf/clear-subscription-cache!)
-             (rp/connect! ds-conn))
-   :after (fn [] (log/set-min-level! :debug))})
+             (rp/connect! conn))
+   :after (fn []
+            (set! js/WebSocket old-ws)
+            (log/set-min-level! :debug))}) ;; Existing restore.
 
 (deftest editor-renders
   (async done
@@ -91,11 +107,11 @@
      (let [root (act-mount container [:f> editor/component])]
        (rf-test/wait-for
         [::e/editor-ready]
-        (let [initial-instance (.-current @shared/editor-ref-atom)]
+        (let [initial-instance (.-current @editor-ref-atom)]
           (react/act #(rf/dispatch [::e/editor-update-content "force rerender"]))
           (rf-test/wait-for
            [::e/editor-update-content]
-           (let [post-instance (.-current @shared/editor-ref-atom)]
+           (let [^js post-instance (.-current @editor-ref-atom)]
              (is (= initial-instance post-instance) "Editor ref persists across content change/rerender")
              (is (.isReady post-instance) "Editor remains ready after rerender"))
            (act-unmount root)
@@ -110,19 +126,19 @@
      (let [root (act-mount container [:f> editor/component])]
        (log/debug ":: 1 ::")
        (rf-test/wait-for
-        [::e/editor-ready]
+        [::e/editor-ready] {:timeout 1000}
         (log/debug ":: 2 ::")
-        (let [instance (.-current @shared/editor-ref-atom)]
-          (.setText instance "line1\nline2"))
+        (let [^js instance (.-current @editor-ref-atom)]
+          (when instance
+            (.setText instance "line1\nline2")))
         (log/debug ":: 3 ::")
         (rf-test/wait-for
-         [::e/editor-update-content]
+         [::e/editor-update-content] {:timeout 1000}
          (log/debug ":: 4 ::")
          (react/act #(rf/dispatch [::e/set-editor-cursor {:line 2 :column 3}]))
          (log/debug ":: 5 ::")
          (rf-test/wait-for
-          [::e/update-cursor]
-          {:timeout 1000}
+          [::e/update-cursor] {:timeout 1000}
           (log/debug ":: 6 ::")
           (r/with-let [cursor @(rf/subscribe [:editor/cursor])]
             (is (= {:line 2 :column 3} cursor) "Cursor updated")
@@ -144,7 +160,7 @@
 ;;        (rf-test/wait-for
 ;;         [::e/editor-ready]
 ;;         (log/debug ":: 2 ::")
-;;         (let [instance (.-current @shared/editor-ref-atom)]
+;;         (let [instance (.-current @editor-ref-atom)]
 ;;           (.setText instance "lorem ipsum")
 ;;           (act-flush identity))
 ;;         (log/debug ":: 3 ::")
@@ -179,7 +195,7 @@
 ;;        (log/debug "Starting full cycle: render, update content, set cursor, highlight")
 ;;        (rf-test/wait-for
 ;;         [::e/editor-ready]
-;;         (let [instance (.-current @shared/editor-ref-atom)]
+;;         (let [instance (.-current @editor-ref-atom)]
 ;;           (.setText instance "lorem ipsum"))
 ;;         (rf-test/wait-for
 ;;          [::e/editor-update-content]

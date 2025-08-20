@@ -98,63 +98,41 @@ The demo app is a simple HTML file with embedded JavaScript (ES modules). It def
 
 Key code snippet from `demo/index.html`:
 
-```html
-<script type="module">
-  (async () => {
-    // Patch goog BEFORE imports
-    globalThis.goog = globalThis.goog || {};
-    globalThis.goog.provide = globalThis.goog.constructNamespace_ || function(name) { /* noop or log */ };
-    globalThis.goog.require = (globalThis.goog.module && globalThis.goog.module.get) || globalThis.goog.require || function(name) { /* noop */ };
+```javascript
+(async () => {
+  // Patch goog BEFORE imports
+  globalThis.goog = globalThis.goog || {};  // Ensure goog exists
+  globalThis.goog.provide = globalThis.goog.constructNamespace_ || function(name) { /* noop or log */ };
+  globalThis.goog.require = (globalThis.goog.module && globalThis.goog.module.get) || globalThis.goog.require || function(name) { /* noop */ };
 
-    const React = await import('react');
-    const { createRoot } = await import('react-dom/client');
-    const { Editor } = await import('@f1r3fly-io/lightning-bug');
-    const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
-    const { defaultKeymap } = await import('@codemirror/commands');
-    const customExtensions = [defaultKeymap];
-    const root = createRoot(document.getElementById('app'));
-    const editorRef = React.createRef();
-    root.render(React.createElement(Editor, {
-      ref: editorRef,
-      languages: {"rholang": RholangExtension},
-      extraExtensions: customExtensions
-    }));
-    const interval = setInterval(() => {
-      if (editorRef.current && editorRef.current.isReady()) {
-        clearInterval(interval);
-        const subscription = editorRef.current.getEvents().subscribe(event => {
-          console.log('Event:', event.type, event.data);
-        });
-        editorRef.current.openDocument(
-          "demo.rho",
-          'new x in { x!("Hello") | Nil }',
-          "rholang"
-        );
-        console.log('Text:', editorRef.current.getText());
-        console.log('File path:', editorRef.current.getFilePath());
-        console.log('File URI:', editorRef.current.getFileUri());
-        editorRef.current.openDocument("second.rho", "Nil", "rholang", false); // Example with make-active false
-        editorRef.current.activateDocument("demo.rho");
-        editorRef.current.renameDocument("renamed.rho", "second.rho");
-        editorRef.current.setCursor({ line: 1, column: 3 });
-        console.log('Cursor after set:', editorRef.current.getCursor());
-        editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
-        console.log('Selection after set:', editorRef.current.getSelection());
-        editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 });
-        editorRef.current.clearHighlight();
-        editorRef.current.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 });
-        editorRef.current.setText("setText text");
-        console.log('Text after setText:', editorRef.current.getText());
-        editorRef.current.setText("setText updated");
-        console.log('Text after setText:', editorRef.current.getText());
-        editorRef.current.saveDocument();
-        console.log('State:', editorRef.current.getState());
-        editorRef.current.closeDocument();
-        subscription.unsubscribe();
-      }
-    }, 100);
-  })();
-</script>
+  const React = await import('react');
+  const { createRoot } = await import('react-dom/client');
+  const { Editor } = await import('@f1r3fly-io/lightning-bug');
+  const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
+  const { keymap } = await import('@codemirror/view');
+  const { defaultKeymap } = await import('@codemirror/commands');
+  const customExtensions = [keymap.of(defaultKeymap)];
+  const root = createRoot(document.getElementById('app'));
+  const editorRef = React.createRef();
+  root.render(React.createElement(Editor, {
+    ref: editorRef,
+    languages: {"rholang": RholangExtension},
+    extraExtensions: customExtensions
+  }));
+  const interval = setInterval(() => {
+    if (editorRef.current && editorRef.current.isReady()) {
+      clearInterval(interval);
+      const subscription = editorRef.current.getEvents().subscribe(event => {
+        console.log('Event:', event.type, event.data);
+      });
+      editorRef.current.openDocument(
+        "inmemory://demo.rho",
+        "new x in { x!(\"Hello\") | Nil }",
+        "rholang"
+      );
+    }
+  }, 100);
+})();
 ```
 
 This setup allows quick testing of the editor in isolation, without the full Re-frame app.
@@ -364,6 +342,8 @@ Use a React ref to access these methods for runtime control. All positions are 1
 | `getFilePath`     | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.                       | <table><tr><td>`editor.getFilePath();`</td></tr><tr><td>`editor.getFilePath("specific-uri");`</td></tr></table> |
 | `getFileUri`      | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.           | <table><tr><td>`editor.getFileUri();`</td></tr><tr><td>`editor.getFileUri("specific-uri");`</td></tr></table> |
 | `activateDocument` | <table><tr><td>`uri: string`</td></tr></table>                                                                      | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets the active document if exists, loads content to view, opens in LSP if not.                         | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
+| `query` | <table><tr><td>`query: string`</td></tr><tr><td>`params?: any[]`</td></tr></table> | <table><tr><td>`any`</td></tr></table> | Queries the internal DataScript database with the given query and optional params. | <table><tr><td>`editor.query('[:find ?uri :where [?e :document/uri ?uri]]');`</td></tr></table> |
+| `getDb` | <table><tr><td>none</td></tr></table> | <table><tr><td>`any`</td></tr></table> | Returns the DataScript connection object for direct access (advanced use). | <table><tr><td>`const db = editor.getDb();`</td></tr></table> |
 
 #### EditorState Schema (Return Value for getState)
 
@@ -381,37 +361,85 @@ interface EditorState {
   };
   cursor: { line: number; column: number };
   selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null;
-  lsp: {
+  lsp: Record<string, {
     connection: boolean;
     url: string | null;
     pending: Record<number, string>;
     initialized?: boolean;
-    logs: Array<{ message: string }>;
-  };
+  }>;
+  logs: Array<{ message: string; lang: string }>;
   languages: Record<string, LanguageConfig>;
   diagnostics: Array<{
-    document: { uri: string; version?: number };
-    diagnostic: { message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number };
-    type: 'diagnostic';
+    uri: string;
+    version?: number;
+    message: string;
+    severity: number;
+    startLine: number;
+    startChar: number;
+    endLine: number;
+    endChar: number;
   }>;
   symbols: Array<{
-    symbol: {
-      name: string;
-      kind: number;
-      startLine: number;
-      startChar: number;
-      endLine: number;
-      endChar: number;
-      selectionStartLine: number;
-      selectionStartChar: number;
-      selectionEndLine: number;
-      selectionEndChar: number;
-      parent?: number;
-    };
-    type: 'symbol';
+    name: string;
+    kind: number;
+    startLine: number;
+    startChar: number;
+    endLine: number;
+    endChar: number;
+    selectionStartLine: number;
+    selectionStartChar: number;
+    selectionEndLine: number;
+    selectionEndChar: number;
+    parent?: number;
   }>;
 }
 ```
+
+### Querying the DataScript Database
+
+The editor exposes the DataScript connection via `getDb()` for advanced querying using DataScript's Datalog language (similar to Datomic but with some differences in schema and queries).
+
+To query, use `query(query, params?)` which runs the query with optional parameters and returns the result as JS array. If params is omitted, an empty array is used.
+
+Example in vanilla JavaScript (no params):
+
+```javascript
+const query = '[:find ?content . :where [?e :workspace/active-uri ?uri] [?e :document/content ?content]]';
+const content = editorRef.current.query(query);
+console.log('Active content:', content);
+```
+
+With params:
+
+```javascript
+const query = '[:find ?content . :in $ ?uri :where [?e :document/uri ?uri] [?e :document/content ?content]]';
+const params = ['inmemory://demo.rho'];
+const content = editorRef.current.query(query, params);
+console.log('Specific content:', content);
+```
+
+For a more complex query with aggregation (e.g., count open documents):
+
+```javascript
+const query = '[:find (count ?e) :where [?e :type :document] [?e :document/opened true]]';
+const count = editorRef.current.query(query);
+console.log('Open documents count:', count[0][0]); // Returns [[N]], so access [0][0] for the count
+```
+
+For even more complex operations like pulling nested data (e.g., hierarchical symbols with parents), use `getDb()` and the DataScript library directly (require 'datascript' in your project, as `query` uses d/q which doesn't support pull).
+
+Example using pull for nested symbols:
+
+```javascript
+// Assume datascript is imported as ds
+const conn = editorRef.current.getDb();
+const query = '[:find ?e :where [?e :symbol/name "parent-symbol"]]'; // Find parent entity ID
+const parentId = ds.q(query, ds.db(conn))[0][0];
+const pulled = ds.pull(ds.db(conn), '[* {:symbol/parent [*]}]', parentId); // Pull with recursion on parent
+console.log('Nested symbol:', pulled);
+```
+
+Note: DataScript schema is fixed; see source for attributes like `:document/content`, `:diagnostic/message`, etc.
 
 ### RxJS Events
 
@@ -421,7 +449,7 @@ Subscribe to events via `getEvents()` for reactive updates. Each event is an obj
 |----------------------|-------------------------------------------------------------------------------|-------------------------------|
 | `ready`              | `null`                                                                        | Editor initialized and ready. |
 | `content-change`     | `{ content: string, uri: string }`                                            | Content updated (e.g., typing or setText). |
-| `selection-change`   | `{ cursor: { line: number; column: number }; selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } \| null, uri: string }` | Cursor or selection changed. |
+| `selection-change`   | `{ cursor: { line: number; column: number }; selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null, uri: string }` | Cursor or selection changed. |
 | `document-open`      | `{ uri: string; content: string; language: string; activated: boolean }`                          | Document opened or activated (activated true if made active). |
 | `document-close`     | `{ uri: string }`                                                             | Document closed. |
 | `document-rename`    | `{ old-uri: string; new-uri: string }`                                        | Document renamed. |
@@ -434,7 +462,7 @@ Subscribe to events via `getEvents()` for reactive updates. Each event is an obj
 | `connect`            | `null`                                                                        | LSP connected. |
 | `disconnect`         | `null`                                                                        | LSP disconnected. |
 | `lsp-error`          | `{ code: number; message: string }`                                           | LSP error occurred. |
-| `highlight-change`   | `{ from: { line: number; column: number }; to: { line: number; column: number } } \| null` | Highlight range updated or cleared. |
+| `highlight-change`   | `{ from: { line: number; column: number }; to: { line: number; column: number } } | null` | Highlight range updated or cleared. |
 
 ## Customizing the Editor Component
 
@@ -653,6 +681,53 @@ Events propagate internal changes/LSP notifications via RxJS.
 
 Performance uses debounced updates, viewport-only decorations, and incremental Tree-Sitter parsing.
 
+## Data Management with DataScript and Datalog
+
+Lightning Bug uses DataScript, an in-memory database library for ClojureScript, to manage internal state such as open documents, diagnostics, symbols, and logs. DataScript is inspired by Datomic, a persistent database system, but is designed for client-side use with features like immutable data structures, transactional updates, and efficient querying via Datalog.
+
+### What is Datalog?
+
+Datalog is a declarative query language for relational databases, rooted in logic programming (similar to Prolog). It allows expressing complex queries concisely using rules, patterns, and joins. Unlike SQL, Datalog is side-effect free and focuses on "what" data to retrieve rather than "how" to retrieve it. Queries are written as vectors of clauses (e.g., `:find`, `:where`), making them composable and easy to reason about.
+
+In Lightning Bug, Datalog queries fetch state like the active document's content or all diagnostics without imperative loops or conditionals.
+
+### DataScript vs. Datomic
+
+- **DataScript**: An embeddable, in-memory database for Clojure/ClojureScript. It supports Datalog queries, schema definitions, and transactions. Data is stored as an immutable index, enabling time-travel queries (query past states). In this project, DataScript manages the editor's workspace as a single DB connection (`conn`), with entities for documents (`:type :document`), diagnostics (`:type :diagnostic`), symbols (`:type :symbol`), and logs (`:type :log`). It's lightweight, requires no server, and integrates with Re-frame/Re-posh for reactive UI updates. Emphasis: Client-side focus makes it ideal for browser apps; no persistence needed here, but extensible via IndexedDB if desired.
+
+- **Datomic**: A distributed, persistent database for Clojure, also using Datalog. It emphasizes facts over places (immutable data accrual) and supports historical queries. Differences from DataScript: Server-based, scales horizontally, includes peer libraries for client querying. Lightning Bug uses DataScript for its in-browser simplicity, but the Datalog API is similar, easing migration if needed.
+
+Key similarities: Both use entity-attribute-value (EAV) tuples, Datalog for queries, and transactions for atomic updates. Differences: DataScript is ephemeral/in-memory; Datomic is durable/across time.
+
+### Usage in Lightning Bug
+
+DataScript stores editor state in a schema-defined DB (see `lib.db/schema`). Transactions (e.g., `d/transact!`) add/retract facts atomically. Queries (e.g., `d/q`) fetch data efficiently. Re-posh bridges DataScript to Re-frame for reactive subs.
+
+Examples:
+- Fetch active content: `(d/q '[:find ?content . :where [?a :workspace/active-uri ?uri] [?e :document/uri ?uri] [?e :document/content ?content]] @conn)`
+- Update document: `(d/transact! conn [[:db/add eid :document/content "new"]])`
+
+Public API exposes querying via `query()` and `getDb()` for custom Datalog access.
+
+### Learning References
+
+- **Datalog**:
+  - [Wikipedia: Datalog](https://en.wikipedia.org/wiki/Datalog) – Overview and history.
+  - [Learn Datalog Today](https://datomic.learn-some.com/) – Interactive tutorial with exercises.
+  - "Datalog and Recursive Query Processing" by Todd J. Green et al. – Academic paper on foundations.
+
+- **DataScript**:
+  - [GitHub Repo](https://github.com/tonsky/datascript) – Source code and docs.
+  - [DataScript Tutorial](https://github.com/kristianmandrup/datascript-tutorial) – Hands-on guide.
+  - [DataScript Internals](https://tonsky.me/blog/datascript-internals/) – Blog post by creator Nikita Prokopov.
+
+- **Datomic**:
+  - [Official Site](https://www.datomic.com/) – Downloads and resources.
+  - [Datomic Docs](https://docs.datomic.com/) – Comprehensive guides and API reference.
+  - [Day of Datomic](https://youtube.com/playlist?list=PLZdCLR02grLoMy4TXE4DZYIuxs3Q9uc4i&si=kCZCrCSx8iIUBe_L) – Video tutorials.
+
+Explore these to deepen understanding of query-driven state management in ClojureScript apps like Lightning Bug.
+
 ## React 19 Compatibility
 
 The library and demo app are compatible with React 19. Development tools like re-frame-10x use the React 18 preload for compatibility. The core editor component works seamlessly with React 19.
@@ -668,3 +743,29 @@ The library and demo app are compatible with React 19. Development tools like re
 - Branch from `main` for PRs. Include tests/docs. Reference issues.
 - Use labels (bug, enhancement) for issues. Provide repro steps.
 - Require 1 approval for reviews. Focus on readability, maintainability, DRY, and separation of concerns.
+
+## Release Process
+
+To release a new version of the library:
+
+1. Update `CHANGELOG.md` with the new version section (e.g., `[X.Y.Z] - YYYY-MM-DD`) and list changes under appropriate categories (Added, Changed, Fixed, etc.). Follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
+2. Update `package.json` with the new version number.
+3. Commit the changes with a message like "Prepare vX.Y.Z release".
+4. Tag the release: `git tag vX.Y.Z`.
+5. Push the tag: `git push origin vX.Y.Z`. This triggers the GitHub Actions workflow to build and publish the package to GitHub Packages.
+6. Verify the release on GitHub and in the NPM registry (under `@f1r3fly-io/lightning-bug`).
+
+This project adheres to [Semantic Versioning (SemVer)](https://semver.org/). SemVer uses the format MAJOR.MINOR.PATCH to communicate changes in software. The key rules are:
+
+- **MAJOR**: Increment when making incompatible API changes (e.g., 1.0.0 to 2.0.0). Reset MINOR and PATCH to 0.
+- **MINOR**: Increment for backward-compatible new functionality or deprecations (e.g., 1.0.0 to 1.1.0). Reset PATCH to 0; may include patch-level changes.
+- **PATCH**: Increment for backward-compatible bug fixes (e.g., 1.0.0 to 1.0.1). No reset needed for other components.
+
+**Pre-release versions** are denoted by appending a hyphen and identifiers (e.g., 1.0.0-alpha, 1.0.0-alpha.1), indicating instability and lower precedence than the normal version. **Build metadata** is denoted by appending a plus sign and identifiers (e.g., 1.0.0+20130313144700), which does not affect version precedence.
+
+**Handling changes**:
+- Breaking changes require a MAJOR increment.
+- New features (backward-compatible) require a MINOR increment.
+- Bug fixes (backward-compatible) require a PATCH increment.
+
+Version 0.y.z is for initial development, with potential for any changes, while 1.0.0 marks a stable public API. Once released, version contents must not be modified; changes require a new version.

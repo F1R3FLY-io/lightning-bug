@@ -1,3 +1,5 @@
+/** @externs */
+
 // Externs to prevent property renaming in advanced compilation for key libraries.
 
 // CodeMirror (@codemirror/state, @codemirror/view, @codemirror/language, etc.)
@@ -5,6 +7,7 @@ var codemirror = {};
 codemirror.state = {};
 codemirror.state.Annotation = function() {};
 codemirror.state.Annotation.define = function() {};
+codemirror.state.Annotation.of = function() {};
 codemirror.state.StateField = function() {};
 codemirror.state.StateField.define = function() {};
 codemirror.state.ChangeSet = function() {};
@@ -25,6 +28,12 @@ codemirror.state.RangeSetBuilder.prototype.finish = function() {};
 codemirror.state.Compartment = function() {};
 codemirror.state.Compartment.prototype.of = function() {};
 codemirror.state.Compartment.prototype.reconfigure = function() {};
+codemirror.state.StateEffect = function() {};
+codemirror.state.StateEffect.define = function() {};
+codemirror.state.Text = function() {};
+codemirror.state.Text.prototype.lineAt = function() {};
+codemirror.state.Text.prototype.line = function() {};
+codemirror.state.Text.prototype.lines = {};
 codemirror.view = {};
 codemirror.view.Decoration = function() {};
 codemirror.view.Decoration.mark = function() {};
@@ -45,13 +54,14 @@ codemirror.view.keymap.of = function() {};
 codemirror.view.lineNumbers = function() {};
 codemirror.language = {};
 codemirror.language.bracketMatching = function() {};
-codemirror.language.indentOnInput = function() {};
-codemirror.language.indentUnit = {};
-codemirror.language.indentUnit.of = function() {};
 codemirror.language.indentService = {};
 codemirror.language.indentService.of = function() {};
+codemirror.language.indentUnit = {};
+codemirror.language.indentUnit.of = function() {};
 codemirror.autocomplete = {};
 codemirror.autocomplete.closeBrackets = function() {};
+codemirror.commands = {};
+codemirror.commands.defaultKeymap = {};
 codemirror.lint = {};
 codemirror.lint.lintGutter = function() {};
 codemirror.lint.linter = function() {};

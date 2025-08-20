@@ -37,17 +37,12 @@
   </script>
   <script type="module">
    (async () => {
-      // Patch goog BEFORE imports
-      globalThis.goog = globalThis.goog || {};  // Ensure goog exists
-      globalThis.goog.provide = globalThis.goog.constructNamespace_ || function(name) { /* noop or log */ };
-      globalThis.goog.require = (globalThis.goog.module && globalThis.goog.module.get) || globalThis.goog.require || function(name) { /* noop */ };
-
       const React = await import('react');
       const { createRoot } = await import('react-dom/client');
       const { Editor } = await import('@f1r3fly-io/lightning-bug');
       const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
       const { keymap } = await import('@codemirror/view');
-      const { defaultKeymap } = await import('@codemirror/commands');  // Real import example
+      const { defaultKeymap } = await import('@codemirror/commands');
       const customExtensions = [keymap.of(defaultKeymap)];
       const root = createRoot(document.getElementById('app'));
       const editorRef = React.createRef();
@@ -67,6 +62,14 @@
             "new x in { x!(\"Hello\") | Nil }",
             "rholang"
           );
+          console.log('State:', editorRef.current.getState());
+          editorRef.current.setCursor({ line: 1, column: 3 });
+          console.log('Cursor:', editorRef.current.getCursor());
+          editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+          console.log('Selection:', editorRef.current.getSelection());
+          console.log('Text:', editorRef.current.getText());
+          console.log('File Path:', editorRef.current.getFilePath());
+          console.log('File URI:', editorRef.current.getFileUri());
         }
       }, 100);
     })();

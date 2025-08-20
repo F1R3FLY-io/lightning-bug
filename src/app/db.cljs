@@ -1,10 +1,6 @@
 (ns app.db
   (:require
-   [datascript.core :as d]
-   [ext.lang.rholang :refer [config]]
-   [lib.db :as lib-db]))
-
-(defonce ds-conn (d/create-conn lib-db/schema))
+   [ext.lang.rholang :refer [config]]))
 
 (def default-db
   (let [langs {"rholang" config
@@ -23,5 +19,4 @@
      :search {:term "" :results [] :visible? false}
      :modals {:rename {:visible? false :new-name ""}}
      :logs-visible? false
-     :logs-height 200
-     :workspace {:files {} :active-file nil}}))
+     :logs-height 200}))

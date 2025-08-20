@@ -89,31 +89,49 @@ export interface EditorState {
   languages: Record<string, LanguageConfig>;
   /** Array of diagnostics from LSP. */
   diagnostics: Array<{
-    /** Document metadata. */
-    document: { uri: string; version?: number };
-    /** Diagnostic details. */
-    diagnostic: { message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number };
-    /** Type discriminator. */
-    type: 'diagnostic';
+    /** Document URI. */
+    uri: string;
+    /** Document version at time of diagnostic. */
+    version?: number;
+    /** Diagnostic message. */
+    message: string;
+    /** Severity (1: Error, 2: Warning, 3: Info, 4: Hint). */
+    severity: number;
+    /** Start line (0-based). */
+    startLine: number;
+    /** Start character (0-based). */
+    startChar: number;
+    /** End line (0-based). */
+    endLine: number;
+    /** End character (0-based). */
+    endChar: number;
   }>;
   /** Array of symbols from LSP. */
   symbols: Array<{
-    /** Symbol details. */
-    symbol: {
-      name: string;
-      kind: number;
-      startLine: number;
-      startChar: number;
-      endLine: number;
-      endChar: number;
-      selectionStartLine: number;
-      selectionStartChar: number;
-      selectionEndLine: number;
-      selectionEndChar: number;
-      parent?: number;
-    };
-    /** Type discriminator. */
-    type: 'symbol';
+    /** Document URI. */
+    uri: string;
+    /** Symbol name. */
+    name: string;
+    /** Symbol kind (LSP standard). */
+    kind: number;
+    /** Start line (0-based). */
+    startLine: number;
+    /** Start character (0-based). */
+    startChar: number;
+    /** End line (0-based). */
+    endLine: number;
+    /** End character (0-based). */
+    endChar: number;
+    /** Selection start line (0-based). */
+    selectionStartLine: number;
+    /** Selection start character (0-based). */
+    selectionStartChar: number;
+    /** Selection end line (0-based). */
+    selectionEndLine: number;
+    /** Selection end character (0-based). */
+    selectionEndChar: number;
+    /** Parent symbol ID (or null). */
+    parent?: number;
   }>;
 }
 
@@ -160,6 +178,10 @@ export interface EditorRef {
   getFileUri(uri?: string): string | null;
   /** Sets the active document if exists, loads content to view, opens in LSP if not. */
   activateDocument(uri: string): void;
+  /** Queries the internal DataScript database with the given query and optional params. */
+  query(query: any, params?: any[]): any;
+  /** Returns the DataScript connection object for direct access (advanced use). */
+  getDb(): any; // DataScript connection object
 }
 
 /**

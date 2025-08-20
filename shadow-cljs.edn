@@ -13,7 +13,10 @@
                                                 "@codemirror/autocomplete" "@codemirror/commands" "@codemirror/language" "@codemirror/state" "@codemirror/view"
                                                 "web-tree-sitter"}}
                  :compiler-options {:closure-extra-annotations #{"@typedef" "@param" "@return" "@type" "@prop"}
-                                    :externs ["externs/libs.ext.js"]}}
+                                    :externs ["externs/libs.ext.js"
+                                              "datascript/externs.js"]}
+                 :dev {:optimizations :none}
+                 :release {:optimizations :advanced}}
           :app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"

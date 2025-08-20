@@ -47,7 +47,7 @@
                                 "")
                           from {:line line :column col}
                           to {:line (inc (:diagnostic/end-line d 0)) :column (inc (:diagnostic/end-char d 0))}]
-                      ^{:key (str line "-" col "-" msg)}
+                      ^{:key (str line "-" col "-" msg "-" sev)}
                       [:label {:class cls
                                :style {:cursor "pointer"
                                        :display "block"}
