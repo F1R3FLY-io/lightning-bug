@@ -1,5 +1,7 @@
 # Lightning Bug
 
+[![CI Status](https://github.com/f1R3FLY-io/lightning-bug/actions/workflows/ci.yaml/badge.svg)](https://github.com/f1R3FLY-io/lightning-bug/actions/workflows/ci.yaml)
+
 Lightning Bug is a modern, extensible text editor built with ClojureScript and CodeMirror 6. The editor features pluggable language support via Tree-Sitter for syntax highlighting and indentation. It also integrates with LSP for advanced features like diagnostics and symbols. The design is decoupled from specific languages or servers. This allows easy extension for new languages.
 
 ## License
