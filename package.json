@@ -37,8 +37,8 @@
     "test:types": "tsd",
     "build:demo": "node scripts/build-demo.js",
     "test": "npx shadow-cljs watch test",
-    "test:headless": "npx shadow-cljs compile karma-test && npx karma start --single-run",
-    "test:headless-advanced": "npx shadow-cljs compile karma-test-advanced && npx karma start --single-run"
+    "test:headless": "npx shadow-cljs compile karma-test && KARMA_FILE=target/karma-test.js npx karma start --single-run",
+    "test:headless-advanced": "npx shadow-cljs compile karma-test-advanced && KARMA_FILE=target/karma-test-advanced.js npx karma start --single-run"
   },
   "main": "dist/libs/lib.core.js",
   "module": "dist/libs/lib.core.js",

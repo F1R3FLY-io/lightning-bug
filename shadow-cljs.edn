@@ -64,6 +64,7 @@
                                                        "fs/promises" false
                                                        "path" false}}
                                 :compiler-options {:optimizations :advanced
+                                                   :pseudo-names true
                                                    :externs ["externs/libs.ext.js"
                                                              "datascript/externs.js"]}}}
  :dev-http {3000 "resources/public"}

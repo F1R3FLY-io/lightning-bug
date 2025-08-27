@@ -1,8 +1,9 @@
 module.exports = function (config) {
+  var karmaFile = process.env.KARMA_FILE || 'target/karma-test.js';
   config.set({
     frameworks: ['cljs-test'],
     files: [
-      'target/karma-test.js',
+      karmaFile,
       { pattern: 'resources/public/js/test/extensions/**', watched: false, included: false, served: true },
       { pattern: 'resources/public/js/test/js/tree-sitter.wasm', watched: false, included: false, served: true }
     ],
@@ -11,7 +12,7 @@ module.exports = function (config) {
       '/js/tree-sitter.wasm': '/base/resources/public/js/test/js/tree-sitter.wasm'
     },
     colors: true,
-    logLevel: config.LOG_INFO,
+    logLevel: config.LOG_DEBUG,
     browsers: ['ChromeHeadless'],
     autoWatch: false,
     singleRun: true,
