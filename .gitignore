@@ -10,6 +10,7 @@
 !/externs/**/*.js
 !/.github/workflows/*.yaml
 !/.gitignore
+!/karma.conf.js
 !/LICENSE.txt
 !/NOTICE.txt
 !/.npmrc

@@ -11,6 +11,10 @@ export interface EditorProps {
   languages?: Record<string, LanguageConfig>;
   /** Array of additional CodeMirror extensions (e.g., keymaps, themes) to extend/override defaults. */
   extraExtensions?: Extension[];
+  /** Optional callback for content changes, triggered after updates. */
+  onContentChange?: (content: string) => void;
+  /** Default protocol for file paths (e.g., "inmemory://"). Defaults to "inmemory://". */
+  defaultProtocol?: string;
 }
 
 /**
@@ -61,7 +65,7 @@ export interface LspState {
   /** WebSocket URL for the LSP server. */
   url: string | null;
   /** Map of pending request IDs to their types. */
-  pending: Record<number, string>;
+  pending: Record<number, string | { type: string; uri: string }>;
   /** Flag indicating if the LSP is initialized. */
   initialized?: boolean;
 }
@@ -136,6 +140,31 @@ export interface EditorState {
 }
 
 /**
+ * Event data emitted by the editor's RxJS Observable.
+ */
+export type EditorEvent =
+  | { type: 'ready'; data: {} }
+  | { type: 'content-change'; data: { content: string; uri: string } }
+  | { type: 'selection-change'; data: { cursor: { line: number; column: number }; selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null; uri: string } }
+  | { type: 'document-open'; data: { uri: string; content: string; language: string; activated: boolean } }
+  | { type: 'document-close'; data: { uri: string } }
+  | { type: 'document-rename'; data: { oldUri: string; newUri: string } }
+  | { type: 'document-save'; data: { uri: string; content: string } }
+  | { type: 'lsp-message'; data: { method: string; lang: string; params?: any } }
+  | { type: 'lsp-initialized'; data: { lang: string } }
+  | { type: 'diagnostics'; data: Array<{ uri: string; version?: number; message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number }> }
+  | { type: 'symbols'; data: Array<{ uri: string; name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number }> }
+  | { type: 'log'; data: { message: string; lang: string } }
+  | { type: 'connect'; data: { lang: string } }
+  | { type: 'disconnect'; data: { lang: string } }
+  | { type: 'lsp-error'; data: { message: string; lang: string } }
+  | { type: 'highlight-change'; data: { from: { line: number; column: number }; to: { line: number; column: number } } | null }
+  | { type: 'language-change'; data: { uri: string; language: string } }
+  | { type: 'scroll'; data: { from: { line: number; column: number }; to: { line: number; column: number } } }
+  | { type: 'destroy'; data: {} }
+  | { type: 'error'; data: { message: string; operation: string; [key: string]: any } };
+
+/**
  * Ref interface for imperative methods on the Editor component.
  * All positions are 1-based (line/column starting at 1).
  */
@@ -143,7 +172,7 @@ export interface EditorRef {
   /** Returns the full current state (workspace, diagnostics, symbols, etc.). */
   getState(): EditorState;
   /** Returns RxJS observable for subscribing to events. */
-  getEvents(): Observable<{ type: string; data: any }>;
+  getEvents(): Observable<EditorEvent>;
   /** Returns current cursor position (1-based) for active document. */
   getCursor(): { line: number; column: number };
   /** Sets cursor position for active document (triggers `selection-change` event). */
@@ -152,14 +181,14 @@ export interface EditorRef {
   getSelection(): { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null;
   /** Sets selection range for active document (triggers `selection-change` event). */
   setSelection(from: { line: number; column: number }, to: { line: number; column: number }): void;
-  /** Opens or activates a document with URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. */
-  openDocument(uri: string, content?: string, lang?: string, makeActive?: boolean): void;
+  /** Opens or activates a document with file path or URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. */
+  openDocument(fileOrUri: string, content?: string, language?: string, makeActive?: boolean): void;
   /** Closes the specified or active document (triggers `document-close`). Notifies LSP if open. */
-  closeDocument(uri?: string): void;
+  closeDocument(fileOrUri?: string): void;
   /** Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP. */
-  renameDocument(newName: string, oldUri?: string): void;
+  renameDocument(newFileOrUri: string, oldFileOrUri?: string): void;
   /** Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`. */
-  saveDocument(uri?: string): void;
+  saveDocument(fileOrUri?: string): void;
   /** Returns `true` if editor is initialized and ready for methods. */
   isReady(): boolean;
   /** Highlights a range in active document (triggers `highlight-change` with range). */
@@ -169,19 +198,23 @@ export interface EditorRef {
   /** Scrolls to center on a range in active document. */
   centerOnRange(from: { line: number; column: number }, to: { line: number; column: number }): void;
   /** Returns text for specified or active document, or `null` if not found. */
-  getText(uri?: string): string | null;
+  getText(fileOrUri?: string): string | null;
   /** Replaces entire text for specified or active document (triggers `content-change`). */
-  setText(text: string, uri?: string): void;
+  setText(text: string, fileOrUri?: string): void;
   /** Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none. */
-  getFilePath(uri?: string): string | null;
+  getFilePath(fileOrUri?: string): string | null;
   /** Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none. */
-  getFileUri(uri?: string): string | null;
+  getFileUri(fileOrUri?: string): string | null;
   /** Sets the active document if exists, loads content to view, opens in LSP if not. */
-  activateDocument(uri: string): void;
+  activateDocument(fileOrUri: string): void;
   /** Queries the internal DataScript database with the given query and optional params. */
   query(query: any, params?: any[]): any;
   /** Returns the DataScript connection object for direct access (advanced use). */
   getDb(): any; // DataScript connection object
+  /** Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active). */
+  getDiagnostics(fileOrUri?: string): Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>;
+  /** Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active). */
+  getSymbols(fileOrUri?: string): Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>;
 }
 
 /**

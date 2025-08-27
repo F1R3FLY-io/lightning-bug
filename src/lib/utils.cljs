@@ -1,5 +1,27 @@
 (ns lib.utils)
 
+(defn generate-uuid
+  "Generates a random UUID."
+  []
+  (random-uuid))
+
+(defn get-extension
+  "Returns the primary extension for a language from the db."
+  [db lang]
+  (or (first (get-in db [:languages lang :extensions])) "text"))
+
+(defn get-lang-from-ext
+  [db ext]
+  (or (ffirst (filter (fn [[_ v]] (some #{ext} (:extensions v))) (:languages db)))
+      (:default-language db)))
+
+(defn new-untitled-name
+  "Generates an untitled file name with optional index and extension."
+  [db n]
+  (let [lang (:default-language db)
+        ext (get-extension db lang)]
+    (str "untitled" (when (pos? n) (str "-" n)) ext)))
+
 (defn offset-to-pos [^js/Text doc ^number offset one-based?]
   (let [line (.lineAt doc offset)
         l (if one-based? (.-number line) (dec (.-number line)))
@@ -15,7 +37,8 @@
             col (:column pos)
             c (if one-based? (dec col) col)
             max-c (.-length line)]
-        (+ (.-from line) (min (max c 0) max-c))))))
+        (when (and (>= c 0) (<= c max-c))
+          (+ (.-from line) c))))))
 
 (defn debounce
   "Returns a debounced version of function f that delays invocation by ms milliseconds.

@@ -15,8 +15,10 @@
                  :compiler-options {:closure-extra-annotations #{"@typedef" "@param" "@return" "@type" "@prop"}
                                     :externs ["externs/libs.ext.js"
                                               "datascript/externs.js"]}
-                 :dev {:optimizations :none}
-                 :release {:optimizations :advanced}}
+                 :dev {:optimizations :none
+                       :compiler-options {:closure-defines {"lib.db.DEBUG" true}}}
+                 :release {:optimizations :advanced
+                           :compiler-options {:closure-defines {"lib.db.DEBUG" false}}}}
           :app {:target :browser
                 :output-dir "resources/public/js"
                 :asset-path "/js"
@@ -46,6 +48,13 @@
                             :autorun true}
                  :js-options {:resolve {"fs" false
                                         "fs/promises" false
-                                        "path" false}}}}
+                                        "path" false}}}
+          :karma-test {:target :karma
+                       :output-to "target/karma-test.js"
+                       :ns-regexp "-test$"
+                       :entries [cljs-test-runner]
+                       :js-options {:resolve {"fs" false
+                                              "fs/promises" false
+                                              "path" false}}}}
  :dev-http {3000 "resources/public"}
  :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]}

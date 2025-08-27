@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2025-08-27
+
+### Added
+
+- Added `getDiagnostics` and `getSymbols` API methods to retrieve LSP diagnostics and symbols for a file.
+- Added `defaultProtocol` prop to Editor for configuring the default URI protocol.
+- Added `test:headless` `npm` script to execute the browser tests in a headless instance of Chrome.
+- Added `.github/workflows/ci.yaml` to run the tests against PRs and merges to `main`
+
+### Changed
+
+- Public API methods now accept file paths or URIs for document identifiers. Paths are prepended with a configurable default protocol (defaults to `"inmemory://"`). Renamed parameters to `fileOrUri`.
+- Enabled conditional spec validation based on build mode (enabled in dev, disabled in release).
+- Replaced manual predicate checks with spec validations, using s/explain-str for detailed errors.
+- Runs the headless browser tests before releasing a new NPM package.
+
+### Fixed
+
+- All browser tests now pass.
+
 ## [0.3.0] - 2025-08-20
 
 ### Changed

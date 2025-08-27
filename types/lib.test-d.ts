@@ -2,12 +2,13 @@ import { expectType, expectAssignable } from 'tsd';
 import * as React from 'react';
 import { Extension } from '@codemirror/state';
 import { Observable } from 'rxjs';
-import type { EditorProps, EditorRef, EditorState, LanguageConfig } from './lib.d.ts';
+import type { EditorProps, EditorRef, EditorState, LanguageConfig, EditorEvent } from './lib.d.ts';
 
 // Check props interface
 expectAssignable<EditorProps>({
   languages: { text: { extensions: ['.txt'] } },
   extraExtensions: [] as Extension[],
+  defaultProtocol: "inmemory://"
 });
 
 // Check ref methods
@@ -15,7 +16,7 @@ const ref = React.createRef<EditorRef>();
 if (ref.current) {
   expectType<EditorState>(ref.current.getState());
   expectType<void>(ref.current.setText('updated', 'uri'));
-  expectType<Observable<{ type: string; data: any }>>(ref.current.getEvents());
+  expectType<Observable<EditorEvent>>(ref.current.getEvents());
   expectType<{ line: number; column: number }>(ref.current.getCursor());
   expectType<void>(ref.current.setCursor({ line: 1, column: 1 }));
   expectType<{ from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null>(ref.current.getSelection());
@@ -37,6 +38,8 @@ if (ref.current) {
   expectType<any>(ref.current.query('query', [1, 'param']));
   expectType<any>(ref.current.query('query', []));
   expectType<any>(ref.current.getDb());
+  expectType<Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>>(ref.current.getDiagnostics('uri'));
+  expectType<Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>>(ref.current.getSymbols('uri'));
 }
 
 // Check state shape

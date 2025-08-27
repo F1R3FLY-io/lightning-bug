@@ -64,7 +64,9 @@ The bindings are referenced in `package.json` via the `"types"` fields in `"expo
 
 ## Running Tests
 
-To run browser tests, execute `npx shadow-cljs watch test`. Open `http://localhost:8021` in a browser to run and view tests.
+To run browser tests interactively, execute `npx shadow-cljs watch test`. Open `http://localhost:8021` in a browser to run and view tests.
+
+To run headless tests for CI or command-line, execute `npm run test:headless`.
 
 To validate TypeScript bindings, run `npm run test:types`.
 
@@ -344,6 +346,8 @@ Use a React ref to access these methods for runtime control. All positions are 1
 | `activateDocument` | <table><tr><td>`uri: string`</td></tr></table>                                                                      | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets the active document if exists, loads content to view, opens in LSP if not.                         | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
 | `query` | <table><tr><td>`query: string`</td></tr><tr><td>`params?: any[]`</td></tr></table> | <table><tr><td>`any`</td></tr></table> | Queries the internal DataScript database with the given query and optional params. | <table><tr><td>`editor.query('[:find ?uri :where [?e :document/uri ?uri]]');`</td></tr></table> |
 | `getDb` | <table><tr><td>none</td></tr></table> | <table><tr><td>`any`</td></tr></table> | Returns the DataScript connection object for direct access (advanced use). | <table><tr><td>`const db = editor.getDb();`</td></tr></table> |
+| `getDiagnostics` | <table><tr><td>`uri?`: `string`</td></tr></table> | <table><tr><td>`Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>`</td></tr></table> | Retrieves the LSP diagnostics for the specified or active file. | <table><tr><td>`const diags = editorRef.current.getDiagnostics();`</td></tr><tr><td>`const diags = editorRef.current.getDiagnostics('inmemory://demo.rho');`</td></tr></table> |
+| `getSymbols` | <table><tr><td>`uri?`: `string`</td></tr></table> | <table><tr><td>`Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>`</td></tr></table> | Retrieves the LSP symbols for the specified or active file. | <table><tr><td>`const syms = editorRef.current.getSymbols();`</td></tr><tr><td>`const syms = editorRef.current.getSymbols('inmemory://demo.rho');`</td></tr></table> |
 
 #### EditorState Schema (Return Value for getState)
 

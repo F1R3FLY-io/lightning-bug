@@ -4,6 +4,8 @@
    [taoensso.timbre :as log]
    [datascript.core :as d]))
 
+(goog-define DEBUG true)
+
 (def schema {:symbol/parent {:db/valueType :db.type/ref}
              :symbol/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
              :diagnostic/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
@@ -12,12 +14,17 @@
 
 (defonce conn (d/create-conn schema))
 
-(s/def :document/uri string?)
-(s/def :document/version nat-int?)
-(s/def :document/text string?)
-(s/def :document/language string?)
-(s/def :document/dirty boolean?)
-(s/def :document/opened boolean?)
+(s/def ::id integer?)
+(s/def ::dirty boolean?)
+(s/def ::text string?)
+(s/def ::language string?)
+(s/def ::version nat-int?)
+(s/def :document/uri ::text)
+(s/def :document/version ::version)
+(s/def :document/text ::text)
+(s/def :document/language ::language)
+(s/def :document/dirty ::dirty)
+(s/def :document/opened boolean?)  ;; specifies the document is opened in the editor (for LSP languages, set after "textDocument/didOpen" is sent)
 (s/def ::document
   (s/and
    (s/keys :req [:document/uri
@@ -118,13 +125,17 @@
                   {:log/message (:message log)
                    :log/lang (:lang log)
                    :type :log}) logs)]
-    (doseq [entity tx]
-      (when-not (valid-log? entity)
-        (log/warn "Invalid log entity:" entity)))
+    (when DEBUG
+      (doseq [entity tx]
+        (when-not (valid-log? entity)
+          (log/warn "Invalid log entity:" (s/explain-str ::log entity)))))
     (d/transact! conn tx)))
 
 (defn document-id-lang-opened-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?e ?lang ?opened]
           :in $ ?uri
@@ -136,9 +147,14 @@
 
 (defn active-uri
   []
-  (d/q '[:find ?uri .
-         :where [?e :workspace/active-uri ?uri]]
-       @conn))
+  (if DEBUG
+    (let [uris (d/q '[:find [?uri ...] :where [?e :workspace/active-uri ?uri]] @conn)]
+      (when (> (count uris) 1)
+        (log/warn "Multiple active URIs found:" uris))
+      (first uris))
+    (d/q '[:find ?uri .
+           :where [?e :workspace/active-uri ?uri]]
+         @conn)))
 
 (defn active-text
   []
@@ -156,8 +172,19 @@
                 [?e :document/language ?lang]]
        @conn))
 
+(defn active-version
+  []
+  (d/q '[:find ?version .
+         :where [?a :workspace/active-uri ?uri]
+                [?e :document/uri ?uri]
+                [?e :document/version ?version]]
+       @conn))
+
 (defn document-text-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (d/q '[:find ?text .
          :in $ ?uri
          :where [?e :document/uri ?uri]
@@ -166,6 +193,9 @@
 
 (defn document-version-by-id
   [id]
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id))))
   (d/q '[:find ?version .
          :in $ ?e
          :where [?e :document/version ?version]]
@@ -173,6 +203,9 @@
 
 (defn document-id-version-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?e ?version]
           :in $ ?uri
@@ -183,6 +216,9 @@
 
 (defn document-opened-by-uri?
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (d/q '[:find ?opened .
          :in $ ?uri
          :where [?e :document/uri ?uri]
@@ -191,6 +227,9 @@
 
 (defn document-dirty-by-uri?
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (d/q '[:find ?dirty .
          :in $ ?uri
          :where [?e :document/uri ?uri]
@@ -219,17 +258,24 @@
 
 (defn diagnostics
   []
-  (d/q '[:find ?uri ?version ?message ?severity ?startLine ?startChar ?endLine ?endChar
+  (d/q '[:find ?uri ?diag-version ?message ?severity ?start-line ?start-char ?end-line ?end-char
          :keys uri version message severity startLine startChar endLine endChar
          :where [?e :diagnostic/document ?doc]
                 [?doc :document/uri ?uri]
-                [?e :diagnostic/version ?version]
+                [?doc :document/version ?doc-version]
                 [?e :diagnostic/message ?message]
                 [?e :diagnostic/severity ?severity]
-                [?e :diagnostic/start-line ?startLine]
-                [?e :diagnostic/start-char ?startChar]
-                [?e :diagnostic/end-line ?endLine]
-                [?e :diagnostic/end-char ?endChar]]
+                [?e :diagnostic/start-line ?start-line]
+                [?e :diagnostic/start-char ?start-char]
+                [?e :diagnostic/end-line ?end-line]
+                [?e :diagnostic/end-char ?end-char]
+                (or-join [?e ?diag-version ?doc-version]
+                          (and [?e :diagnostic/version ?diag-version]
+                               [(= ?diag-version ?doc-version)])
+                          (and [(missing? $ ?e :diagnostic/version)]
+                               [(identity ?doc-version) ?diag-version])
+                          (and [?e :diagnostic/version ?diag-version]
+                               [(nil? ?diag-version)]))]
        @conn))
 
 (defn symbols
@@ -237,14 +283,14 @@
   (d/q '[:find ?uri
                ?name
                ?kind
-               ?startLine
-               ?startChar
-               ?endLine
-               ?endChar
-               ?selectionStartLine
-               ?selectionStartChar
-               ?selectionEndLine
-               ?selectionEndChar
+               ?start-line
+               ?start-char
+               ?end-line
+               ?end-char
+               ?selection-start-line
+               ?selection-start-char
+               ?selection-end-line
+               ?selection-end-char
                ?parent
          :keys uri
                name
@@ -262,15 +308,18 @@
                 [?doc :document/uri ?uri]
                 [?e :symbol/name ?name]
                 [?e :symbol/kind ?kind]
-                [?e :symbol/start-line ?startLine]
-                [?e :symbol/start-char ?startChar]
-                [?e :symbol/end-line ?endLine]
-                [?e :symbol/end-char ?endChar]
-                [?e :symbol/selection-start-line ?selectionStartLine]
-                [?e :symbol/selection-start-char ?selectionStartChar]
-                [?e :symbol/selection-end-line ?selectionEndLine]
-                [?e :symbol/selection-end-char ?selectionEndChar]
-                [?e :symbol/parent ?parent]]
+                [?e :symbol/start-line ?start-line]
+                [?e :symbol/start-char ?start-char]
+                [?e :symbol/end-line ?end-line]
+                [?e :symbol/end-char ?end-char]
+                [?e :symbol/selection-start-line ?selection-start-line]
+                [?e :symbol/selection-start-char ?selection-start-char]
+                [?e :symbol/selection-end-line ?selection-end-line]
+                [?e :symbol/selection-end-char ?selection-end-char]
+                (or-join [?e ?parent]
+                          [?e :symbol/parent ?parent]
+                          (and [(missing? $ ?e :symbol/parent)]
+                              [(ground 0) ?parent]))]
        @conn))
 
 (defn active-uri-text-lang
@@ -280,13 +329,15 @@
           :where [?a :workspace/active-uri ?uri]
                  [?e :document/uri ?uri]
                  [?e :document/text ?text]
-                 [?e :document/language ?lang]
-                 [?e :document/version ?version]]
+                 [?e :document/language ?lang]]
         @conn)
    [nil nil nil]))
 
 (defn doc-text-version-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?text ?version]
           :in $ ?uri
@@ -298,6 +349,9 @@
 
 (defn doc-id-text-lang-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?e ?text ?lang]
           :in $ ?uri
@@ -309,6 +363,9 @@
 
 (defn doc-text-lang-dirty-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?text ?lang ?dirty]
           :in $ ?uri
@@ -321,6 +378,9 @@
 
 (defn document-id-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (d/q '[:find ?e .
          :in $ ?uri
          :where [?e :document/uri ?uri]]
@@ -328,6 +388,9 @@
 
 (defn doc-text-lang-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?text ?lang]
           :in $ ?uri
@@ -337,8 +400,24 @@
         @conn uri)
    [nil nil]))
 
+(defn document-language-by-uri
+  [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (or
+   (d/q '[:find ?lang .
+          :in $ ?uri
+          :where [?e :document/uri ?uri]
+                 [?e :document/language ?lang]]
+        @conn uri)
+   [nil nil]))
+
 (defn document-language-opened-by-uri
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (or
    (d/q '[:find [?lang ?opened]
           :in $ ?uri
@@ -350,104 +429,148 @@
 
 (defn inc-document-version-by-uri!
   [uri]
-  (let [[id old-version] (document-id-version-by-uri uri)]
-    (when id
-      (let [new-version (inc old-version)
-            tx [[:db/add id :document/version new-version]]]
-        (when (not (nat-int? new-version))
-          (log/warn "Invalid new-version for uri" uri ":" new-version))
-        (d/transact! conn tx)
-        new-version))))
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (when-let [[id old-version] (document-id-version-by-uri uri)]
+    (let [new-version (inc old-version)
+          tx [[:db/add id :document/version new-version]]]
+      (when DEBUG
+        (when-not (s/valid? :document/version new-version)
+          (log/warn "Invalid new-version for uri" uri ":" (s/explain-str :document/version new-version))))
+      (d/transact! conn tx)
+      new-version)))
 
 (defn inc-document-version-by-id!
   [id]
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id))))
   (let [old-version (document-version-by-id id)]
     (when id
       (let [new-version (inc old-version)
             tx [[:db/add id :document/version new-version]]]
-        (when (not (nat-int? new-version))
-          (log/warn "Invalid new-version for id" id ":" new-version))
+        (when DEBUG
+          (when-not (s/valid? :document/version new-version)
+            (log/warn "Invalid new-version for id" id ":" (s/explain-str :document/version new-version))))
         (d/transact! conn tx)
         new-version))))
 
 (defn update-document-dirty-by-id!
   [id dirty?]
-  (let [tx [[:db/add id :document/dirty dirty?]]]
-    (when (not (integer? id))
-      (log/warn "Invalid id for update-document-dirty-by-id!:" id))
-    (when (not (boolean? dirty?))
-      (log/warn "Invalid dirty? for update-document-dirty-by-id!:" dirty?))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id)))
+    (when-not (s/valid? ::dirty dirty?)
+      (log/warn (s/explain-str ::dirty dirty?))))
+  (if (d/entity @conn id)
+    (let [tx [[:db/add id :document/dirty dirty?]]]
+      (d/transact! conn tx))
+    (log/error "No entity exists with id" id)))
 
 (defn update-document-text-by-id!
   [id text]
-  (let [tx [[:db/add id :document/text text]
-            [:db/add id :document/dirty true]]]
-    (when (not (and (integer? id) (string? text)))
-      (log/warn "Invalid parameters for update-document-text-by-id! id:" id "text:" text))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id)))
+    (when-not (s/valid? ::text text)
+      (log/warn (s/explain-str ::text text))))
+  (if (d/entity @conn id)
+    (let [tx [[:db/add id :document/text text]
+              [:db/add id :document/dirty true]]]
+      (d/transact! conn tx))
+    (log/error "No entity exists with id" id)))
 
 (defn update-document-text-by-uri!
   [uri text]
-  (let [tx [[:db/add [:document/uri uri] :document/text text]
-            [:db/add [:document/uri uri] :document/dirty false]]]
-    (when (not (and (string? uri) (string? text)))
-      (log/warn "Invalid parameters for update-document-text-by-uri! uri:" uri "text:" text))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri)))
+    (when-not (s/valid? ::text text)
+      (log/warn (s/explain-str ::text text))))
+  (when-let [id (document-id-by-uri uri)]
+    (let [tx [[:db/add id :document/text text]
+              [:db/add id :document/dirty true]]]
+      (d/transact! conn tx))))
 
 (defn update-document-uri-language-by-id!
   [id uri lang]
-  (let [tx [[:db/add id :document/uri uri]
-            [:db/add id :document/language lang]]]
-    (when (not (and (integer? id) (string? uri) (string? lang)))
-      (log/warn "Invalid parameters for update-document-uri-language-by-id! id:" id "uri:" uri "lang:" lang))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id)))
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri)))
+    (when-not (s/valid? ::language lang)
+      (log/warn (s/explain-str ::language lang))))
+  (if (d/entity @conn id)
+    (let [tx [[:db/add id :document/uri uri]
+              [:db/add id :document/language lang]]]
+      (d/transact! conn tx))
+    (log/error "No entity exists with id" id)))
 
 (defn update-document-uri-by-id!
   [id uri]
-  (let [tx [[:db/add id :document/uri uri]]]
-    (when (not (and (integer? id) (string? uri)))
-      (log/warn "Invalid parameters for update-document-uri-by-id! id:" id "uri:" uri))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id)))
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (if (d/entity @conn id)
+    (let [tx [[:db/add id :document/uri uri]]]
+      (d/transact! conn tx))
+    (log/error "No entity exists with id" id)))
 
 (defn update-document-language-by-id!
   [id language]
-  (let [tx [[:db/add id :document/language language]]]
-    (when (not (and (integer? id) (string? language)))
-      (log/warn "Invalid parameters for update-document-language-by-id! id:" id "language:" language))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id)))
+    (when-not (s/valid? ::language language)
+      (log/warn (s/explain-str ::language language))))
+  (if (d/entity @conn id)
+    (let [tx [[:db/add id :document/language language]]]
+      (d/transact! conn tx))
+    (log/error "No entity exists with id" id)))
 
 (defn update-document-text-language-by-id!
   [id text lang]
-  (let [tx (cond-> []
-             text (conj [:db/add id :document/text text]
-                        [:db/add id :document/dirty true])
-             lang (conj [:db/add id :document/language lang]))]
-    (when (not (and (integer? id) (or (nil? text) (string? text)) (or (nil? lang) (string? lang))))
-      (log/warn "Invalid parameters for update-document-text-language-by-id! id:" id "text:" text "lang:" lang))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id)))
+    (when-not (or (nil? text) (s/valid? ::text text))
+      (log/warn (s/explain-str ::text text)))
+    (when-not (or (nil? lang) (s/valid? ::language lang))
+      (log/warn (s/explain-str ::language lang))))
+  (if (d/entity @conn id)
+    (let [tx (cond-> []
+               text (conj [:db/add id :document/text text]
+                          [:db/add id :document/dirty true])
+               lang (conj [:db/add id :document/language lang]))]
+      (d/transact! conn tx))
+    (log/error "No entity exists with id" id)))
 
 (defn document-opened-by-uri!
   [uri]
-  (let [tx [[:db/add [:document/uri uri] :document/opened true]]]
-    (when (not (string? uri))
-      (log/warn "Invalid uri for document-opened-by-uri!:" uri))
-    (d/transact! conn tx)))
-
-(defn document-dirty-by-id!
-  [id]
-  (let [tx [[:db/add id :document/dirty false]]]
-    (when (not (integer? id))
-      (log/warn "Invalid id for document-dirty-by-id!:" id))
-    (d/transact! conn tx)))
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (when-let [id (document-id-by-uri uri)]
+    (let [tx [[:db/add id :document/opened true]]]
+      (d/transact! conn tx))))
 
 (defn update-active-uri!
   [uri]
-  (let [tx [{:workspace/active-uri uri
-             :type :active-uri}]]
-    (doseq [entity tx]
-      (when-not (valid-active-uri? entity)
-        (log/warn "Invalid active-uri entity:" entity)))
+  (when DEBUG
+    (when-not (s/valid? :workspace/active-uri uri)
+      (log/warn (s/explain-str :workspace/active-uri uri))))
+  (let [prev-eids (d/q '[:find [?e ...] :where [?e :workspace/active-uri _]] @conn)
+        retracts (map (fn [eid] [:db/retractEntity eid]) prev-eids)
+        add {:workspace/active-uri uri :type :active-uri}
+        tx (conj retracts add)]
+    (when DEBUG
+      (doseq [entity (filter map? tx)]
+        (when-not (valid-active-uri? entity)
+          (log/warn "Invalid active-uri entity:" (s/explain-str ::active-uri entity)))))
     (d/transact! conn tx)))
 
 (defn create-documents!
@@ -460,16 +583,18 @@
                    :document/dirty (:dirty doc)
                    :document/opened (:opened doc)
                    :type :document}) docs)]
-    (doseq [entity tx]
-      (when-not (valid-document? entity)
-        (log/warn "Invalid document entity:" entity)))
+    (when DEBUG
+      (doseq [entity tx]
+        (when-not (valid-document? entity)
+          (log/warn "Invalid document entity:" (s/explain-str ::document entity)))))
     (d/transact! conn tx)))
 
 (defn delete-document-by-id!
   [id]
+  (when DEBUG
+    (when-not (s/valid? ::id id)
+      (log/warn (s/explain-str ::id id))))
   (let [tx [[:db/retractEntity id]]]
-    (when (not (integer? id))
-      (log/warn "Invalid id for delete-document-by-id!:" id))
     (d/transact! conn tx)))
 
 (defn first-document-uri
@@ -478,25 +603,28 @@
 
 (defn active-uri?
   [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
   (= uri (active-uri)))
 
 (defn- ensure-document-eid [uri version language text dirty opened]
-  (let [eid (document-id-by-uri uri)]
-    (if eid
-      eid
-      (let [temp-id -1
-            entity {:db/id temp-id
-                    :document/uri uri
-                    :document/version (or version 0)
-                    :document/text (or text "")
-                    :document/language (or language "unknown")
-                    :document/dirty (boolean dirty)
-                    :document/opened (boolean opened)
-                    :type :document}
-            tx [entity]
-            tx-report (d/transact! conn tx)]
-        (when (not (valid-document? entity))
-          (log/warn "Invalid document entity in ensure-document-eid:" entity))
+  (if-let [eid (document-id-by-uri uri)]
+    eid
+    (let [temp-id -1
+          entity {:db/id temp-id
+                  :document/uri uri
+                  :document/version (or version 0)
+                  :document/text (or text "")
+                  :document/language (or language "unknown")
+                  :document/dirty (boolean dirty)
+                  :document/opened (boolean opened)
+                  :type :document}
+          tx [entity]]
+      (when DEBUG
+        (when-not (valid-document? entity)
+          (log/warn "Invalid document entity in ensure-document-eid:" (s/explain-str ::document entity))))
+      (let [tx-report (d/transact! conn tx)]
         (get (:tempids tx-report) temp-id)))))
 
 (defn flatten-diags
@@ -528,25 +656,31 @@
                            :type :diagnostic}
                     version (assoc :diagnostic/version version)))
                 diags)]
-    (doseq [entity tx]
-      (when-not (valid-diagnostic? entity)
-        (log/warn "Invalid diagnostic entity:" entity)))
+    (when DEBUG
+      (doseq [entity tx]
+        (when-not (valid-diagnostic? entity)
+          (log/warn "Invalid diagnostic entity:" (s/explain-str ::diagnostic entity)))))
     tx))
 
 (defn replace-diagnostics-by-uri!
   [uri version diags]
-  (let [old-ids (d/q '[:find [?e ...]
-                       :in $ ?uri
-                       :where
-                       [?d :document/uri ?uri]
-                       [?e :diagnostic/document ?d]]
-                     @conn uri)
-        deletions (map (fn [id] [:db/retractEntity id]) old-ids)]
-    (if (empty? diags)
-      (when (seq deletions) (d/transact! conn deletions))
-      (let [doc-eid (ensure-document-eid uri version nil nil false false)
-            creations (create-diagnostics diags doc-eid version)]
-        (d/transact! conn (concat deletions creations))))))
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri)))
+    (when-not (or (nil? version) (s/valid? ::version version))
+      (log/warn (s/explain-str ::version version))))
+  (when-let [doc-eid (document-id-by-uri uri)]
+    (let [old-ids (d/q '[:find [?e ...]
+                         :in $ ?uri
+                         :where
+                         [?d :document/uri ?uri]
+                         [?e :diagnostic/document ?d]]
+                       @conn uri)
+          deletions (map (fn [id] [:db/retractEntity id]) old-ids)]
+      (if (empty? diags)
+        (when (seq deletions) (d/transact! conn deletions))
+        (let [creations (create-diagnostics diags doc-eid version)]
+          (d/transact! conn (concat deletions creations)))))))
 
 (defn flatten-symbols
   "Flattens hierarchical LSP symbols into a list for datascript transaction, assigning negative db/ids to avoid conflicts."
@@ -599,21 +733,94 @@
                            :type :symbol}
                     (:symbol/parent s) (assoc :symbol/parent (:symbol/parent s))))
                 flat-symbols)]
-    (doseq [entity tx]
-      (when-not (valid-symbol? entity)
-        (log/warn "Invalid symbol entity:" entity)))
+    (when DEBUG
+      (doseq [entity tx]
+        (when-not (valid-symbol? entity)
+          (log/warn "Invalid symbol entity:" (s/explain-str ::symbol entity)))))
     tx))
 
 (defn replace-symbols!
   [uri symbols]
-  (let [doc-eid (document-id-by-uri uri)
-        old-ids (when doc-eid
-                  (d/q '[:find [?e ...]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (when-let [doc-eid (document-id-by-uri uri)]
+    (let [old-ids (d/q '[:find [?e ...]
                          :in $ ?doc
                          :where [?e :symbol/document ?doc]]
-                       @conn doc-eid))
-        deletions (map (fn [id] [:db/retractEntity id]) old-ids)]
-    (if (empty? symbols)
-      (when (seq deletions) (d/transact! conn deletions))
-      (let [creations (create-symbols doc-eid uri symbols)]
-        (d/transact! conn (concat deletions creations))))))
+                       @conn doc-eid)
+          deletions (map (fn [id] [:db/retractEntity id]) old-ids)]
+      (if (empty? symbols)
+        (when (seq deletions) (d/transact! conn deletions))
+        (let [creations (create-symbols doc-eid uri symbols)]
+          (d/transact! conn (concat deletions creations)))))))
+
+(defn diagnostics-by-uri [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (d/q '[:find ?message ?severity ?start-line ?start-char ?end-line ?end-char ?diag-version
+         :keys message severity startLine startChar endLine endChar version
+         :in $ ?uri
+         :where [?doc :document/uri ?uri]
+                [?doc :document/version ?doc-version]
+                [?e :diagnostic/document ?doc]
+                [?e :diagnostic/message ?message]
+                [?e :diagnostic/severity ?severity]
+                [?e :diagnostic/start-line ?start-line]
+                [?e :diagnostic/start-char ?start-char]
+                [?e :diagnostic/end-line ?end-line]
+                [?e :diagnostic/end-char ?end-char]
+                (or-join [?e ?diag-version ?doc-version]
+                          (and [?e :diagnostic/version ?diag-version]
+                               [(= ?diag-version ?doc-version)])
+                          (and [(missing? $ ?e :diagnostic/version)]
+                               [(identity ?doc-version) ?diag-version])
+                          (and [?e :diagnostic/version ?diag-version]
+                               [(nil? ?diag-version)]))]
+       @conn uri))
+
+(defn symbols-by-uri [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (d/q '[:find ?name
+               ?kind
+               ?start-line
+               ?start-char
+               ?end-line
+               ?end-char
+               ?selection-start-line
+               ?selection-start-char
+               ?selection-end-line
+               ?selection-end-char
+               ?parent
+         :keys name
+               kind
+               startLine
+               startChar
+               endLine
+               endChar
+               selectionStartLine
+               selectionStartChar
+               selectionEndLine
+               selectionEndChar
+               parent
+         :in $ ?uri
+         :where [?e :symbol/document ?doc]
+                [?doc :document/uri ?uri]
+                [?e :symbol/name ?name]
+                [?e :symbol/kind ?kind]
+                [?e :symbol/start-line ?start-line]
+                [?e :symbol/start-char ?start-char]
+                [?e :symbol/end-line ?end-line]
+                [?e :symbol/end-char ?end-char]
+                [?e :symbol/selection-start-line ?selection-start-line]
+                [?e :symbol/selection-start-char ?selection-start-char]
+                [?e :symbol/selection-end-line ?selection-end-line]
+                [?e :symbol/selection-end-char ?selection-end-char]
+                (or-join [?e ?parent]
+                          [?e :symbol/parent ?parent]
+                          (and [(missing? $ ?e :symbol/parent)]
+                              [(ground 0) ?parent]))]
+       @conn uri))

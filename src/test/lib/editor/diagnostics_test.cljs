@@ -1,7 +1,7 @@
 (ns test.lib.editor.diagnostics-test
   (:require
-    [clojure.test :refer [deftest is]]
-    [lib.editor.diagnostics :as diagnostics]))
+   [clojure.test :refer [deftest is]]
+   [lib.editor.diagnostics :as diagnostics]))
 
 (deftest severity-class-mapping
   (is (= "error" (diagnostics/severity-class 1)) "Error severity maps to red wavy class")

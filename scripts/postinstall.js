@@ -28,7 +28,8 @@ const targets = [
   { src: treeSitterWasmPath, dest: path.join(baseDir, 'resources/public/js/tree-sitter.wasm') },
   { src: treeSitterWasmPath, dest: path.join(baseDir, 'resources/public/js/test/js/tree-sitter.wasm') },
   { src: rholangWasmPath, dest: path.join(baseDir, 'resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm') },
-  { src: rholangWasmPath, dest: path.join(baseDir, 'resources/public/js/test/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm') }
+  // NOTE: The rholang parser WASM is copied to the testing extensions dir further in the script
+  // { src: rholangWasmPath, dest: path.join(baseDir, 'resources/public/js/test/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm') }
 ];
 
 targets.forEach(({ src, dest }) => {
@@ -37,11 +38,8 @@ targets.forEach(({ src, dest }) => {
   console.log(`Copied ${src} to ${dest}`);
 });
 
-// Create empty query directories (no copy needed, assuming queries are in source).
-const queryDirs = [
-  path.join(baseDir, 'resources/public/js/test/extensions/lang/rholang/tree-sitter/queries/')
-];
-queryDirs.forEach(dir => {
-  fs.mkdirSync(dir, { recursive: true });
-  console.log(`Created directory ${dir}`);
-});
+// Copy full extensions dir to test (includes queries and all subdirs).
+const extensionsSrc = path.join(baseDir, 'resources/public/extensions');
+const testExtensionsDest = path.join(baseDir, 'resources/public/js/test/extensions');
+fs.cpSync(extensionsSrc, testExtensionsDest, { recursive: true });
+console.log(`Copied ${extensionsSrc} to ${testExtensionsDest}`);
