@@ -21,7 +21,7 @@ if (ref.current) {
   expectType<void>(ref.current.setCursor({ line: 1, column: 1 }));
   expectType<{ from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null>(ref.current.getSelection());
   expectType<void>(ref.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 5 }));
-  expectType<void>(ref.current.openDocument('uri', 'content', 'lang'));
+  expectType<void>(ref.current.openDocument('uri', 'text', 'lang'));
   expectType<void>(ref.current.closeDocument('uri'));
   expectType<void>(ref.current.renameDocument('new-name', 'old-uri'));
   expectType<void>(ref.current.saveDocument('uri'));
@@ -45,7 +45,7 @@ if (ref.current) {
 // Check state shape
 const state: EditorState = {
   workspace: {
-    documents: { 'uri': { content: '', language: 'text', version: 0, dirty: false, opened: false } },
+    documents: { 'uri': { text: '', language: 'text', version: 0, dirty: false, opened: false } },
     activeUri: null,
   },
   cursor: { line: 1, column: 1 },

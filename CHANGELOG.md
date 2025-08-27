@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-08-27
+
+### Added
+
+- Added new build target `karma-test-advanced` to run headless tests against release-compiled library.
+
+### Changed
+
+- Modified `.github/workflows/ci.yaml` to run the release-compiled tests.
+
 ## [0.4.0] - 2025-08-27
 
 ### Added

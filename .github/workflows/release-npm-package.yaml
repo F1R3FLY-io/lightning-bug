@@ -62,7 +62,7 @@ jobs:
         run: npm run test:types
 
       - name: Run headless tests
-        run: npm run test:headless
+        run: npm run test:headless-advanced
 
       - name: Build library
         run: npx shadow-cljs release libs

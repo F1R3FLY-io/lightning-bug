@@ -34,6 +34,27 @@ If you need to copy the file manually after installation, run the following comm
 cp node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/tree-sitter-rholang.wasm resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm
 ```
 
+### Setting up GitHub Personal Access Token
+
+To access F1R3FLY.io's NPM packages hosted on GitHub Packages (e.g., `@f1r3fly-io/lightning-bug`), you need to set up a GitHub Personal Access Token (PAT) with the `read:packages` scope.
+
+1. Go to your GitHub account settings: [https://github.com/settings/tokens](https://github.com/settings/tokens).
+2. Click "Generate new token" (classic token).
+3. Select the `read:packages` scope.
+4. Generate the token and copy it.
+5. Set the token as the `NODE_AUTH_TOKEN` environment variable before running `npm install`:
+
+   ```
+   export NODE_AUTH_TOKEN=your_pat_here
+   npm install
+   ```
+
+For CI/CD workflows (e.g., GitHub Actions), set `NODE_AUTH_TOKEN` as a secret in your repository settings and reference it in the workflow YAML (e.g., `${{ secrets.GITHUB_TOKEN }}` for public repos, or a custom PAT for private).
+
+The `.npmrc` file is configured to use this token for authentication with the GitHub NPM registry.
+
+For more information about Github's NPM registry, take a look at [Working with the npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry).
+
 ## Installation and Compilation
 
 ### Dependencies
@@ -48,6 +69,8 @@ Install the Clojure CLI tools. Install Node.js dependencies with `npm install`. 
 | `:app` | Full development app with Re-frame UI | `npx shadow-cljs compile app` | `npx shadow-cljs watch app` | - |
 | `:demo` | Minimal standalone demo | `npm run build:demo` | `npx shadow-cljs watch demo` | - |
 | `:test` | Browser tests | - | `npx shadow-cljs watch test` | - |
+| `:karma-test` | Karma tests | `npx shadow-cljs compile karma-test` | - | - |
+| `:karma-test-advanced` | Karma tests against release-compiled library | `npx shadow-cljs compile karma-test-advanced` | - | - |
 
 For multiple targets, run `npx shadow-cljs watch libs app test`.
 
@@ -69,6 +92,8 @@ The bindings are referenced in `package.json` via the `"types"` fields in `"expo
 To run browser tests interactively, execute `npx shadow-cljs watch test`. Open `http://localhost:8021` in a browser to run and view tests.
 
 To run headless tests for CI or command-line, execute `npm run test:headless`.
+
+To run headless tests against the release-compiled library, execute `npm run test:headless-advanced`.
 
 To validate TypeScript bindings, run `npm run test:types`.
 
@@ -104,11 +129,6 @@ Key code snippet from `demo/index.html`:
 
 ```javascript
 (async () => {
-  // Patch goog BEFORE imports
-  globalThis.goog = globalThis.goog || {};  // Ensure goog exists
-  globalThis.goog.provide = globalThis.goog.constructNamespace_ || function(name) { /* noop or log */ };
-  globalThis.goog.require = (globalThis.goog.module && globalThis.goog.module.get) || globalThis.goog.require || function(name) { /* noop */ };
-
   const React = await import('react');
   const { createRoot } = await import('react-dom/client');
   const { Editor } = await import('@f1r3fly-io/lightning-bug');
@@ -121,7 +141,8 @@ Key code snippet from `demo/index.html`:
   root.render(React.createElement(Editor, {
     ref: editorRef,
     languages: {"rholang": RholangExtension},
-    extraExtensions: customExtensions
+    extraExtensions: customExtensions,
+    preloadLanguages: ["rholang"]
   }));
   const interval = setInterval(() => {
     if (editorRef.current && editorRef.current.isReady()) {
@@ -130,10 +151,20 @@ Key code snippet from `demo/index.html`:
         console.log('Event:', event.type, event.data);
       });
       editorRef.current.openDocument(
-        "inmemory://demo.rho",
+        "demo.rho",
         "new x in { x!(\"Hello\") | Nil }",
         "rholang"
       );
+      console.log('State:', editorRef.current.getState());
+      editorRef.current.setCursor({ line: 1, column: 3 });
+      console.log('Cursor:', editorRef.current.getCursor());
+      editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+      console.log('Selection:', editorRef.current.getSelection());
+      console.log('Text:', editorRef.current.getText());
+      console.log('File Path:', editorRef.current.getFilePath());
+      console.log('File URI:', editorRef.current.getFileUri());
+      console.log('Diagnostics:', editorRef.current.getDiagnostics());
+      console.log('Symbols:', editorRef.current.getSymbols());
     }
   }, 100);
 })();
@@ -185,7 +216,7 @@ For a complete example, refer to the demo app's `resources/public/demo/index.htm
 
 Customize the editor using a ref for commands, and RxJS for events. For detailed examples in JavaScript and TypeScript, see the sections below.
 
-Use the imperative API (via ref) to access methods like `openDocument(uri, content?, lang?, makeActive?)`, `setCursor(pos)`, `highlightRange(from, to)`, `getText(uri?)`. See "Public API" for the full list.
+Use the imperative API (via ref) to access methods like `openDocument(uri, text?, lang?, makeActive?)`, `setCursor(pos)`, `highlightRange(from, to)`, `getText(uri?)`. See "Public API" for the full list.
 
 For language customization, override or add languages in the `languages` prop. For example, add LSP URL or change indent size.
 
@@ -211,7 +242,7 @@ useEffect(() => {
 }, [editorRef]);
 ```
 
-Key events include `ready` (editor initialized), `content-change` (content updated with {content, uri}), `selection-change` (cursor/selection changed with {cursor, selection, uri}), `document-open` (document opened with {uri, content, language, activated}), `document-close` (document closed with {uri}), `document-rename` (document renamed with {old-uri, new-uri}), `document-save` (document saved with {uri, content}), `lsp-message` (raw LSP message with {method, params, ...}), `lsp-initialized` (LSP connection initialized), `diagnostics` (diagnostics updated as array with uri in each), `symbols` (symbols updated as array with uri in each), `log` (log message with {message}), `connect` (LSP connected), `disconnect` (LSP disconnected), `lsp-error` (LSP error with {code, message}), `highlight-change` (highlight range updated or cleared with {from, to} or null).
+Key events include `ready` (editor initialized), `content-change` (content updated with `{text, uri}`), `selection-change` (cursor/selection changed with `{cursor, selection, uri}`), `document-open` (document opened with `{uri, text, language, activated}`), `document-close` (document closed with `{uri}`), `document-rename` (document renamed with `{old-uri, new-uri}`), `document-save` (document saved with `{uri, text}`), `lsp-message` (raw LSP message with `{method, params, ...}`), `lsp-initialized` (LSP connection initialized), `diagnostics` (diagnostics updated as array with uri in each), `symbols` (symbols updated as array with uri in each), `log` (log message with `{message}`), `connect` (LSP connected), `disconnect` (LSP disconnected), `lsp-error` (LSP error with `{code, message}`), `highlight-change` (highlight range updated or cleared with `{from, to}` or null).
 
 For a practical example, see the demo app's interval-based check for `isReady()` and subscription to events.
 
@@ -305,6 +336,7 @@ The `Editor` component accepts the following props for initialization and config
 |--------------------|-------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|
 | `languages`        | `Record<string, LanguageConfig>`          | No       | Map of language keys to their configurations. Merges with built-in defaults like `"text"`.             |
 | `extraExtensions`  | `Extension[]`                             | No       | Array of additional CodeMirror extensions (from `@codemirror/*` packages) to extend/override defaults. |
+| `defaultProtocol`  | `string`                                  | No       | Default protocol for file paths (e.g., "inmemory://"). Defaults to "inmemory://".                      |
 
 #### LanguageConfig Schema
 
@@ -333,23 +365,23 @@ Use a React ref to access these methods for runtime control. All positions are 1
 | `setCursor`       | <table><tr><td>`pos: { line: number; column: number }`</td></tr></table>                                              | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets cursor position for active document (triggers `selection-change` event).                           | <table><tr><td>`editor.setCursor({ line: 1, column: 3 });`</td></tr></table> |
 | `getSelection`    | <table><tr><td>none</td></tr></table>                                                                                 | <table><tr><td>`{ from: { line: number; column: number }; to: { line: number; column: number }; text: string } \| null`</td></tr></table> | Returns current selection range and text for active document, or `null` if no selection.                | <table><tr><td>`editor.getSelection();`</td></tr></table> |
 | `setSelection`    | <table><tr><td>`from`: `{ line: number; column: number }`</td></tr><tr><td>`to`: `{ line: number; column: number }`</td></tr></table> | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets selection range for active document (triggers `selection-change` event).                           | <table><tr><td>`editor.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
-| `openDocument`    | <table><tr><td>`uri`: `string`</td></tr><tr><td>`content?`: `string`</td></tr><tr><td>`lang?`: `string`</td></tr><tr><td>`makeActive?`: `boolean` = `true`</td></tr></table> | <table><tr><td>`void`</td></tr></table>                                                                                                  | Opens or activates a document with URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. | <table><tr><td>`editor.openDocument("demo.rho", "content", "rholang");`</td></tr><tr><td>`editor.openDocument("demo.rho"); // activates existing`</td></tr><tr><td>`editor.openDocument("demo.rho", null, null, false); // opens without activating`</td></tr></table> |
-| `closeDocument`   | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Closes the specified or active document (triggers `document-close`). Notifies LSP if open.              | <table><tr><td>`editor.closeDocument();`</td></tr><tr><td>`editor.closeDocument("specific-uri");`</td></tr></table> |
-| `renameDocument`  | <table><tr><td>`newName: string`</td></tr><tr><td>`oldUri?`: `string`</td></tr></table>                                               | <table><tr><td>`void`</td></tr></table>                                                                                                  | Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.       | <table><tr><td>`editor.renameDocument("new-name.rho");`</td></tr><tr><td>`editor.renameDocument("new-name.rho", "old-uri");`</td></tr></table> |
-| `saveDocument`    | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.          | <table><tr><td>`editor.saveDocument();`</td></tr><tr><td>`editor.saveDocument("specific-uri");`</td></tr></table> |
+| `openDocument`    | <table><tr><td>`fileOrUri`: `string`</td></tr><tr><td>`text?`: `string`</td></tr><tr><td>`lang?`: `string`</td></tr><tr><td>`makeActive?`: `boolean` = `true`</td></tr></table> | <table><tr><td>`void`</td></tr></table>                                                                                                  | Opens or activates a document with file path or URI, optional text and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. | <table><tr><td>`editor.openDocument("demo.rho", "text", "rholang");`</td></tr><tr><td>`editor.openDocument("demo.rho"); // activates existing`</td></tr><tr><td>`editor.openDocument("demo.rho", null, null, false); // opens without activating`</td></tr></table> |
+| `closeDocument`   | <table><tr><td>`fileOrUri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Closes the specified or active document (triggers `document-close`). Notifies LSP if open.              | <table><tr><td>`editor.closeDocument();`</td></tr><tr><td>`editor.closeDocument("specific-uri");`</td></tr></table> |
+| `renameDocument`  | <table><tr><td>`newFileOrUri: string`</td></tr><tr><td>`oldFileOrUri?`: `string`</td></tr></table>                                               | <table><tr><td>`void`</td></tr></table>                                                                                                  | Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.       | <table><tr><td>`editor.renameDocument("new-name.rho");`</td></tr><tr><td>`editor.renameDocument("new-name.rho", "old-uri");`</td></tr></table> |
+| `saveDocument`    | <table><tr><td>`fileOrUri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.          | <table><tr><td>`editor.saveDocument();`</td></tr><tr><td>`editor.saveDocument("specific-uri");`</td></tr></table> |
 | `isReady`         | <table><tr><td>none</td></tr></table>                                                                                 | <table><tr><td>`boolean`</td></tr></table>                                                                                               | Returns `true` if editor is initialized and ready for methods.                                          | <table><tr><td>`editor.isReady();`</td></tr></table> |
 | `highlightRange`  | <table><tr><td>`from`: `{ line: number; column: number }`</td></tr><tr><td>`to`: `{ line: number; column: number }`</td></tr></table> | <table><tr><td>`void`</td></tr></table>                                                                                                  | Highlights a range in active document (triggers `highlight-change` with range).                         | <table><tr><td>`editor.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
 | `clearHighlight`  | <table><tr><td>none</td></tr></table>                                                                                 | <table><tr><td>`void`</td></tr></table>                                                                                                  | Clears highlight in active document (triggers `highlight-change` with `null`).                          | <table><tr><td>`editor.clearHighlight();`</td></tr></table> |
 | `centerOnRange`   | <table><tr><td>`from`: `{ line: number; column: number }`</td></tr><tr><td>`to`: `{ line: number; column: number }`</td></tr></table> | <table><tr><td>`void`</td></tr></table>                                                                                                  | Scrolls to center on a range in active document.                                                        | <table><tr><td>`editor.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
-| `getText`         | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns text for specified or active document, or `null` if not found.                                 | <table><tr><td>`editor.getText();`</td></tr><tr><td>`editor.getText("specific-uri");`</td></tr></table> |
-| `setText`         | <table><tr><td>`text: string`</td></tr><tr><td>`uri?`: `string`</td></tr></table>                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Replaces entire text for specified or active document (triggers `content-change`).                      | <table><tr><td>`editor.setText("new text");`</td></tr><tr><td>`editor.setText("new text", "specific-uri");`</td></tr></table> |
-| `getFilePath`     | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.                       | <table><tr><td>`editor.getFilePath();`</td></tr><tr><td>`editor.getFilePath("specific-uri");`</td></tr></table> |
-| `getFileUri`      | <table><tr><td>`uri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.           | <table><tr><td>`editor.getFileUri();`</td></tr><tr><td>`editor.getFileUri("specific-uri");`</td></tr></table> |
-| `activateDocument` | <table><tr><td>`uri: string`</td></tr></table>                                                                      | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets the active document if exists, loads content to view, opens in LSP if not.                         | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
+| `getText`         | <table><tr><td>`fileOrUri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns text for specified or active document, or `null` if not found.                                 | <table><tr><td>`editor.getText();`</td></tr><tr><td>`editor.getText("specific-uri");`</td></tr></table> |
+| `setText`         | <table><tr><td>`text: string`</td></tr><tr><td>`fileOrUri?`: `string`</td></tr></table>                                                     | <table><tr><td>`void`</td></tr></table>                                                                                                  | Replaces entire text for specified or active document (triggers `content-change`).                      | <table><tr><td>`editor.setText("new text");`</td></tr><tr><td>`editor.setText("new text", "specific-uri");`</td></tr></table> |
+| `getFilePath`     | <table><tr><td>`fileOrUri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.                       | <table><tr><td>`editor.getFilePath();`</td></tr><tr><td>`editor.getFilePath("specific-uri");`</td></tr></table> |
+| `getFileUri`      | <table><tr><td>`fileOrUri?`: `string`</td></tr></table>                                                                     | <table><tr><td>`string \| null`</td></tr></table>                                                                                         | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.           | <table><tr><td>`editor.getFileUri();`</td></tr><tr><td>`editor.getFileUri("specific-uri");`</td></tr></table> |
+| `activateDocument` | <table><tr><td>`fileOrUri: string`</td></tr></table>                                                                      | <table><tr><td>`void`</td></tr></table>                                                                                                  | Sets the active document if exists, loads text to view, opens in LSP if not.                         | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
 | `query` | <table><tr><td>`query: string`</td></tr><tr><td>`params?: any[]`</td></tr></table> | <table><tr><td>`any`</td></tr></table> | Queries the internal DataScript database with the given query and optional params. | <table><tr><td>`editor.query('[:find ?uri :where [?e :document/uri ?uri]]');`</td></tr></table> |
 | `getDb` | <table><tr><td>none</td></tr></table> | <table><tr><td>`any`</td></tr></table> | Returns the DataScript connection object for direct access (advanced use). | <table><tr><td>`const db = editor.getDb();`</td></tr></table> |
-| `getDiagnostics` | <table><tr><td>`uri?`: `string`</td></tr></table> | <table><tr><td>`Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>`</td></tr></table> | Retrieves the LSP diagnostics for the specified or active file. | <table><tr><td>`const diags = editorRef.current.getDiagnostics();`</td></tr><tr><td>`const diags = editorRef.current.getDiagnostics('inmemory://demo.rho');`</td></tr></table> |
-| `getSymbols` | <table><tr><td>`uri?`: `string`</td></tr></table> | <table><tr><td>`Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>`</td></tr></table> | Retrieves the LSP symbols for the specified or active file. | <table><tr><td>`const syms = editorRef.current.getSymbols();`</td></tr><tr><td>`const syms = editorRef.current.getSymbols('inmemory://demo.rho');`</td></tr></table> |
+| `getDiagnostics` | <table><tr><td>`fileOrUri?`: `string`</td></tr></table> | <table><tr><td>`Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>`</td></tr></table> | Retrieves the LSP diagnostics for the specified or active file. | <table><tr><td>`const diags = editorRef.current.getDiagnostics();`</td></tr><tr><td>`const diags = editorRef.current.getDiagnostics('inmemory://demo.rho');`</td></tr></table> |
+| `getSymbols` | <table><tr><td>`fileOrUri?`: `string`</td></tr></table> | <table><tr><td>`Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>`</td></tr></table> | Retrieves the LSP symbols for the specified or active file. | <table><tr><td>`const syms = editorRef.current.getSymbols();`</td></tr><tr><td>`const syms = editorRef.current.getSymbols('inmemory://demo.rho');`</td></tr></table> |
 
 #### EditorState Schema (Return Value for getState)
 
@@ -357,7 +389,7 @@ Use a React ref to access these methods for runtime control. All positions are 1
 interface EditorState {
   workspace: {
     documents: Record<string, {
-      content: string;
+      text: string;
       language: string;
       version: number;
       dirty: boolean;
@@ -410,18 +442,18 @@ To query, use `query(query, params?)` which runs the query with optional paramet
 Example in vanilla JavaScript (no params):
 
 ```javascript
-const query = '[:find ?content . :where [?e :workspace/active-uri ?uri] [?e :document/content ?content]]';
-const content = editorRef.current.query(query);
-console.log('Active content:', content);
+const query = '[:find ?text . :where [?a :workspace/active-uri ?uri] [?e :document/uri ?uri] [?e :document/text ?text]]';
+const text = editorRef.current.query(query);
+console.log('Active text:', text);
 ```
 
 With params:
 
 ```javascript
-const query = '[:find ?content . :in $ ?uri :where [?e :document/uri ?uri] [?e :document/content ?content]]';
+const query = '[:find ?text . :in $ ?uri :where [?e :document/uri ?uri] [?e :document/text ?text]]';
 const params = ['inmemory://demo.rho'];
-const content = editorRef.current.query(query, params);
-console.log('Specific content:', content);
+const text = editorRef.current.query(query, params);
+console.log('Specific text:', text);
 ```
 
 For a more complex query with aggregation (e.g., count open documents):
@@ -445,7 +477,7 @@ const pulled = ds.pull(ds.db(conn), '[* {:symbol/parent [*]}]', parentId); // Pu
 console.log('Nested symbol:', pulled);
 ```
 
-Note: DataScript schema is fixed; see source for attributes like `:document/content`, `:diagnostic/message`, etc.
+Note: DataScript schema is fixed; see source for attributes like `:document/text`, `:diagnostic/message`, etc.
 
 ### RxJS Events
 
@@ -523,7 +555,7 @@ The `Editor` can be customized using props for initial setup and a React ref for
        // Get state
        const state = editorRef.current.getState();
        console.log('State:', state.workspace.documents, state.workspace.activeUri);
-       // Set content
+       // Set text
        editorRef.current.setText('updated');
        // Get cursor
        const cursor = editorRef.current.getCursor();
@@ -538,7 +570,7 @@ The `Editor` can be customized using props for initial setup and a React ref for
        // Close document
        editorRef.current.closeDocument();
        // Rename document (after reopening)
-       editorRef.current.openDocument('inmemory://old.rho', 'content', 'rholang');
+       editorRef.current.openDocument('inmemory://old.rho', 'text', 'rholang');
        editorRef.current.renameDocument('new.rho', 'inmemory://old.rho');
        // Save document
        editorRef.current.saveDocument();
@@ -601,7 +633,7 @@ To use Lightning Bug in a TypeScript project, import the types from the package.
        if (selection) console.log('Selection:', selection.text);
        editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
        editorRef.current.closeDocument();
-       editorRef.current.openDocument('inmemory://old.rho', 'content', 'rholang');
+       editorRef.current.openDocument('inmemory://old.rho', 'text', 'rholang');
        editorRef.current.renameDocument('new.rho', 'inmemory://old.rho');
        editorRef.current.saveDocument();
        editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 5 });
@@ -703,15 +735,15 @@ In Lightning Bug, Datalog queries fetch state like the active document's content
 
 - **Datomic**: A distributed, persistent database for Clojure, also using Datalog. It emphasizes facts over places (immutable data accrual) and supports historical queries. Differences from DataScript: Server-based, scales horizontally, includes peer libraries for client querying. Lightning Bug uses DataScript for its in-browser simplicity, but the Datalog API is similar, easing migration if needed.
 
-Key similarities: Both use entity-attribute-value (EAV) tuples, Datalog for queries, and transactions for atomic updates. Differences: DataScript is ephemeral/in-memory; Datomic is durable/across time.
+Key similarities: Both use entity-attribute-value (EAV) tuples, Datalog for queries, and transactions for atomic updates. Differences from DataScript: DataScript is ephemeral/in-memory; Datomic is durable/across time.
 
 ### Usage in Lightning Bug
 
 DataScript stores editor state in a schema-defined DB (see `lib.db/schema`). Transactions (e.g., `d/transact!`) add/retract facts atomically. Queries (e.g., `d/q`) fetch data efficiently. Re-posh bridges DataScript to Re-frame for reactive subs.
 
 Examples:
-- Fetch active content: `(d/q '[:find ?content . :where [?a :workspace/active-uri ?uri] [?e :document/uri ?uri] [?e :document/content ?content]] @conn)`
-- Update document: `(d/transact! conn [[:db/add eid :document/content "new"]])`
+- Fetch active content: `(d/q '[:find ?text . :where [?a :workspace/active-uri ?uri] [?e :document/uri ?uri] [?e :document/text ?text]] @conn)`
+- Update document: `(d/transact! conn [[:db/add eid :document/text "new"]])`
 
 Public API exposes querying via `query()` and `getDb()` for custom Datalog access.
 

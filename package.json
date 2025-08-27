@@ -1,6 +1,6 @@
 {
   "name": "@f1r3fly-io/lightning-bug",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A modern, extensible text editor built with ClojureScript and CodeMirror 6.",
   "repository": {
     "type": "git",
@@ -37,7 +37,8 @@
     "test:types": "tsd",
     "build:demo": "node scripts/build-demo.js",
     "test": "npx shadow-cljs watch test",
-    "test:headless": "npx shadow-cljs compile karma-test && npx karma start --single-run"
+    "test:headless": "npx shadow-cljs compile karma-test && npx karma start --single-run",
+    "test:headless-advanced": "npx shadow-cljs compile karma-test-advanced && npx karma start --single-run"
   },
   "main": "dist/libs/lib.core.js",
   "module": "dist/libs/lib.core.js",

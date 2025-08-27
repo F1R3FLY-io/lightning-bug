@@ -45,7 +45,7 @@ export interface LanguageConfig {
  */
 export interface DocState {
   /** Current text content of the document. */
-  content: string;
+  text: string;
   /** Language key associated with the document (e.g., "rholang"). */
   language: string;
   /** Version number for LSP synchronization. */
@@ -182,7 +182,7 @@ export interface EditorRef {
   /** Sets selection range for active document (triggers `selection-change` event). */
   setSelection(from: { line: number; column: number }, to: { line: number; column: number }): void;
   /** Opens or activates a document with file path or URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. */
-  openDocument(fileOrUri: string, content?: string, language?: string, makeActive?: boolean): void;
+  openDocument(fileOrUri: string, text?: string, language?: string, makeActive?: boolean): void;
   /** Closes the specified or active document (triggers `document-close`). Notifies LSP if open. */
   closeDocument(fileOrUri?: string): void;
   /** Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP. */

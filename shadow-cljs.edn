@@ -55,6 +55,16 @@
                        :entries [cljs-test-runner]
                        :js-options {:resolve {"fs" false
                                               "fs/promises" false
-                                              "path" false}}}}
+                                              "path" false}}}
+          :karma-test-advanced {:target :karma
+                                :output-to "target/karma-test-advanced.js"
+                                :ns-regexp "-test$"
+                                :entries [cljs-test-runner]
+                                :js-options {:resolve {"fs" false
+                                                       "fs/promises" false
+                                                       "path" false}}
+                                :compiler-options {:optimizations :advanced
+                                                   :externs ["externs/libs.ext.js"
+                                                             "datascript/externs.js"]}}}
  :dev-http {3000 "resources/public"}
  :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]}
