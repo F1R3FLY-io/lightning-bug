@@ -782,6 +782,10 @@ The library and demo app are compatible with React 19. Development tools like re
 - Use labels (bug, enhancement) for issues. Provide repro steps.
 - Require 1 approval for reviews. Focus on readability, maintainability, DRY, and separation of concerns.
 
+## Gitignore
+
+The `.gitignore` file blacklists everything by default with `*`, then whitelists specific file patterns like `!/README.md`. Directories are included with `!*/` to allow whitelisting files inside them. Additional blacklists (e.g., `/resources/public/js/test/*`) and whitelists can follow as necessary. If a new file is added that is not included in the whitelisted patterns, a new rule to include it must be added to the `.gitignore` (if a new file is not staged in your git changes, this almost certainly is why).
+
 ## Release Process
 
 To release a new version of the library:

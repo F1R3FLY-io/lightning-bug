@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -20,14 +21,16 @@
         "@codemirror/autocomplete": "./node_modules/@codemirror/autocomplete/dist/index.js",
         "@codemirror/commands": "./node_modules/@codemirror/commands/dist/index.js",
         "@codemirror/language": "./node_modules/@codemirror/language/dist/index.js",
+        "@codemirror/lint": "./node_modules/@codemirror/lint/dist/index.js",
+        "@codemirror/search": "./node_modules/@codemirror/search/dist/index.js",
         "@codemirror/state": "./node_modules/@codemirror/state/dist/index.js",
         "@codemirror/view": "./node_modules/@codemirror/view/dist/index.js",
-        "@marijn/find-cluster-break": "./node_modules/@marijn/find-cluster-break/src/index.js",
+        "@lezer/common": "./node_modules/@lezer/common/dist/index.js",
+        "@lezer/highlight": "./node_modules/@lezer/highlight/dist/index.js",
         "style-mod": "./node_modules/style-mod/src/style-mod.js",
         "w3c-keyname": "./node_modules/w3c-keyname/index.js",
         "crelt": "./node_modules/crelt/index.js",
-        "@lezer/common": "./node_modules/@lezer/common/dist/index.js",
-        "@lezer/highlight": "./node_modules/@lezer/highlight/dist/index.js",
+        "@marijn/find-cluster-break": "./node_modules/@marijn/find-cluster-break/src/index.js",
         "web-tree-sitter": "./node_modules/web-tree-sitter/tree-sitter.js"
       }
     }
@@ -41,15 +44,11 @@
       const { createRoot } = await import('react-dom/client');
       const { Editor } = await import('@f1r3fly-io/lightning-bug');
       const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
-      const { keymap } = await import('@codemirror/view');
-      const { defaultKeymap } = await import('@codemirror/commands');
-      const customExtensions = [keymap.of(defaultKeymap)];
       const root = createRoot(document.getElementById('app'));
       const editorRef = React.createRef();
       root.render(React.createElement(Editor, {
         ref: editorRef,
         languages: {"rholang": RholangExtension},
-        extraExtensions: customExtensions,
         preloadLanguages: ["rholang"]
       }));
       const interval = setInterval(() => {
@@ -73,6 +72,7 @@
           console.log('File URI:', editorRef.current.getFileUri());
           console.log('Diagnostics:', editorRef.current.getDiagnostics());
           console.log('Symbols:', editorRef.current.getSymbols());
+          console.log('Search Term:', editorRef.current.getSearchTerm());
         }
       }, 100);
     })();

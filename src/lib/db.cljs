@@ -759,8 +759,8 @@
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (d/q '[:find ?message ?severity ?start-line ?start-char ?end-line ?end-char ?diag-version
-         :keys message severity startLine startChar endLine endChar version
+  (d/q '[:find ?uri ?message ?severity ?start-line ?start-char ?end-line ?end-char ?diag-version
+         :keys uri message severity startLine startChar endLine endChar version
          :in $ ?uri
          :where [?doc :document/uri ?uri]
                 [?doc :document/version ?doc-version]
@@ -784,7 +784,8 @@
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (d/q '[:find ?name
+  (d/q '[:find ?uri
+               ?name
                ?kind
                ?start-line
                ?start-char
@@ -795,7 +796,8 @@
                ?selection-end-line
                ?selection-end-char
                ?parent
-         :keys name
+         :keys uri
+               name
                kind
                startLine
                startChar

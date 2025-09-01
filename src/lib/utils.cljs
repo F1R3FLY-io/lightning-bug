@@ -1,4 +1,20 @@
-(ns lib.utils)
+(ns lib.utils
+  (:require [taoensso.timbre :as log]))
+
+(defn log-error-with-cause
+  ([^js/Error error]
+   (letfn [(collect-error-chain [err chain]
+             (if err
+               (recur (.-cause err) (conj chain err))
+               chain))]
+     (let [error-chain (collect-error-chain error [])]
+       (doseq [[i err] (map-indexed vector error-chain)]
+         (if (zero? i)
+           (log/error (str "Error: " (.-message err) "\n" (.-stack err)))
+           (log/error (str "Caused by: " (.-message err) "\n" (.-stack err))))))))
+  ([message ^js/Error error]
+   (log/error message)
+   (log-error-with-cause error)))
 
 (defn generate-uuid
   "Generates a random UUID."

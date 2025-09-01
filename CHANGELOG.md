@@ -7,11 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-08-31
+
+### Added
+
+- Undo/Redo functionality.
+- Tab indentation and Shift+Tab dedentation.
+- Find and replace.
+- Unload hook to ensure LSP server connection is cleanly terminated.
+
+### Changed
+
+- `go`-blocks now return Rust-like `Result` pairs consisting of either the keyword `:ok` or `:error` followed by either the expected return value for `:ok` or an instance of `js/Error` for `:error`. For example: `[:ok true]` or `[:error (js/Error. "Failed to perform some action" #js {:cause e})]`. Exceptions are also chained to improve traceability across asyncrhonous contexts and the chained causes are printed at the end of failing tests.
+- Improved debuggability of headless tests.
+
 ## [0.4.1] - 2025-08-27
 
 ### Added
 
 - Added new build target `karma-test-advanced` to run headless tests against release-compiled library.
+- Unload hook to ensure LSP server connection is cleanly terminated.
 
 ### Changed
 

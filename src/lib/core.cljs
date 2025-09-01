@@ -1,8 +1,9 @@
 (ns lib.core
   (:require
    ["@codemirror/autocomplete" :refer [closeBrackets]]
-   ["@codemirror/commands" :refer [defaultKeymap]]
+   ["@codemirror/commands" :refer [defaultKeymap history historyKeymap indentWithTab]]
    ["@codemirror/language" :refer [bracketMatching]]
+   ["@codemirror/search" :refer [getSearchQuery search searchKeymap openSearchPanel]]
    ["@codemirror/state" :refer [Annotation
                                 EditorSelection
                                 EditorState
@@ -12,20 +13,15 @@
                                lineNumbers]]
    ["react" :as react]
    ["rxjs" :as rxjs :refer [ReplaySubject]]
-   [clojure.string :as str]
    [clojure.core.async :refer [go <! put! promise-chan]]
+   [clojure.string :as str]
    [datascript.core :as d]
    [reagent.core :as r]
    [lib.db :as db :refer [conn]]
    [lib.editor.diagnostics :as diagnostics :refer [set-diagnostic-effect]]
    [lib.editor.highlight :as highlight]
    [lib.editor.syntax :as syntax]
-   [lib.lsp.client :as lsp :refer [didChange->lsp
-                                   didClose->lsp
-                                   didOpen->lsp
-                                   didRenameFiles->lsp
-                                   didSave->lsp
-                                   documentSymbol->lsp]]
+   [lib.lsp.client :as lsp]
    [lib.state :refer [normalize-languages]]
    [lib.utils :as u :refer [split-uri debounce]]
    [taoensso.timbre :as log]))
@@ -37,12 +33,14 @@
 ;; Annotation to mark transactions that update diagnostics in the StateField.
 (def diagnostic-annotation (.define Annotation))
 
+;; Annotation to mark external full-text set transactions (skips debounced LSP in update listener)
+(def external-set-annotation (.define Annotation))
+
 ;; StateField to hold the current list of LSP diagnostics.
 (def diagnostic-field
   (.define StateField
            #js {:create (fn [_] #js []) ;; Initial empty array of diagnostics.
                 :update (fn [value ^js tr]
-                          ;; Update with new diagnostics if the transaction has the annotation, else keep current.
                           (if-let [new-diags (.annotation tr diagnostic-annotation)]
                             new-diags
                             value))}))
@@ -74,6 +72,7 @@
       (log/warn "Non-string keys found in languages map:" (keys languages)))
     {:cursor {:line 1 :column 1}
      :selection nil
+     :search-term ""
      :lsp {}
      :languages languages
      :extra-extensions extra-extensions
@@ -120,12 +119,22 @@
                                   (let [[uri text lang] (db/active-uri-text-lang)]
                                     (when (and uri text lang)
                                       (let [version (db/inc-document-version-by-uri! uri)]
-                                        (didChange->lsp lang uri text version state-atom)))))
+                                        (lsp/notify-did-change lang uri text version state-atom)))))
                                 200)
+        debounced-search-emit (debounce
+                               (fn [term]
+                                 (let [uri (db/active-uri)]
+                                   (emit-event events "search-term-change" {:term term :uri uri})))
+                               200)
         update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              (when (or (.-docChanged u) (.-selectionSet u))
                                (update-editor-state (.-state u) state-atom events))
+                             (let [old-term (:search-term @state-atom "")
+                                   new-term (or (.-search (getSearchQuery (.-state u))) "")]
+                               (when (not= old-term new-term)
+                                 (swap! state-atom assoc :search-term new-term)
+                                 (debounced-search-emit new-term)))
                              (when (.-docChanged u)
                                (when-let [uri (db/active-uri)]
                                  (let [new-text (.toString (.-doc (.-state u)))]
@@ -135,15 +144,18 @@
                                    (when on-content-change
                                      (on-content-change new-text))
                                    (when (db/document-opened-by-uri? uri)
-                                     (debounced-lsp))))))))
+                                     (when-not (some #(.annotation % external-set-annotation) (.-transactions u))
+                                       (debounced-lsp)))))))))
         default-exts [(lineNumbers)
                       (bracketMatching)
                       (closeBrackets)
-                      (.of keymap defaultKeymap)
+                      (.of keymap (clj->js (concat [indentWithTab] defaultKeymap historyKeymap searchKeymap)))
                       (.of syntax/syntax-compartment #js [])
                       (.theme EditorView #js {} #js {:dark true})
                       diagnostic-field
-                      update-ext]
+                      update-ext
+                      (history)
+                      (search)] ; Added search extension for the panel and commands
         extra-extensions (:extra-extensions @state-atom #js [])]
     (into-array
      (concat default-exts diagnostics/extensions extra-extensions))))
@@ -170,69 +182,87 @@
   [lang uri state-atom events]
   (let [[text version] (db/doc-text-version-by-uri uri)]
     (when-let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
-      (let [connected? (get-in @state-atom [:lsp lang :connected?])
-            initialized? (get-in @state-atom [:lsp lang :initialized?])]
+      (let [lsp-state (get-in @state-atom [:lsp lang])
+            connected? (:connected? lsp-state)
+            initialized? (:initialized? lsp-state)]
         (log/debug "Ensuring LSP document opened for lang:" lang "uri:" uri "connected?" connected? "initialized?" initialized?)
         (go
-          (when-not (and connected? initialized?)
-            (let [p (get-connect-promise lang lsp-url state-atom events)
-                  res (<! (promise->chan p))]
-              (when (= res :unreachable)
-                (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
-                                                :lang lang})
-                (log/error "Failed to connect and initialize LSP for lang" lang))))
-          (when (and (get-in @state-atom [:lsp lang :connected?])
-                     (get-in @state-atom [:lsp lang :initialized?])
-                     (not (db/document-opened-by-uri? uri)))
-            (didOpen->lsp lang uri text version state-atom)
-            (emit-event events "lsp-message" {:method "textDocument/didOpen"
-                                              :lang lang
-                                              :params {:textDocument {:uri uri
-                                                                      :languageId lang
-                                                                      :version version
-                                                                      :text text}}})
-            (db/document-opened-by-uri! uri)
-            (emit-event events "document-open" {:uri uri
-                                                :content text
-                                                :language lang
-                                                :opened true})))))))
+          (try
+            (when-not (and connected? initialized?)
+              (let [p (get-connect-promise lang lsp-url state-atom events)
+                    res (<! (promise->chan p))]
+                (when (= res :unreachable)
+                  (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
+                                                  :lang lang})
+                  (log/error "Failed to connect and initialize LSP for lang" lang))))
+            (when (and (get-in @state-atom [:lsp lang :connected?])
+                       (get-in @state-atom [:lsp lang :initialized?])
+                       (not (db/document-opened-by-uri? uri)))
+              (lsp/notify-did-open lang uri text version state-atom)
+              (emit-event events "lsp-message" {:method "textDocument/didOpen"
+                                                :lang lang
+                                                :params {:textDocument {:uri uri
+                                                                        :languageId lang
+                                                                        :version version
+                                                                        :text text}}})
+              (db/document-opened-by-uri! uri)
+              (emit-event events "document-open" {:uri uri
+                                                  :content text
+                                                  :language lang
+                                                  :opened true}))
+            [:ok nil]
+            (catch :default e
+              [:error (js/Error. (str "(ensure-lsp-document-opened " lang " " uri " state-atom events) failed") #js {:cause e})])))))))
 
 (defn- activate-document
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
   Emits events for document activation and LSP open if necessary."
   [uri state-atom view-ref events]
-  (try
-    (log/info "Activating document:" uri)
-    (let [old-lang (db/active-lang)]
-      (db/update-active-uri! uri)
-      (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
-        (when-let [view (.-current view-ref)]
-          (let [current-doc (.-doc (.-state view))
-                current-length (.-length current-doc)]
-            (.dispatch view #js {:changes #js {:from 0
-                                               :to current-length
-                                               :insert text}})))
-        (when (not= old-lang new-lang)
-          (syntax/init-syntax (.-current view-ref) state-atom)
-          (emit-event events "language-change" {:uri uri :language new-lang}))
-        (if (get-in @state-atom [:languages new-lang :lsp-url])
-          (ensure-lsp-document-opened new-lang uri state-atom events)
-          (db/document-opened-by-uri! uri))
-        (emit-event events "document-open" {:uri uri
-                                            :content text
-                                            :language new-lang
-                                            :activated true})))
-    (catch js/Error error
-      (emit-event events "error" {:message (.-message error) :uri uri})
-      (log/error "Failed to activate document" uri ":" (.-message error)))))
+  (go
+    (try
+      (log/info "Activating document:" uri)
+      (let [old-lang (db/active-lang)]
+        (db/update-active-uri! uri)
+        (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
+          (when-let [view (.-current view-ref)]
+            (let [current-doc (.-doc (.-state view))
+                  current-length (.-length current-doc)]
+              (.dispatch view #js {:changes #js {:from 0
+                                                 :to current-length
+                                                 :insert text}})))
+          (when (not= old-lang new-lang)
+            (if-let [res (<! (syntax/init-syntax (.-current view-ref) state-atom))]
+              (if (= :ok (first res))
+                (emit-event events "language-change" {:uri uri :language new-lang})
+                (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second res)})))
+              (throw (js/Error. (str "(syntax/init-syntax (.-current view-ref) state-atom) returned nothing in call to (activate-document " uri " state-atom view-ref events)")))))
+          (if (get-in @state-atom [:languages new-lang :lsp-url])
+            (let [res (<! (ensure-lsp-document-opened new-lang uri state-atom events))]
+              (if (= :error (first res))
+                (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second res)}))
+                nil))
+            (db/document-opened-by-uri! uri))
+          (emit-event events "document-open" {:uri uri
+                                              :content text
+                                              :language new-lang
+                                              :activated true})))
+      [:ok nil]
+      (catch js/Error error
+        (emit-event events "error" {:message (.-message error) :uri uri})
+        (log/error "Failed to activate document" uri ":" (.-message error))
+        [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
 
 (defn- normalize-uri [file-or-uri-js default-protocol]
-  (if file-or-uri-js
+  (if (and file-or-uri-js (pos? (count file-or-uri-js)))
     (let [file-or-uri (js->clj file-or-uri-js :keywordize-keys true)]
       (if (re-find #"^[a-zA-Z]+:" file-or-uri)
         file-or-uri
         (str (or default-protocol "inmemory://") file-or-uri)))
-    (db/active-uri)))
+    (if-let [active-uri (db/active-uri)]
+      active-uri
+      (throw
+       (js/Error.
+        "Invalid URI or file path: either parameter must be non-empty or a document must be active")))))
 
 ;; Inner React functional component, handling CodeMirror integration and state management.
 (let [inner (fn [js-props forwarded-ref]
@@ -259,7 +289,8 @@
                                                                   :activeUri (db/active-uri)}
                                                       :logs (db/logs)
                                                       :diagnostics (db/diagnostics)
-                                                      :symbols (db/symbols)))
+                                                      :symbols (db/symbols)
+                                                      :searchTerm (:search-term @state-atom "")))
                                       (catch js/Error error
                                         (emit-event events "error" {:message (.-message error)
                                                                     :operation "getState"})
@@ -353,12 +384,14 @@
                                             (emit-event events "error" {:message (.-message error)
                                                                         :operation "setSelection"})
                                             (log/error "Error in setSelection:" (.-message error)))))
-                        ;; Opens or activates a document with file path or URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If fourth param make-active-js is false, opens without activating.
+                        ;; Opens or activates a document with file path or URI, optional content and language (triggers `document-open`).
+                        ;; Reuses if exists, updates if provided. Notifies LSP if connected. If fourth param make-active-js is false,
+                        ;; opens without activating.
                         ;; Example: (.openDocument editor "demo.rho" "new x in { x!(\"Hello\") | Nil }" "rholang")
                         ;;          (.openDocument editor "demo.rho") ; activates existing
                         ;;          (.openDocument editor "demo.rho" nil nil false) ; opens without activating
                         :openDocument (fn [file-or-uri-js text-js lang-js & [make-active-js]]
-                                        (when-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
+                                        (if-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
                                           (try
                                             (log/info "Opening document:" uri)
                                             (let [text (js->clj text-js :keywordize-keys true)
@@ -379,7 +412,7 @@
                                                   (db/update-document-text-language-by-id! id effective-text effective-lang)
                                                   (when (and changed? (db/document-opened-by-uri? uri))
                                                     (let [version (db/inc-document-version-by-uri! uri)]
-                                                      (didChange->lsp effective-lang uri effective-text version state-atom)
+                                                      (lsp/notify-did-change effective-lang uri effective-text version state-atom)
                                                       (emit-event events "lsp-message" {:method "textDocument/didChange"
                                                                                         :lang effective-lang
                                                                                         :params {:textDocument {:uri uri
@@ -400,17 +433,22 @@
                                               (emit-event events "error" {:message (.-message error)
                                                                           :operation "openDocument"
                                                                           :uri uri})
-                                              (log/error "Error in openDocument:" (.-message error))))))
+                                              (log/error "Error in openDocument:" (.-message error))))
+                                          (let [error-message (str "Invalid file path or URI: " file-or-uri-js)]
+                                            (emit-event events "error" {:message error-message
+                                                                        :operation "openDocument"
+                                                                        :uri file-or-uri-js})
+                                            (log/error "Failed to open document:" error-message))))
                         ;; Closes the specified or active document (triggers `document-close`). Notifies LSP if open.
                         ;; Example: (.closeDocument editor)
-                        ;;          (.closeDocument editor "specific-uri")
+                        ;; Example: (.closeDocument editor "specific-uri")
                         :closeDocument (fn [file-or-uri-js]
                                          (try
                                            (when-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
                                              (log/info "Closing document:" uri)
                                              (let [[id lang opened?] (db/document-id-lang-opened-by-uri uri)]
                                                (when opened?
-                                                 (didClose->lsp lang uri state-atom)
+                                                 (lsp/notify-did-close lang uri state-atom)
                                                  (emit-event events "lsp-message" {:method "textDocument/didClose"
                                                                                    :lang lang
                                                                                    :params {:textDocument {:uri uri}}}))
@@ -433,49 +471,55 @@
                         ;; Example: (.renameDocument editor "new-name.rho")
                         ;;          (.renameDocument editor "new-name.rho" "old-uri")
                         :renameDocument (fn [new-file-or-uri-js old-file-or-uri-js]
-                                          (try
-                                            (when-not new-file-or-uri-js
-                                              (throw
-                                               (js/Error.
-                                                (str "Invalid `new-file-or-uri-js` passed to `renameDocument`:" new-file-or-uri-js))))
-                                            (let [default-protocol (:default-protocol @state-atom)
-                                                  new-uri (normalize-uri new-file-or-uri-js default-protocol)
-                                                  old-uri (normalize-uri old-file-or-uri-js default-protocol)]
-                                              (log/info "Renaming document from" old-uri "to" new-uri)
-                                              (when (not= new-uri old-uri)
-                                                (let [new-ext (get-ext-from-path new-uri)
-                                                      new-lang (when new-ext (get-lang-from-ext (:languages @state-atom) new-ext))
-                                                      [id old-lang opened?] (db/document-id-lang-opened-by-uri old-uri)
-                                                      lang-changed? (and new-lang (not= new-lang old-lang))]
-                                                  (when (and old-uri id)
-                                                    (when-not (db/document-id-by-uri new-uri)
-                                                      (when opened?
-                                                        (when-not lang-changed?
-                                                          (didRenameFiles->lsp old-lang old-uri new-uri state-atom)
-                                                          (emit-event events "lsp-message" {:method "workspace/didRenameFiles"
-                                                                                            :lang old-lang
-                                                                                            :params {:files [{:oldUri old-uri
-                                                                                                              :newUri new-uri}]}})))
-                                                      (if lang-changed?
-                                                        (db/update-document-uri-language-by-id! id new-uri new-lang)
-                                                        (db/update-document-uri-by-id! id new-uri))
-                                                      (when (= old-uri (db/active-uri))
-                                                        (db/update-active-uri! new-uri)
-                                                        (when-let [^js editor-view (.-current view-ref)]
-                                                          (syntax/init-syntax editor-view state-atom)))
-                                                      (when-not (db/document-opened-by-uri? new-uri)
-                                                        (ensure-lsp-document-opened new-lang new-uri state-atom events))
-                                                      (emit-event events "document-rename" {:old-uri old-uri
-                                                                                            :new-uri new-uri}))))))
-                                            (catch js/Error error
-                                              (emit-event events "error" {:message (.-message error)
-                                                                          :operation "renameDocument"
-                                                                          :old-uri old-file-or-uri-js
-                                                                          :new-uri new-file-or-uri-js})
-                                              (log/error "Error in renameDocument:" (.-message error)))))
+                                          (go
+                                            (try
+                                              (when-not new-file-or-uri-js
+                                                (throw
+                                                 (js/Error.
+                                                  (str "Invalid `new-file-or-uri-js` passed to `renameDocument`:" new-file-or-uri-js))))
+                                              (let [default-protocol (:default-protocol @state-atom)
+                                                    new-uri (normalize-uri new-file-or-uri-js default-protocol)
+                                                    old-uri (normalize-uri old-file-or-uri-js default-protocol)]
+                                                (log/info "Renaming document from" old-uri "to" new-uri)
+                                                (when (not= new-uri old-uri)
+                                                  (let [new-ext (get-ext-from-path new-uri)
+                                                        new-lang (when new-ext (get-lang-from-ext (:languages @state-atom) new-ext))
+                                                        [id old-lang opened?] (db/document-id-lang-opened-by-uri old-uri)
+                                                        lang-changed? (and new-lang (not= new-lang old-lang))]
+                                                    (when (and old-uri id)
+                                                      (when-not (db/document-id-by-uri new-uri)
+                                                        (when opened?
+                                                          (when-not lang-changed?
+                                                            (lsp/notify-did-rename-files old-lang old-uri new-uri state-atom)
+                                                            (emit-event events "lsp-message" {:method "workspace/didRenameFiles"
+                                                                                              :lang old-lang
+                                                                                              :params {:files [{:oldUri old-uri
+                                                                                                                :newUri new-uri}]}})))
+                                                        (if lang-changed?
+                                                          (db/update-document-uri-language-by-id! id new-uri new-lang)
+                                                          (db/update-document-uri-by-id! id new-uri))
+                                                        (when (= old-uri (db/active-uri))
+                                                          (db/update-active-uri! new-uri)
+                                                          (when-let [^js editor-view (.-current view-ref)]
+                                                            (if-let [res (<! (syntax/init-syntax editor-view state-atom))]
+                                                              (when (= :error (first res))
+                                                                (throw (js/Error. (str "(.renameDocument this " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause (second res)})))
+                                                              (throw (js/Error. (str "(syntax/init-syntax editor-view state-atom) returned nothing in call to (.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed"))))))
+                                                        (when-not (db/document-opened-by-uri? new-uri)
+                                                          (ensure-lsp-document-opened new-lang new-uri state-atom events))
+                                                        (emit-event events "document-rename" {:old-uri old-uri
+                                                                                              :new-uri new-uri}))))))
+                                              [:ok nil]
+                                              (catch js/Error error
+                                                (emit-event events "error" {:message (.-message error)
+                                                                            :operation "renameDocument"
+                                                                            :old-uri old-file-or-uri-js
+                                                                            :new-uri new-file-or-uri-js})
+                                                (let [error-with-cause (js/Error. (str "(.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause error})]
+                                                  (u/log-error-with-cause error-with-cause))))))
                         ;; Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
                         ;; Example: (.saveDocument editor)
-                        ;;          (.saveDocument editor "specific-uri")
+                        ;; Example: (.saveDocument editor "specific-uri")
                         :saveDocument (fn [file-or-uri-js]
                                         (try
                                           (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
@@ -484,7 +528,7 @@
                                             (log/info "Saving document:" uri)
                                             (when (and uri dirty)
                                               (when (get-in @state-atom [:lsp lang :connected?])
-                                                (didSave->lsp lang uri text state-atom)
+                                                (lsp/notify-did-save lang uri text state-atom)
                                                 (emit-event events "lsp-message" {:method "textDocument/didSave"
                                                                                   :lang lang
                                                                                   :params {:textDocument {:uri uri}}}))
@@ -580,7 +624,7 @@
                                              (log/error "Error in centerOnRange:" (.-message error)))))
                         ;; Returns text for specified or active document, or `null` if not found.
                         ;; Example: (.getText editor)
-                        ;;          (.getText editor "specific-uri")
+                        ;; Example: (.getText editor "specific-uri")
                         :getText (fn [file-or-uri-js]
                                    (try
                                      (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
@@ -595,7 +639,7 @@
                                        nil)))
                         ;; Replaces entire text for specified or active document (triggers `content-change`).
                         ;; Example: (.setText editor "new text")
-                        ;;          (.setText editor "new text" "specific-uri")
+                        ;; Example: (.setText editor "new text" "specific-uri")
                         :setText (fn [text-js file-or-uri-js]
                                    (try
                                      (let [text (js->clj text-js :keywordize-keys true)
@@ -615,11 +659,12 @@
                                                      len (.-length doc)]
                                                  (.dispatch editor-view #js {:changes #js {:from 0
                                                                                            :to len
-                                                                                           :insert text}}))
+                                                                                           :insert text}
+                                                                             :annotations (.of external-set-annotation true)}))
                                                (log/warn "Cannot set editor text: view not ready")))
                                            (when (and lang opened? (get-in @state-atom [:lsp lang :connected?]))
                                              (let [version (db/inc-document-version-by-id! id)]
-                                               (didChange->lsp lang uri text version state-atom)
+                                               (lsp/notify-did-change lang uri text version state-atom)
                                                (emit-event events "lsp-message" {:method "textDocument/didChange"
                                                                                  :lang lang
                                                                                  :params {:textDocument {:uri uri
@@ -633,7 +678,7 @@
                                        (log/error "Error in setText:" (.-message error)))))
                         ;; Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.
                         ;; Example: (.getFilePath editor)
-                        ;;          (.getFilePath editor "specific-uri")
+                        ;; Example: (.getFilePath editor "specific-uri")
                         :getFilePath (fn [file-or-uri-js]
                                        (try
                                          (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
@@ -648,7 +693,7 @@
                                            nil)))
                         ;; Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.
                         ;; Example: (.getFileUri editor)
-                        ;;          (.getFileUri editor "specific-uri")
+                        ;; Example: (.getFileUri editor "specific-uri")
                         :getFileUri (fn [file-or-uri-js]
                                       (try
                                         (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -697,7 +742,7 @@
                         :getDb (fn [] conn)
                         ;; Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active).
                         ;; Example: (.getDiagnostics editor)
-                        ;; Example: (.getDiagnostics editor "inmemory://demo.rho")
+                        ;; Example: (.getDiagnostics editor 'inmemory://demo.rho')
                         :getDiagnostics (fn [file-or-uri-js]
                                           (try
                                             (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -711,7 +756,7 @@
                                               #js [])))
                         ;; Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active).
                         ;; Example: (.getSymbols editor)
-                        ;; Example: (.getSymbols editor "inmemory://demo.rho")
+                        ;; Example: (.getSymbols editor 'inmemory://demo.rho')
                         :getSymbols (fn [file-or-uri-js]
                                       (try
                                         (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -722,7 +767,32 @@
                                                                       :operation "getSymbols"
                                                                       :uri file-or-uri-js})
                                           (log/error "Error in getSymbols:" (.-message error))
-                                          #js [])))})
+                                          #js [])))
+                        ;; Returns the current search term.
+                        ;; Example: (.getSearchTerm editor)
+                        :getSearchTerm (fn []
+                                         (try
+                                           (log/trace "Fetching search term")
+                                           (or (:search-term @state-atom) "")
+                                           (catch js/Error error
+                                             (emit-event events "error" {:message (.-message error)
+                                                                         :operation "getSearchTerm"})
+                                             (log/error "Error in getSearchTerm:" (.-message error))
+                                             "")))
+                        ;; Opens the search panel in the editor.
+                        ;; Example: (.openSearchPanel editor)
+                        :openSearchPanel (fn []
+                                           (try
+                                             (if-let [^js editor-view (.-current view-ref)]
+                                               (openSearchPanel editor-view)
+                                               (do
+                                                 (emit-event events "error" {:message "View not ready"
+                                                                             :operation "openSearchPanel"})
+                                                 (log/warn "View not ready for openSearchPanel")))
+                                             (catch js/Error error
+                                               (emit-event events "error" {:message (.-message error)
+                                                                           :operation "openSearchPanel"})
+                                               (log/error "Error in openSearchPanel:" (.-message error)))))})
                  #js [@state-atom (.-current view-ref) ready])
                 (react/useEffect
                  (fn []
@@ -756,10 +826,19 @@
                                                    (.dispatch editor-view #js {:effects #js [(.of set-diagnostic-effect (clj->js diags))]})
                                                    (let [uri (:uri evt)]
                                                      (when-let [lang (db/document-language-by-uri uri)]
-                                                       (documentSymbol->lsp lang uri state-atom))))))))]
+                                                       (lsp/request-document-symbol lang uri state-atom))))))))]
                        (fn [] (.unsubscribe sub)))
                      js/undefined))
                  #js [(.-current view-ref)])
+                (react/useEffect
+                 (fn []
+                   (let [shutdown-all (fn []
+                                        (doseq [[lang _] (:lsp @state-atom)]
+                                          (lsp/request-shutdown lang state-atom)))]
+                     (js/window.addEventListener "beforeunload" shutdown-all)
+                     (fn []
+                       (js/window.removeEventListener "beforeunload" shutdown-all))))
+                 #js [])
                 (react/useEffect
                  (fn []
                    (log/info "Editor: Initializing EditorView")
@@ -780,6 +859,8 @@
                        (update-editor-state editor-state state-atom events)
                        (fn []
                          (log/info "Editor: Destroying EditorView")
+                         (doseq [[lang _] (:lsp @state-atom)]
+                           (lsp/request-shutdown lang state-atom))
                          (when-let [editor-view (.-current view-ref)]
                            (.destroy editor-view))
                          (set! (.-current view-ref) nil)
@@ -787,7 +868,8 @@
                      (catch js/Error error
                        (emit-event events "error" {:message (.-message error)
                                                    :operation "initEditorView"})
-                       (log/error "Error initializing EditorView:" (.-message error)))))
+                       (u/log-error-with-cause "Error initializing EditorView" error)
+                       (fn []))))
                  #js [(db/active-lang) (:extra-extensions @state-atom) container-ref])
                 (react/createElement "div" #js {:ref container-ref
                                                 :className "code-editor flex-grow-1"})))]

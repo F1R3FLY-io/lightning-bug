@@ -137,6 +137,8 @@ export interface EditorState {
     /** Parent symbol ID (or null). */
     parent?: number;
   }>;
+  /** Current search term. */
+  searchTerm: string;
 }
 
 /**
@@ -162,7 +164,8 @@ export type EditorEvent =
   | { type: 'language-change'; data: { uri: string; language: string } }
   | { type: 'scroll'; data: { from: { line: number; column: number }; to: { line: number; column: number } } }
   | { type: 'destroy'; data: {} }
-  | { type: 'error'; data: { message: string; operation: string; [key: string]: any } };
+  | { type: 'error'; data: { message: string; operation: string; [key: string]: any } }
+  | { type: 'search-term-change'; data: { term: string; uri: string } };
 
 /**
  * Ref interface for imperative methods on the Editor component.
@@ -177,7 +180,7 @@ export interface EditorRef {
   getCursor(): { line: number; column: number };
   /** Sets cursor position for active document (triggers `selection-change` event). */
   setCursor(pos: { line: number; column: number }): void;
-  /** Returns current selection range and text for active document, or `null` if no selection. */
+  /** Returns current selection range and text (or null if none). */
   getSelection(): { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null;
   /** Sets selection range for active document (triggers `selection-change` event). */
   setSelection(from: { line: number; column: number }, to: { line: number; column: number }): void;
@@ -215,6 +218,8 @@ export interface EditorRef {
   getDiagnostics(fileOrUri?: string): Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>;
   /** Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active). */
   getSymbols(fileOrUri?: string): Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>;
+  /** Returns the current search term. */
+  getSearchTerm(): string;
 }
 
 /**

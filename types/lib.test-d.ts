@@ -40,6 +40,7 @@ if (ref.current) {
   expectType<any>(ref.current.getDb());
   expectType<Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>>(ref.current.getDiagnostics('uri'));
   expectType<Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>>(ref.current.getSymbols('uri'));
+  expectType<string>(ref.current.getSearchTerm());
 }
 
 // Check state shape
@@ -77,6 +78,7 @@ const state: EditorState = {
     selectionEndChar: 1,
     parent: 0
   }],
+  searchTerm: ""
 };
 expectType<EditorState>(state);
 

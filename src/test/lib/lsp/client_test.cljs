@@ -1,18 +1,21 @@
 (ns test.lib.lsp.client-test
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures]]
+   [clojure.test :refer [deftest is testing use-fixtures async]]
+   [clojure.core.async :refer [go <! timeout]]
    [clojure.string :as str]
    [clojure.spec.alpha :as s]
+   [clojure.test.check :as tc]
+   [clojure.test.check.generators :as gen]
+   [clojure.test.check.properties :as prop]
    [datascript.core :as d]
    [reagent.core :as r]
    ["rxjs" :as rxjs]
-   [lib.db :as db :refer [conn flatten-symbols create-documents! replace-symbols!]]
-   [lib.lsp.client :as lsp]))
+   [lib.db :as db :refer [flatten-symbols create-documents! replace-symbols!]]
+   [lib.lsp.client :as lsp]
+   [lib.utils :as u]))
 
 (use-fixtures :each
-  (fn [f]
-    (d/reset-conn! conn (d/empty-db db/schema))
-    (f)))
+  {:before #(d/reset-conn! db/conn (d/empty-db db/schema))})
 
 (deftest connect-mock-websocket
   (let [state (r/atom {:lsp {:pending {}}})
@@ -167,6 +170,17 @@
     (is (= "single" (:symbol/name (first flat))))
     (is (nil? (:symbol/parent (first flat))) "No parent for top-level")))
 
+(deftest message-conforms-to-spec
+  (testing "Valid request"
+    (let [req {:jsonrpc "2.0" :id 1 :method "initialize" :params {}}]
+      (is (s/valid? ::lsp/request req))))
+  (testing "Valid notification"
+    (let [notif {:jsonrpc "2.0" :method "initialized" :params {}}]
+      (is (s/valid? ::lsp/notification notif))))
+  (testing "Valid response"
+    (let [resp {:jsonrpc "2.0" :id 1 :result {}}]
+      (is (s/valid? ::lsp/response resp)))))
+
 (deftest handle-message-with-header
   (let [state (r/atom {:lsp {"test-lang" {:pending {1 :initialize}}}})
         events (rxjs/Subject.)
@@ -265,13 +279,126 @@
         (is (= "test-uri" (:uri child)) "URI added to child")
         (is (not= (:parent root) (:parent child)) "Child parent differs from root")))))
 
-(deftest message-conforms-to-spec
-  (testing "Valid request"
-    (let [req {:jsonrpc "2.0" :id 1 :method "initialize" :params {}}]
-      (is (s/valid? ::lsp/request req))))
-  (testing "Valid notification"
-    (let [notif {:jsonrpc "2.0" :method "initialized" :params {}}]
-      (is (s/valid? ::lsp/notification notif))))
-  (testing "Valid response"
-    (let [resp {:jsonrpc "2.0" :id 1 :result {}}]
-      (is (s/valid? ::lsp/response resp)))))
+(deftest send-initialize-conforms
+  (let [state (r/atom {:lsp {"test" {:pending {} :next-id 1}}})
+        sent (atom [])]
+    (with-redefs [lsp/send-raw (fn [_lang full _state] (swap! sent conj full))]
+      (lsp/request-initialize "test" state))
+    (is (= 1 (count @sent)))
+    (let [msg (js/JSON.parse (subs (first @sent) (str/index-of (first @sent) "{")))]
+      (is (s/valid? ::lsp/request (js->clj msg :keywordize-keys true)) "Send-initialize conforms to request spec"))))
+
+(deftest handle-initialize-response-sets-state
+  (let [state (r/atom {:lsp {"test-lang" {:pending {1 :initialize}}}})
+        events (rxjs/Subject.)
+        response-js #js {:jsonrpc "2.0"
+                         :id 1
+                         :result #js {:capabilities #js {}}}
+        response (js/JSON.stringify response-js)
+        full (str "Content-Length: " (.-length response) "\r\n\r\n" response)]
+    (with-redefs [lsp/send (fn [_ _ _])] ; Mock send-initialized
+      (lsp/handle-message "test-lang" full state events))
+    (is (true? (get-in @state [:lsp "test-lang" :initialized?])) "Initialized flag set")
+    (is (empty? (get-in @state [:lsp "test-lang" :pending])) "Pending cleared")))
+
+(deftest handle-publish-diagnostics-transacts
+  (let [state (r/atom {})
+        events (rxjs/Subject.)
+        params {:uri "test-uri"
+                :diagnostics [{:message "err"
+                               :severity 1
+                               :range {:start {:line 0
+                                               :character 0}
+                                       :end {:line 0
+                                             :character 5}}}]}
+        doc-tx [{:uri "test-uri"
+                 :text ""
+                 :language "test"
+                 :version 1
+                 :dirty false
+                 :opened true}]
+        _ (create-documents! doc-tx)]
+    (db/update-active-uri! "test-uri")
+    (lsp/handle-publish-diagnostics "test" params state events)
+    (let [diags (db/diagnostics)]
+      (is (= 1 (count diags)) "Diagnostic transacted")
+      (is (= "err" (:message (first diags))) "Message matches")
+      (is (= "test-uri" (:uri (first diags))) "URI added"))))
+
+(let [gen-type (gen/elements [:request :notification])
+      gen-request-method (gen/elements ["initialize"])
+      gen-notification-method (gen/elements ["textDocument/didOpen"])
+      gen-id (gen/one-of [gen/nat gen/string])
+      gen-params (gen/map gen/keyword gen/any)
+      prop (prop/for-all [type gen-type]
+                         (gen/let [method (case type
+                                            :request gen-request-method
+                                            :notification gen-notification-method)
+                                   id (case type
+                                        :request gen-id
+                                        :notification (gen/return nil))
+                                   params gen-params]
+                           (let [msg (cond-> {:jsonrpc "2.0" :method method :params params}
+                                       id (assoc :id id))
+                                 spec (case type :request ::lsp/request :notification ::lsp/notification)]
+                             (s/valid? spec msg))))]
+  (deftest message-conformance-property
+    (let [result (tc/quick-check 100 prop {:seed 42})]
+      (is (:result result) "All generated messages conform to specs"))))
+
+(deftest shutdown-sends-request
+  (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
+                                     :pending {}
+                                     :connected? true
+                                     :reachable true}}})
+        sent (atom [])]
+    (with-redefs [lsp/send-raw (fn [_lang full _state] (swap! sent conj full))]
+      (lsp/request-shutdown "test" state))
+    (is (= 1 (count @sent)))
+    (let [msg (js/JSON.parse (subs (first @sent) (str/index-of (first @sent) "{")))]
+      (is (s/valid? ::lsp/request (js->clj msg :keywordize-keys true)) "Shutdown conforms to request spec"))))
+
+(deftest exit-sends-notification
+  (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
+                                     :pending {}
+                                     :connected? true
+                                     :reachable true}}})
+        sent (atom [])]
+    (with-redefs [lsp/send-raw (fn [_lang full _state] (swap! sent conj full))]
+      (lsp/notify-exit "test" state))
+    (is (= 1 (count @sent)))
+    (let [msg (js/JSON.parse (subs (first @sent) (str/index-of (first @sent) "{")))]
+      (is (s/valid? ::lsp/notification (js->clj msg :keywordize-keys true)) "Exit conforms to notification spec"))))
+
+(deftest handle-shutdown-response
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [state (r/atom {:lsp {"test-lang" {:ws (js/Object.)
+                                                                     :pending {1 :shutdown}}}})
+                                   events (rxjs/Subject.)
+                                   response-js #js {:jsonrpc "2.0"
+                                                    :id 1
+                                                    :result #js {}}
+                                   response (js/JSON.stringify response-js)
+                                   full (str "Content-Length: " (.-length response) "\r\n\r\n" response)
+                                   sent (atom [])
+                                   closed (atom false)]
+                               (set! (.-close (get-in @state [:lsp "test-lang" :ws])) (fn [] (reset! closed true)))
+                               (with-redefs [lsp/send (fn [_lang msg _state-atom]
+                                                        (swap! sent conj msg))]
+                                 (lsp/handle-message "test-lang" full state events))
+                               (<! (timeout 100))
+                               (is (= 1 (count @sent)) "Sent exit after shutdown")
+                               (is (= "exit" (:method (first @sent))) "Exit notification sent")
+                               (is @closed "WebSocket closed after exit")
+                               [:ok nil])
+                             (catch :default e
+                               [:error (js/Error. "handle-shutdown-response failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
