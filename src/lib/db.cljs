@@ -4,7 +4,7 @@
    [taoensso.timbre :as log]
    [datascript.core :as d]))
 
-(goog-define DEBUG true)
+(goog-define ^boolean DEBUG true)
 
 (def schema {:symbol/parent {:db/valueType :db.type/ref}
              :symbol/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one}

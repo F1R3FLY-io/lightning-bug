@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-09-01
+
+### Added
+
+- Script to strip the occasionally generated, erroneous statement `goog=goog||{};` from the release distribution before publishing artifacts.
+- A sanity test that launches the demo app in a headless browser and ensures it loads correctly for both the unoptimized and fully optimized distributions.
+
+### Changed
+
+- The erroneous statement `goog=goog||{};` which caused the error `goog is not defined` is now stripped from the fully-optimized distribution before publication.
+- The sanity test is now run in the CI after the automated tests complete for both the unoptimized and fully-optimized jobs.
+- All dependencies have been updated.
+- On a tagged release, the CI now uploads the same artifact that was tested against in `test-headless-advanced`. This makes it less likely that a bug can slip through.
+
 ## [0.5.0] - 2025-08-31
 
 ### Added

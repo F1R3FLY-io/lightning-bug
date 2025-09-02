@@ -59,11 +59,25 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Run type tests
         run: npm run test:types
 
       - name: Run headless tests
         run: npm run test:headless
+
+      - name: Build demo (dev)
+        run: npm run build:demo
+
+      - name: Run sanity test (dev)
+        env:
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: node scripts/test-demo.js
 
   test-headless-advanced:
     runs-on: ubuntu-latest
@@ -109,8 +123,43 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Run headless advanced tests
         run: npm run test:headless-advanced
+
+      - name: Build demo (release)
+        env:
+          MODE: release
+        run: npm run build:demo
+
+      # Quick-and-dirty method for stripping the erroneous `goog=goog||{};`
+      # statement from the compiled libs.
+      # ----------------------------------------------------------------------
+      # TODO: Replace this with a proper fix when possible. I had it fixed but
+      # it snuck back in somehow ...
+      # ----------------------------------------------------------------------
+      - name: Strip goog
+        run: node scripts/strip-goog.js dist/libs/lib.core.js
+
+      - name: Run sanity test (release)
+        env:
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: node scripts/test-demo.js
+
+      - name: Upload libs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libs-artifact
+          path: |
+            dist/**
+            types/**
+            resources/public/extensions/**
+            scripts/postinstall.js
 
   release:
     needs: [test-headless, test-headless-advanced]
@@ -129,37 +178,13 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: latest
-          cache: npm
-          cache-dependency-path: package-lock.json
           registry-url: 'https://npm.pkg.github.com'
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Download libs artifact
+        uses: actions/download-artifact@v4
         with:
-          distribution: 'temurin'
-          java-version: '23'
-
-      - name: Set up Clojure
-        uses: DeLaGuardo/setup-clojure@13.4
-        with:
-          cli: latest
-
-      - name: Cache clojure dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gitlibs
-            ~/.deps.clj
-            .cpcache
-          key: cljdeps-${{ hashFiles('deps.edn') }}
-          restore-keys: cljdeps-
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build library
-        run: npx shadow-cljs release libs
+          name: libs-artifact
+          path: .
 
       - name: Publish to GitHub Packages
         run: npm publish --access public

@@ -5,6 +5,8 @@ const cp = require('child_process');
 const baseDir = path.dirname(__dirname);
 const demoDir = path.join(baseDir, 'resources/public/demo');
 
+const mode = process.env.MODE || 'dev';
+
 // Function to run shell commands synchronously.
 function runCmd(cmd, cwd = baseDir) {
   console.log(`Running: ${cmd} in ${cwd}`);
@@ -13,8 +15,11 @@ function runCmd(cmd, cwd = baseDir) {
 
 // Install deps and build libs in base dir.
 runCmd('npm install', baseDir);
-// runCmd('npx shadow-cljs release libs', baseDir);
-runCmd('npx shadow-cljs compile libs', baseDir);
+if (mode === 'release') {
+  runCmd('npx shadow-cljs release libs', baseDir);
+} else {
+  runCmd('npx shadow-cljs compile libs', baseDir);
+}
 
 // In demo dir: install deps.
 runCmd('npm install', demoDir);

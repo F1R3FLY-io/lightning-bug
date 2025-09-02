@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -40,41 +39,75 @@
   </script>
   <script type="module">
    (async () => {
-      const React = await import('react');
-      const { createRoot } = await import('react-dom/client');
-      const { Editor } = await import('@f1r3fly-io/lightning-bug');
-      const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
-      const root = createRoot(document.getElementById('app'));
-      const editorRef = React.createRef();
-      root.render(React.createElement(Editor, {
-        ref: editorRef,
-        languages: {"rholang": RholangExtension},
-        preloadLanguages: ["rholang"]
-      }));
-      const interval = setInterval(() => {
-        if (editorRef.current && editorRef.current.isReady()) {
-          clearInterval(interval);
-          const subscription = editorRef.current.getEvents().subscribe(event => {
-            console.log('Event:', event.type, event.data);
+      try {
+        console.log("Start imports");
+        const React = await import('react');
+        console.log("React imported");
+        const { createRoot } = await import('react-dom/client');
+        console.log("react-dom/client imported");
+        const { Editor } = await import('@f1r3fly-io/lightning-bug');
+        console.log("Editor imported");
+        const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
+        console.log("RholangExtension imported");
+        console.log("Start render");
+        const root = createRoot(document.getElementById('app'));
+        const editorRef = React.createRef();
+        window.editorRef = editorRef; // Expose for testing
+        root.render(React.createElement(Editor, {
+          ref: editorRef,
+          languages: {"rholang": RholangExtension},
+          preloadLanguages: ["rholang"]
+        }));
+        console.log("Rendered");
+        const waitForReady = (ref) => new Promise(resolve => {
+          const check = () => {
+            console.log("Checking ready...");
+            if (ref.current && ref.current.isReady()) {
+              console.log("Is ready");
+              resolve();
+            } else {
+              setTimeout(check, 100);
+            }
+          };
+          check();
+        });
+        console.log("Await waitForReady");
+        await waitForReady(editorRef);
+        console.log("Editor ready");
+        const events = editorRef.current.getEvents();
+        const waitForEvent = (events, type, matcher = () => true) => new Promise(resolve => {
+          const sub = events.subscribe(event => {
+            console.log('Event received:', event.type);
+            if (event.type === type && matcher(event.data)) {
+              sub.unsubscribe();
+              resolve(event.data);
+            }
           });
-          editorRef.current.openDocument(
-            "demo.rho",
-            "new x in { x!(\"Hello\") | Nil }",
-            "rholang"
-          );
-          console.log('State:', editorRef.current.getState());
-          editorRef.current.setCursor({ line: 1, column: 3 });
-          console.log('Cursor:', editorRef.current.getCursor());
-          editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
-          console.log('Selection:', editorRef.current.getSelection());
-          console.log('Text:', editorRef.current.getText());
-          console.log('File Path:', editorRef.current.getFilePath());
-          console.log('File URI:', editorRef.current.getFileUri());
-          console.log('Diagnostics:', editorRef.current.getDiagnostics());
-          console.log('Symbols:', editorRef.current.getSymbols());
-          console.log('Search Term:', editorRef.current.getSearchTerm());
-        }
-      }, 100);
+        });
+        editorRef.current.openDocument(
+          "demo.rho",
+          "new x in { x!(\"Hello\") | Nil }",
+          "rholang"
+        );
+        await waitForEvent(events, "document-open", data => data.uri === "demo.rho" && data.activated);
+        console.log("Document opened and activated");
+        console.log('State:', editorRef.current.getState());
+        editorRef.current.setCursor({ line: 1, column: 3 });
+        console.log('Cursor:', editorRef.current.getCursor());
+        editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+        console.log('Selection:', editorRef.current.getSelection());
+        console.log('Text:', editorRef.current.getText());
+        console.log('File Path:', editorRef.current.getFilePath());
+        console.log('File URI:', editorRef.current.getFileUri());
+        console.log('Diagnostics:', editorRef.current.getDiagnostics());
+        console.log('Symbols:', editorRef.current.getSymbols());
+        console.log('Search Term:', editorRef.current.getSearchTerm());
+        const subscription = editorRef.current.getEvents().subscribe(event => {
+          console.log('Event:', event.type, event.data);
+        });
+      } catch (e) {
+        console.error("Script error:", e.name, e.message, e.stack, JSON.stringify(e, Object.getOwnPropertyNames(e)));
+      }
     })();
   </script>
 </head>
