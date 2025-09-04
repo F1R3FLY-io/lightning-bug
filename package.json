@@ -74,8 +74,6 @@
   },
   "files": [
     "dist/**",
-    "types/**",
-    "resources/public/extensions/**",
-    "scripts/postinstall.js"
+    "types/**"
   ]
 }

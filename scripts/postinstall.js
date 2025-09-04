@@ -18,18 +18,13 @@ function findPkgDir(pkgName) {
 }
 
 const treeSitterDir = findPkgDir('web-tree-sitter');
-const rholangDir = findPkgDir('@f1r3fly-io/tree-sitter-rholang-js-with-comments');
 
 const treeSitterWasmPath = path.join(treeSitterDir, 'tree-sitter.wasm');
-const rholangWasmPath = path.join(rholangDir, 'tree-sitter-rholang.wasm');
 
 // Define target paths (create directories if needed).
 const targets = [
   { src: treeSitterWasmPath, dest: path.join(baseDir, 'resources/public/js/tree-sitter.wasm') },
   { src: treeSitterWasmPath, dest: path.join(baseDir, 'resources/public/js/test/js/tree-sitter.wasm') },
-  { src: rholangWasmPath, dest: path.join(baseDir, 'resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm') },
-  // NOTE: The rholang parser WASM is copied to the testing extensions dir further in the script
-  // { src: rholangWasmPath, dest: path.join(baseDir, 'resources/public/js/test/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm') }
 ];
 
 targets.forEach(({ src, dest }) => {

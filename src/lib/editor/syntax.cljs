@@ -7,6 +7,7 @@
    ["@codemirror/language" :refer [indentService indentUnit]]
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
+   ["f1r3fly-io/tree-sitter-rholang-js-with-comments" :as TreeSitterRholang :refer [wasm]]
    [lib.db :as db]
    [lib.state :refer [normalize-languages]]
    [lib.utils :as u]))
@@ -274,7 +275,7 @@
                                                 nil)))))
                   lang (or (:lang cached)
                            (when wasm-path
-                             (let [[tag val] (<! (promise->chan (.load Language wasm-path)))]
+                             (let [[tag val] (<! (promise->chan (.load Language wasm)))]
                                (if (= tag :ok)
                                  val
                                  (do
