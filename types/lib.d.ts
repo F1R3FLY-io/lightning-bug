@@ -13,7 +13,7 @@ export interface LanguageConfig {
   /** Pre-instantiated Tree-Sitter Parser (or function returning one, sync or async) with language set. Prefer over grammarWasm. */
   parser?: Parser | (() => Parser) | (() => Promise<Parser>);
   /** Path to the SCM query file for syntax highlighting captures. */
-  highlightQueryPath?: string | (() => string);
+  highlightsQueryPath?: string | (() => string);
   /** Path to the SCM query file for indentation rules. */
   indentsQueryPath?: string | (() => string);
   /** WebSocket URL for connecting to a Language Server Protocol (LSP) server (enables diagnostics/symbols). */

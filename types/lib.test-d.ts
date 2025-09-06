@@ -96,7 +96,7 @@ expectAssignable<LanguageConfig>({
 expectAssignable<LanguageConfig>({
   grammarWasm: 'path/to/grammar.wasm',
   parser: new Parser(),
-  highlightQueryPath: 'queries/highlights.scm',
+  highlightsQueryPath: 'queries/highlights.scm',
   indentsQueryPath: 'queries/indents.scm',
   lspUrl: 'ws://localhost:1234',
   extensions: ['.rho'],
