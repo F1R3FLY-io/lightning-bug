@@ -26,6 +26,8 @@
 !/scripts/**/*.js
 !/scripts/**/*.sh
 !/shadow-cljs.edn
+!/src/**/*.clj
+!/src/**/*.cljc
 !/src/**/*.cljs
 !/tsconfig.json
 !/types/**/*.d.ts
