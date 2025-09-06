@@ -13,6 +13,10 @@
       "imports": {
         "@f1r3fly-io/lightning-bug": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/lib.core.js",
         "@f1r3fly-io/lightning-bug/extensions": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/ext.lang.rholang.js",
+        "@f1r3fly-io/lightning-bug/tree-sitter": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.tree-sitter.js",
+        "@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.rholang.js",
+        "@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.rholang-queries.js",
+        "@f1r3fly-io/tree-sitter-rholang-js-with-comments": "./node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/dist/tree-sitter-rholang-js.es.js",
         "react": "https://esm.sh/react@19.0.0-rc-f994737d14-20240522",
         "react-dom": "https://esm.sh/react-dom@19.0.0-rc-f994737d14-20240522",
         "react-dom/client": "https://esm.sh/react-dom@19.0.0-rc-f994737d14-20240522/client",
@@ -49,14 +53,25 @@
         console.log("Editor imported");
         const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
         console.log("RholangExtension imported");
+        const { treeSitterWasmUrl } = await import('@f1r3fly-io/lightning-bug/tree-sitter');
+        console.log("treeSitterWasmUrl imported");
+        const { highlightsQueryUrl, indentsQueryUrl } = await import('@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries');
+        console.log("queries imported");
+        const { wasm } = await import ('@f1r3fly-io/tree-sitter-rholang-js-with-comments');
+        console.log("Rholang wasm imported");
         console.log("Start render");
         const root = createRoot(document.getElementById('app'));
         const editorRef = React.createRef();
         window.editorRef = editorRef; // Expose for testing
         root.render(React.createElement(Editor, {
           ref: editorRef,
-          languages: {"rholang": RholangExtension},
-          preloadLanguages: ["rholang"]
+          treeSitterWasm: treeSitterWasmUrl,
+          languages: {"rholang": {
+            ...RholangExtension,
+            grammarWasm: wasm,
+            highlightsQueryPath: highlightsQueryUrl,
+            indentsQueryPath: indentsQueryUrl,
+          }}
         }));
         console.log("Rendered");
         const waitForReady = (ref) => new Promise(resolve => {

@@ -1,5 +1,6 @@
-import { expectType } from 'tsd';
+import { expectType, expectAssignable } from 'tsd';
 import type { RholangExtensionConfig } from './ext.d.ts';
+import { RholangExtension } from 'lightning-bug/extensions';
 
 expectType<RholangExtensionConfig>({
   grammarWasm: 'path',
@@ -10,3 +11,5 @@ expectType<RholangExtensionConfig>({
   fileIcon: 'icon',
   fallbackHighlighter: 'none',
 });
+
+expectAssignable<RholangExtensionConfig>(RholangExtension);

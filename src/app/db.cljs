@@ -1,9 +1,9 @@
 (ns app.db
   (:require
-   [ext.lang.rholang :refer [config]]))
+   [ext.lang.rholang :refer [language-config]]))
 
 (def default-db
-  (let [langs {"rholang" config
+  (let [langs {"rholang" language-config
                "text" {:extensions [".txt"]
                        :fallback-highlighter "none"
                        :file-icon "fas fa-file text-secondary"}}

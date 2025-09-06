@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-09-05
+
+### Added
+
+- Support for embedded resources (WASM files, Tree-Sitter SCM query files, and Tree-Sitter parsers).
+
+### Changed
+
+- Made the Node scripts more descriptive and useful, and cleaned them up a bit.
+- Test files are now excluded from NPM package.
+- Demo app now loads embedded resources.
+
 ## [0.5.1] - 2025-09-01
 
 ### Added

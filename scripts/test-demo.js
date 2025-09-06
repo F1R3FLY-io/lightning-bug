@@ -1,14 +1,14 @@
-const puppeteer = require('puppeteer-core');
-const path = require('path');
-const http = require('http');
 const fs = require('fs');
+const http = require('http');
+const path = require('path');
+const puppeteer = require('puppeteer-core');
 
 (async () => {
   console.log('Starting sanity test...');
   const demoDir = path.resolve(__dirname, '..', 'resources', 'public', 'demo');
   const port = 3002; // Arbitrary port
 
-  // Simple HTTP server
+  // Simple HTTP server to serve the demo directory
   const server = http.createServer((req, res) => {
     console.log(`Server request: ${req.url}`);
     const filePath = path.join(demoDir, req.url === '/' ? 'index.html' : req.url);
@@ -33,8 +33,8 @@ const fs = require('fs');
   const executablePath = process.env.CHROME_BIN || '/usr/bin/google-chrome-stable';
   console.log(`Using Chrome executable: ${executablePath}`);
   console.log('Launching browser...');
-  const browser = await puppeteer.launch({ 
-    headless: true, 
+  const browser = await puppeteer.launch({
+    headless: true,
     executablePath,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security']
   });

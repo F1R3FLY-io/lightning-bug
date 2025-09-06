@@ -3,24 +3,36 @@
             [clojure.spec.alpha :as s]
             [taoensso.timbre :as log]))
 
+;; Editor configuration specs
+(s/def ::tree-sitter-wasm (s/or :string string? :fn fn?))
+(s/def ::extra-extensions any?)
+(s/def ::default-protocol string?)
+(s/def ::on-content-change fn?)
+(s/def ::editor-config (s/keys :opt-un [::tree-sitter-wasm ::extra-extensions ::default-protocol ::on-content-change]))
+
 ;; Language configuration specs
-(s/def ::grammar-wasm string?)
-(s/def ::highlight-query-path string?)
-(s/def ::indents-query-path string?)
+(s/def ::grammar-wasm (s/or :string string? :fn fn?))
+(s/def ::parser (s/or :fn fn? :instance any?))
+(s/def ::highlights-query-path (s/or :string string? :fn fn?))
+(s/def ::indents-query-path (s/or :string string? :fn fn?))
 (s/def ::lsp-url string?)
 (s/def ::extensions (s/coll-of string? :min-count 1))
 (s/def ::file-icon string?)
 (s/def ::fallback-highlighter string?)
 (s/def ::indent-size pos-int?)
 
-(s/def ::config (s/keys :req-un [::extensions]
-                        :opt-un [::grammar-wasm
-                                 ::highlight-query-path
-                                 ::indents-query-path
-                                 ::lsp-url
-                                 ::file-icon
-                                 ::fallback-highlighter
-                                 ::indent-size]))
+(s/def ::language-config (s/keys :req-un [::extensions]
+                                 :opt-un [::grammar-wasm
+                                          ::parser
+                                          ::highlights-query-path
+                                          ::indents-query-path
+                                          ::lsp-url
+                                          ::file-icon
+                                          ::fallback-highlighter
+                                          ::indent-size]))
+
+(s/def ::languages
+  (s/map-of (s/or :string string? :keyword keyword?) ::language-config))
 
 (defn kebab-keyword
   "Converts a camelCase keyword to kebab-case keyword.
@@ -35,6 +47,16 @@
   [config]
   (into {} (map (fn [[k v]] [(kebab-keyword k) (if (map? v) (convert-config-keys v) v)]) config)))
 
+(defn normalize-editor-config
+  "Normalizes editor config by converting camelCase keys to kebab-case.
+  Validates the config with spec and throws on invalid."
+  [config]
+  (let [normalized (convert-config-keys config)]
+    (when-not (s/valid? ::editor-config normalized)
+      (log/error "Invalid editor config" (s/explain-str ::editor-config normalized))
+      (throw (ex-info "Invalid editor config" {:explain (s/explain-str ::editor-config normalized)})))
+    normalized))
+
 (defn normalize-languages
   "Ensures all keys in the languages map are strings, converting keywords if necessary.
   Also normalizes inner config keys from camelCase to kebab-case.
@@ -44,10 +66,10 @@
    (fn [m k v]
      (let [key-str (if (keyword? k) (name k) (str k))
            config (convert-config-keys v)]
-       (when-not (s/valid? ::config config)
-         (log/error "Invalid language config for" key-str (s/explain-str ::config config))
-         (throw (ex-info "Invalid language config" (clj->js {:lang key-str
-                                                             :explain (s/explain-data ::config config)}))))
+       (when-not (s/valid? ::language-config config)
+         (log/error "Invalid language config for" key-str (s/explain-str ::language-config config))
+         (throw (ex-info "Invalid language config" {:lang key-str
+                                                    :explain (s/explain-str ::language-config config)})))
        (assoc m key-str config)))
    {}
    langs))

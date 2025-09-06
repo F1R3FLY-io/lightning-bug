@@ -2,13 +2,15 @@ import { expectType, expectAssignable } from 'tsd';
 import * as React from 'react';
 import { Extension } from '@codemirror/state';
 import { Observable } from 'rxjs';
-import type { EditorProps, EditorRef, EditorState, LanguageConfig, EditorEvent } from './lib.d.ts';
+import { Parser } from 'web-tree-sitter';
+import type { EditorProps, EditorRef, EditorState, LanguageConfig, EditorEvent, Diagnostic, Symbol } from './lib.d.ts';
 
 // Check props interface
 expectAssignable<EditorProps>({
   languages: { text: { extensions: ['.txt'] } },
   extraExtensions: [] as Extension[],
-  defaultProtocol: "inmemory://"
+  defaultProtocol: "inmemory://",
+  treeSitterWasm: "js/tree-sitter.wasm"
 });
 
 // Check ref methods
@@ -38,22 +40,21 @@ if (ref.current) {
   expectType<any>(ref.current.query('query', [1, 'param']));
   expectType<any>(ref.current.query('query', []));
   expectType<any>(ref.current.getDb());
-  expectType<Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>>(ref.current.getDiagnostics('uri'));
-  expectType<Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>>(ref.current.getSymbols('uri'));
+  expectType<Diagnostic[]>(ref.current.getDiagnostics('uri'));
+  expectType<Symbol[]>(ref.current.getSymbols('uri'));
   expectType<string>(ref.current.getSearchTerm());
+  expectType<void>(ref.current.openSearchPanel());
 }
 
 // Check state shape
 const state: EditorState = {
   workspace: {
-    documents: { 'uri': { text: '', language: 'text', version: 0, dirty: false, opened: false } },
+    documents: [{ uri: 'uri', text: '', language: 'text', version: 0, dirty: false, opened: false }],
     activeUri: null,
   },
   cursor: { line: 1, column: 1 },
   selection: null,
-  lsp: { "text": { connection: false, url: null, pending: {}, initialized: false } },
   logs: [],
-  languages: { text: { extensions: ['.txt'] } },
   diagnostics: [{
     uri: 'test',
     version: 1,
@@ -94,6 +95,7 @@ expectAssignable<LanguageConfig>({
 
 expectAssignable<LanguageConfig>({
   grammarWasm: 'path/to/grammar.wasm',
+  parser: new Parser(),
   highlightQueryPath: 'queries/highlights.scm',
   indentsQueryPath: 'queries/indents.scm',
   lspUrl: 'ws://localhost:1234',
@@ -107,3 +109,13 @@ expectAssignable<LanguageConfig>({
 // @ts-expect-error
 expectAssignable<LanguageConfig>({});
 void {}; // suppress unused
+
+expectAssignable<LanguageConfig>({
+  parser: () => new Parser(),
+  extensions: []
+});
+
+expectAssignable<LanguageConfig>({
+  parser: async () => new Parser(),
+  extensions: []
+});

@@ -69,7 +69,7 @@ jobs:
         run: npm run test:types
 
       - name: Run headless tests
-        run: npm run test:headless
+        run: npm run test:debug
 
       - name: Build demo (dev)
         run: npm run build:demo
@@ -130,7 +130,7 @@ jobs:
           chrome-version: stable
 
       - name: Run headless advanced tests
-        run: npm run test:headless-advanced
+        run: npm run test:release
 
       - name: Build demo (release)
         env:

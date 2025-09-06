@@ -2,16 +2,22 @@
   (:require
    [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.test :refer [deftest is async use-fixtures]]
+   [datascript.core :as d]
    [taoensso.timbre :as log :include-macros true]
    [lib.db :as db]
    [lib.editor.syntax :as syntax :refer [promise->chan]]
    [lib.utils :as u]
    ["@codemirror/state" :refer [ChangeSet EditorState]]
    ["@codemirror/view" :refer [EditorView]]
-   ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]))
+   ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
+   ["@f1r3fly-io/tree-sitter-rholang-js-with-comments" :refer [wasm]]
+   [ext.embedded.lang.rholang :refer [treeSitterRholangWasmUrl]]
+   [ext.embedded.lang.rholang-queries :refer [highlightsQueryUrl indentsQueryUrl]]))
 
 (use-fixtures :each
-  {:before (fn [] (reset! syntax/languages {}))})
+  {:before (fn []
+             (reset! syntax/languages {})
+             (d/reset-conn! db/conn (d/empty-db db/schema)))})
 
 (defn slurp
   "Reads the contents of a file into a string."
@@ -86,7 +92,7 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
-                                   [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
                                    parser (doto (new Parser) (.setLanguage lang))
                                    query (new (.-Query TreeSitter) lang query-str)
                                    ;; Create a dummy state field that is not attached.
@@ -109,11 +115,6 @@
                  (u/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
-
-(defn tree->root-node
-  "Helper to extract root node with type hint preserved."
-  [^js tree]
-  (.rootNode tree))
 
 (deftest incremental-parse
   (async done
@@ -159,7 +160,7 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
-                                   [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
                                    parser (doto (new Parser) (.setLanguage lang))
                                    query (new (.-Query TreeSitter) lang query-str)
                                    initial-doc ""
@@ -192,7 +193,7 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    state-atom (atom {:language "rholang" :languages {"rholang" {:grammar-wasm wasm-path
-                                                                                                :highlight-query query-str
+                                                                                                :highlights-query query-str
                                                                                                 :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! [{:uri "test.rho" :text "" :language "rholang" :version 1 :dirty false :opened true}])
@@ -227,21 +228,22 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    state-atom (atom {:languages {:rholang {:grammar-wasm wasm-path
-                                                                           :highlight-query query-str
-                                                                           :extensions [".rho"]}}})
-                                   state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-                                   view (EditorView. #js {:state state :parent js/document.body})
-                                   result (<! (syntax/init-syntax view state-atom))]
-                               (log/debug "@state-atom =>" @state-atom)
-                               (log/debug "(get-in @state-atom [:languages]) =>" (get-in @state-atom [:languages]))
-                               (is (some? (get-in @state-atom [:languages "rholang"])) "Keyword key normalized to string")
-                               (is (nil? (get-in @state-atom [:languages :rholang])) "Keyword key removed")
-                               (.destroy view)
-                               (if (= :ok (first result))
-                                 (do
-                                   (is (= :success (second result)) "Tree-Sitter plugin applied successfully")
-                                   [:ok nil])
-                                 [:error (js/Error. "keyword-key-fallback failed" #js {:cause (second result)})]))
+                                                                           :highlights-query query-str
+                                                                           :extensions [".rho"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "test"
+                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.rho")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? (get-in @state-atom [:languages "rholang"])) "Keyword key normalized to string")
+                                 (is (nil? (get-in @state-atom [:languages :rholang])) "Keyword key removed")
+                                 (.destroy view)
+                                 (if (= :ok (first result))
+                                   (do
+                                     (is (= :success (second result)) "Tree-Sitter plugin applied successfully")
+                                     [:ok nil])
+                                   [:error (js/Error. "keyword-key-fallback failed" #js {:cause (second result)})])))
                              (catch :default e
                                [:error (js/Error. "keyword-key-fallback failed" #js {:cause e})]))))]
              (when (= :error (first res))
@@ -259,20 +261,22 @@
                              (<! (promise->chan @syntax/ts-init-promise))
                              (<! (timeout 100))
                              (let [wasm-path "/invalid/path/to/tree-sitter-rholang.wasm"
-                                   state-atom (atom {:language "rholang"
-                                                     :languages {"rholang" {:grammar-wasm wasm-path
-                                                                            :highlight-query-path "/invalid/path/highlights.scm"
-                                                                            :extensions [".rho"]}}})
-                                   state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-                                   view (EditorView. #js {:state state :parent js/document.body})
-                                   result (<! (syntax/init-syntax view state-atom))]
-                               (is (nil? (get @syntax/languages "rholang")) "Language not cached on failure")
-                               (.destroy view)
-                               (if (= :ok (first result))
-                                 (do
-                                   (is (= :missing-components (second result)) "Falls back for invalid WASM path")
-                                   [:ok nil])
-                                 [:error (js/Error. "wasm-load-failure failed" #js {:cause (second result)})]))
+                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
+                                                                            :highlights-query-path "/invalid/path/highlights.scm"
+                                                                            :extensions [".rho"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "rholang"
+                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.rho")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (nil? (get @syntax/languages "rholang")) "Language not cached on failure")
+                                 (.destroy view)
+                                 (if (= :ok (first result))
+                                   (do
+                                     (is (= :missing-components (second result)) "Falls back for invalid WASM path")
+                                     [:ok nil])
+                                   [:error (js/Error. "wasm-load-failure failed" #js {:cause (second result)})])))
                              (catch :default e
                                [:error (js/Error. "wasm-load-failure failed" #js {:cause e})]))))]
              (when (= :error (first res))
@@ -290,20 +294,22 @@
                              (<! (promise->chan @syntax/ts-init-promise))
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-                                   state-atom (atom {:language "rholang"
-                                                     :languages {"rholang" {:grammar-wasm wasm-path
-                                                                            :highlight-query-path "/invalid/path/highlights.scm"
-                                                                            :extensions [".rho"]}}})
-                                   state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
-                                   view (EditorView. #js {:state state :parent js/document.body})
-                                   result (<! (syntax/init-syntax view state-atom))]
-                               (is (nil? (get @syntax/languages "rholang")) "Language not cached on query failure")
-                               (.destroy view)
-                               (if (= :ok (first result))
-                                 (do
-                                   (is (= :missing-components (second result)) "Falls back for invalid query path")
-                                   [:ok nil])
-                                 [:error (js/Error. "query-load-failure failed" #js {:cause (second result)})]))
+                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
+                                                                            :highlights-query-path "/invalid/path/highlights.scm"
+                                                                            :extensions [".rho"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "rholang"
+                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.rho")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (nil? (get @syntax/languages "rholang")) "Language not cached on query failure")
+                                 (.destroy view)
+                                 (if (= :ok (first result))
+                                   (do
+                                     (is (= :missing-components (second result)) "Falls back for invalid query path")
+                                     [:ok nil])
+                                   [:error (js/Error. "query-load-failure failed" #js {:cause (second result)})])))
                              (catch :default e
                                [:error (js/Error. "query-load-failure failed" #js {:cause e})]))))]
              (when (= :error (first res))
@@ -323,21 +329,23 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    highlight-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-                                   state-atom (atom {:language "rholang"
-                                                     :languages {"rholang" {:grammar-wasm wasm-path
-                                                                            :highlight-query highlight-str
+                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
+                                                                            :highlights-query highlight-str
                                                                             :indents-query indents-str
                                                                             :indent-size 2
-                                                                            :extensions [".rho"]}}})
-                                   state (.create EditorState #js {:doc "{ Nil }" :extensions #js []})
-                                   view (EditorView. #js {:state state :parent js/document.body})
-                                   result (<! (syntax/init-syntax view state-atom))]
-                               (.destroy view)
-                               (if (= :ok (first result))
-                                 (do
-                                   (is (= :success (second result)) "Initialization succeeds with indents query")
-                                   [:ok nil])
-                                 [:error (js/Error. "indents-query-load failed" #js {:cause (second result)})]))
+                                                                            :extensions [".rho"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "rholang"
+                               (db/create-documents! [{:uri "file.rho" :text "{ Nil }" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.rho")
+                               (let [state (.create EditorState #js {:doc "{ Nil }" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (.destroy view)
+                                 (if (= :ok (first result))
+                                   (do
+                                     (is (= :success (second result)) "Initialization succeeds with indents query")
+                                     [:ok nil])
+                                   [:error (js/Error. "indents-query-load failed" #js {:cause (second result)})])))
                              (catch :default e
                                [:error (js/Error. "indents-query-load failed" #js {:cause e})]))))]
              (when (= :error (first res))
@@ -398,6 +406,234 @@
                                [:ok nil])
                              (catch :default e
                                [:error (js/Error. "indentation-after-opening-brace failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest parser-as-instance
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
+                                   parser (doto (new Parser) (.setLanguage lang))
+                                   state-atom (atom {:languages {"test" {:parser parser
+                                                                         :highlights-query query-str
+                                                                         :extensions [".test"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "test"
+                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.test")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Parser instance used successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "parser-as-instance failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest parser-as-sync-fn
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
+                                   load-parser (fn [] (doto (new Parser) (.setLanguage lang)))
+                                   state-atom (atom {:languages {"test" {:parser load-parser
+                                                                         :highlights-query query-str
+                                                                         :extensions [".test"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "test"
+                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.test")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Sync parser function used successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "parser-as-sync-fn failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest parser-as-async-fn
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   load-parser (fn [] (.then (Language.load wasm-path)
+                                                             (fn [lang]
+                                                               (doto (new Parser) (.setLanguage lang)))))
+                                   state-atom (atom {:languages {"test" {:parser load-parser
+                                                                         :highlights-query query-str
+                                                                         :extensions [".test"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "test"
+                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.test")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Async parser function used successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "parser-as-async-fn failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest data-uri-wasm-from-package
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
+                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm
+                                                                            :highlights-query query-str
+                                                                            :indents-query indents-str
+                                                                            :extensions [".rho"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "rholang"
+                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.rho")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Package data URI wasm used successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "base64-wasm-from-package failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest grammar-wasm-as-fn
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [state-atom (atom {:languages {"test" {:grammar-wasm (fn [] "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm")
+                                                                         :highlights-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
+                                                                         :extensions [".test"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "test"
+                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.test")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Grammar WASM as function used successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "grammar-wasm-as-fn failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest highlights-query-as-fn
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   state-atom (atom {:languages {"test" {:grammar-wasm wasm-path
+                                                                         :highlights-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
+                                                                         :extensions [".test"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "test"
+                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.test")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Highlights query as function used successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "highlights-query-as-fn failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (u/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest embedded-wasm-load
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [state-atom (atom {:languages {"rholang" {:grammar-wasm treeSitterRholangWasmUrl
+                                                                            :highlights-query-path highlightsQueryUrl
+                                                                            :indents-query-path indentsQueryUrl
+                                                                            :extensions [".rho"]}}})]
+                               ;; Setup mock active document to ensure db/active-lang returns "rholang"
+                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "file.rho")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (some? result) "Initialization completed")
+                                 (is (= :ok (first result)) "Successful initialization")
+                                 (is (= :success (second result)) "Embedded WASM and queries loaded successfully")
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "embedded-wasm-load failed" #js {:cause e})]))))]
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]

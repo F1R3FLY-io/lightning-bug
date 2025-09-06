@@ -15,7 +15,7 @@
    ["react" :as react]
    ["react-dom/client" :as rdclient]
    [lib.core :refer [Editor]]
-   [ext.lang.rholang :refer [config]]
+   [ext.lang.rholang :refer [language-config]]
    [lib.db :as db]
    [lib.editor.syntax :as syntax]
    [lib.utils :as u]
@@ -260,7 +260,7 @@
 
 (deftest language-config-key-normalization
   (let [props {:languages {"rholang" {"grammarWasm" "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-                                      "highlightQueryPath" "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"
+                                      "highlightsQueryPath" "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"
                                       "indentsQueryPath" "/extensions/lang/rholang/tree-sitter/queries/indents.scm"
                                       "lspUrl" "ws://localhost:41551"
                                       "extensions" [".rho"]
@@ -270,9 +270,9 @@
     (is (= (get-in props [:languages "rholang" "grammarWasm"])
            (get-in state [:languages "rholang" :grammar-wasm]))
         "grammarWasm normalized to :grammar-wasm")
-    (is (= (get-in props [:languages "rholang" "highlightQueryPath"])
-           (get-in state [:languages "rholang" :highlight-query-path]))
-        "highlightQueryPath normalized")
+    (is (= (get-in props [:languages "rholang" "highlightsQueryPath"])
+           (get-in state [:languages "rholang" :highlights-query-path]))
+        "highlightsQueryPath normalized")
     (is (= (get-in props [:languages "rholang" "indentsQueryPath"])
            (get-in state [:languages "rholang" :indents-query-path]))
         "indentsQueryPath normalized")
@@ -297,7 +297,7 @@
                              (let [container (js/document.createElement "div")
                                    ref (react/createRef)
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 1000))]
@@ -395,7 +395,7 @@
                              (let [container (js/document.createElement "div")
                                    ref (react/createRef)
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 1000))]
@@ -584,7 +584,7 @@
                              (let [container (js/document.createElement "div")
                                    ref (react/createRef)
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 1000))]
@@ -1162,7 +1162,7 @@
                                      events (atom [])]
                                  (js/document.body.appendChild container)
                                  (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}
-                                                                                    "rholang" config}
+                                                                                    "rholang" language-config}
                                                                         :ref ref})]
                                    (let [ready? (<! (wait-for-ready ref 1000))]
                                      (is ready? "Editor ready within timeout"))
@@ -1328,7 +1328,7 @@
                              (let [container (js/document.createElement "div")
                                    ref (react/createRef)
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 1000))]
@@ -1548,7 +1548,7 @@
                              (let [container (js/document.createElement "div")
                                    ref (react/createRef)
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 1000))]
@@ -1759,7 +1759,7 @@
                                    ref (react/createRef)
                                    events (atom [])
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 2000))]
@@ -1820,7 +1820,7 @@
                                    ref (react/createRef)
                                    events (atom [])
                                    mock-lsp-url "ws://mock"
-                                   mock-config (assoc config :lsp-url mock-lsp-url)
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
                                                                     :ref ref})]
                                (let [ready-res (<! (wait-for-ready ref 2000))]

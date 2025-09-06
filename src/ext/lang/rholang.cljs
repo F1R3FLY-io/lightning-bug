@@ -1,9 +1,9 @@
 (ns ext.lang.rholang
   (:require [clojure.string :as str]))
 
-(def config
+(def language-config
   {:grammar-wasm "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-   :highlight-query-path "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"
+   :highlights-query-path "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"
    :indents-query-path "/extensions/lang/rholang/tree-sitter/queries/indents.scm"
    :lsp-url "ws://localhost:41551"
    :extensions [".rho"]
@@ -17,4 +17,4 @@
 (def ^:export RholangExtension
   (clj->js (reduce-kv (fn [m k v]
                         (assoc m (kebab-to-camel k) v))
-                      {} config)))
+                      {} language-config)))

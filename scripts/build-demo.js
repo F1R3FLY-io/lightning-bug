@@ -1,50 +1,32 @@
 const fs = require('fs');
 const path = require('path');
-const cp = require('child_process');
+const { findPkgDir, runCmd } = require('./utils');
 
 const baseDir = path.dirname(__dirname);
 const demoDir = path.join(baseDir, 'resources/public/demo');
 
+// MODE can be 'dev' or 'release', defaults to 'dev'
 const mode = process.env.MODE || 'dev';
-
-// Function to run shell commands synchronously.
-function runCmd(cmd, cwd = baseDir) {
-  console.log(`Running: ${cmd} in ${cwd}`);
-  cp.execSync(cmd, { stdio: 'inherit', cwd });
-}
 
 // Install deps and build libs in base dir.
 runCmd('npm install', baseDir);
 if (mode === 'release') {
-  runCmd('npx shadow-cljs release libs', baseDir);
+  runCmd('npm run build:release', baseDir);
 } else {
-  runCmd('npx shadow-cljs compile libs', baseDir);
+  runCmd('npm run build:debug', baseDir);
 }
 
 // In demo dir: install deps.
 runCmd('npm install', demoDir);
 
-// Function to find package directory by searching up the tree.
-function findPkgDir(pkgName, startDir = demoDir) {
-  let dir = startDir;
-  const root = path.parse(dir).root;
-  while (dir !== root) {
-    const nm = path.join(dir, 'node_modules', pkgName);
-    if (fs.existsSync(nm)) {
-      return nm;
-    }
-    dir = path.dirname(dir);
-  }
-  throw new Error(`Package ${pkgName} not found`);
-}
-
+// Find package directories
 const treeSitterDir = findPkgDir('web-tree-sitter', demoDir);
 const lightningBugDir = findPkgDir('@f1r3fly-io/lightning-bug', demoDir);
 
 const treeSitterWasmPath = path.join(treeSitterDir, 'tree-sitter.wasm');
 const extensionsSrc = path.join(lightningBugDir, 'resources/public/extensions');
 
-// Create js dir.
+// Create js dir if not exists.
 const demoJsDir = path.join(demoDir, 'js');
 fs.mkdirSync(demoJsDir, { recursive: true });
 console.log(`Created directory ${demoJsDir}`);

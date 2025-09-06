@@ -7,6 +7,15 @@
       ],
       "lightning-bug/extensions": [
         "types/ext.d.ts"
+      ],
+      "lightning-bug/tree-sitter": [
+        "types/embedded.tree-sitter.d.ts"
+      ],
+      "lightning-bug/extensions/lang/rholang/tree-sitter": [
+        "types/embedded.rholang.d.ts"
+      ],
+      "lightning-bug/extensions/lang/rholang/tree-sitter/queries": [
+        "types/embedded.rholang-queries.d.ts"
       ]
     },
     "moduleResolution": "node",

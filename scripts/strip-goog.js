@@ -2,10 +2,11 @@ const fs = require('fs');
 const path = process.argv[2];
 
 if (!path) {
-  console.error('Usage: node fix-goog.js <path-to-js-file>');
+  console.error('Usage: node strip-goog.js <path-to-js-file>');
   process.exit(1);
 }
 
+// Read the file content
 let content = fs.readFileSync(path, 'utf8');
 
 // Count matches before replacing
@@ -15,7 +16,7 @@ const matchCount = matches ? matches.length : 0;
 // Replace the matches
 content = content.replace(/goog=goog\|\|\{\};/g, '');
 
-// Write the file
+// Write the updated content back to the file
 fs.writeFileSync(path, content);
 
 // Report results

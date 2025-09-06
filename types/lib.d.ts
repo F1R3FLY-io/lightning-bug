@@ -1,6 +1,32 @@
 import * as React from 'react';
 import { Extension } from '@codemirror/state';
 import { Observable } from 'rxjs';
+import { Parser } from 'web-tree-sitter';
+
+/**
+ * Configuration interface for a language extension.
+ * Defines paths and settings for Tree-Sitter, LSP, and file handling.
+ */
+export interface LanguageConfig {
+  /** Path to the Tree-Sitter grammar WASM file for syntax parsing. */
+  grammarWasm?: string | (() => string);
+  /** Pre-instantiated Tree-Sitter Parser (or function returning one, sync or async) with language set. Prefer over grammarWasm. */
+  parser?: Parser | (() => Parser) | (() => Promise<Parser>);
+  /** Path to the SCM query file for syntax highlighting captures. */
+  highlightQueryPath?: string | (() => string);
+  /** Path to the SCM query file for indentation rules. */
+  indentsQueryPath?: string | (() => string);
+  /** WebSocket URL for connecting to a Language Server Protocol (LSP) server (enables diagnostics/symbols). */
+  lspUrl?: string;
+  /** Array of file extensions associated with the language (required, e.g., [".rho"]). */
+  extensions: string[];
+  /** CSS class for the file icon in the UI (e.g., "fas fa-code"). */
+  fileIcon?: string;
+  /** Fallback highlighting mode if Tree-Sitter fails (e.g., "none"). */
+  fallbackHighlighter?: string;
+  /** Number of spaces per indent level (defaults to 2). */
+  indentSize?: number;
+}
 
 /**
  * Props interface for the Editor component.
@@ -15,35 +41,27 @@ export interface EditorProps {
   onContentChange?: (content: string) => void;
   /** Default protocol for file paths (e.g., "inmemory://"). Defaults to "inmemory://". */
   defaultProtocol?: string;
+  /** URL to the `tree-sitter.wasm` */
+  treeSitterWasm?: string;
 }
 
-/**
- * Configuration interface for a language extension.
- * Defines paths and settings for Tree-Sitter, LSP, and file handling.
- */
-export interface LanguageConfig {
-  /** Path to the Tree-Sitter grammar WASM file for syntax parsing. */
-  grammarWasm?: string;
-  /** Path to the SCM query file for syntax highlighting captures. */
-  highlightQueryPath?: string;
-  /** Path to the SCM query file for indentation rules. */
-  indentsQueryPath?: string;
-  /** WebSocket URL for connecting to a Language Server Protocol (LSP) server (enables diagnostics/symbols). */
-  lspUrl?: string;
-  /** Array of file extensions associated with the language (required, e.g., [".rho"]). */
-  extensions: string[];
-  /** CSS class for the file icon in the UI (e.g., "fas fa-code"). */
-  fileIcon?: string;
-  /** Fallback highlighting mode if Tree-Sitter fails (e.g., "none"). */
-  fallbackHighlighter?: string;
-  /** Number of spaces per indent level (defaults to 2). */
-  indentSize?: number;
+export interface Position {
+  line: number;
+  column: number;
+}
+
+export interface Selection {
+  from: Position;
+  to: Position;
+  text: string;
 }
 
 /**
  * Internal state of a document in the workspace.
  */
-export interface DocState {
+export interface Document {
+  /** URI to the document's location. */
+  uri: string;
   /** Current text content of the document. */
   text: string;
   /** Language key associated with the document (e.g., "rholang"). */
@@ -56,62 +74,33 @@ export interface DocState {
   opened: boolean;
 }
 
-/**
- * Internal state of an LSP connection for a language.
- */
-export interface LspState {
-  /** Connection status (true if connected). */
-  connection: boolean;
-  /** WebSocket URL for the LSP server. */
-  url: string | null;
-  /** Map of pending request IDs to their types. */
-  pending: Record<number, string | { type: string; uri: string }>;
-  /** Flag indicating if the LSP is initialized. */
-  initialized?: boolean;
+export interface Workspace {
+  /** Map of URIs to document states. */
+  documents: Document[];
+  /** Currently active document URI (or null). */
+  activeUri: string | null;
 }
 
-/**
- * Full internal state of the editor, accessible via getState().
- */
-export interface EditorState {
-  /** Workspace containing open documents and active URI. */
-  workspace: {
-    /** Map of URIs to document states. */
-    documents: Record<string, DocState>;
-    /** Currently active document URI (or null). */
-    activeUri: string | null;
-  };
-  /** Current cursor position (1-based). */
-  cursor: { line: number; column: number };
-  /** Current selection range and text (or null if none). */
-  selection: { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null;
-  /** LSP connections by language key. */
-  lsp: Record<string, LspState>;
-  /** Array of log messages from LSP. */
-  logs: Array<{ message: string; lang: string }>;
-  /** Map of configured languages. */
-  languages: Record<string, LanguageConfig>;
-  /** Array of diagnostics from LSP. */
-  diagnostics: Array<{
-    /** Document URI. */
-    uri: string;
-    /** Document version at time of diagnostic. */
-    version?: number;
-    /** Diagnostic message. */
-    message: string;
-    /** Severity (1: Error, 2: Warning, 3: Info, 4: Hint). */
-    severity: number;
-    /** Start line (0-based). */
-    startLine: number;
-    /** Start character (0-based). */
-    startChar: number;
-    /** End line (0-based). */
-    endLine: number;
-    /** End character (0-based). */
-    endChar: number;
-  }>;
-  /** Array of symbols from LSP. */
-  symbols: Array<{
+export interface Diagnostic {
+  /** Document URI. */
+  uri: string;
+  /** Document version at time of diagnostic. */
+  version?: number;
+  /** Diagnostic message. */
+  message: string;
+  /** Severity (1: Error, 2: Warning, 3: Info, 4: Hint). */
+  severity: number;
+  /** Start line (0-based). */
+  startLine: number;
+  /** Start character (0-based). */
+  startChar: number;
+  /** End line (0-based). */
+  endLine: number;
+  /** End character (0-based). */
+  endChar: number;
+}
+
+export interface Symbol {
     /** Document URI. */
     uri: string;
     /** Symbol name. */
@@ -136,7 +125,24 @@ export interface EditorState {
     selectionEndChar: number;
     /** Parent symbol ID (or null). */
     parent?: number;
-  }>;
+}
+
+/**
+ * Full internal state of the editor, accessible via getState().
+ */
+export interface EditorState {
+  /** Workspace containing open documents and active URI. */
+  workspace: Workspace;
+  /** Current cursor position (1-based). */
+  cursor: Position;
+  /** Current selection range and text (or null if none). */
+  selection: Selection | null;
+  /** Array of log messages from LSP. */
+  logs: Array<{ message: string; lang: string }>;
+  /** Array of diagnostics from LSP. */
+  diagnostics: Diagnostic[];
+  /** Array of symbols from LSP. */
+  symbols: Symbol[];
   /** Current search term. */
   searchTerm: string;
 }
@@ -177,13 +183,13 @@ export interface EditorRef {
   /** Returns RxJS observable for subscribing to events. */
   getEvents(): Observable<EditorEvent>;
   /** Returns current cursor position (1-based) for active document. */
-  getCursor(): { line: number; column: number };
+  getCursor(): Position;
   /** Sets cursor position for active document (triggers `selection-change` event). */
-  setCursor(pos: { line: number; column: number }): void;
+  setCursor(pos: Position): void;
   /** Returns current selection range and text (or null if none). */
-  getSelection(): { from: { line: number; column: number }; to: { line: number; column: number }; text: string } | null;
+  getSelection(): Selection | null;
   /** Sets selection range for active document (triggers `selection-change` event). */
-  setSelection(from: { line: number; column: number }, to: { line: number; column: number }): void;
+  setSelection(from: Position, to: Position): void;
   /** Opens or activates a document with file path or URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. */
   openDocument(fileOrUri: string, text?: string, language?: string, makeActive?: boolean): void;
   /** Closes the specified or active document (triggers `document-close`). Notifies LSP if open. */
@@ -195,11 +201,11 @@ export interface EditorRef {
   /** Returns `true` if editor is initialized and ready for methods. */
   isReady(): boolean;
   /** Highlights a range in active document (triggers `highlight-change` with range). */
-  highlightRange(from: { line: number; column: number }, to: { line: number; column: number }): void;
+  highlightRange(from: Position, to: Position): void;
   /** Clears highlight in active document (triggers `highlight-change` with `null`). */
   clearHighlight(): void;
   /** Scrolls to center on a range in active document. */
-  centerOnRange(from: { line: number; column: number }, to: { line: number; column: number }): void;
+  centerOnRange(from: Position, to: Position): void;
   /** Returns text for specified or active document, or `null` if not found. */
   getText(fileOrUri?: string): string | null;
   /** Replaces entire text for specified or active document (triggers `content-change`). */
@@ -213,13 +219,15 @@ export interface EditorRef {
   /** Queries the internal DataScript database with the given query and optional params. */
   query(query: any, params?: any[]): any;
   /** Returns the DataScript connection object for direct access (advanced use). */
-  getDb(): any; // DataScript connection object
+  getDb(): any;
   /** Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active). */
-  getDiagnostics(fileOrUri?: string): Array<{message: string; severity: number; startLine: number; startChar: number; endLine: number; endChar: number; version?: number}>;
+  getDiagnostics(fileOrUri?: string): Diagnostic[];
   /** Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active). */
-  getSymbols(fileOrUri?: string): Array<{name: string; kind: number; startLine: number; startChar: number; endLine: number; endChar: number; selectionStartLine: number; selectionStartChar: number; selectionEndLine: number; selectionEndChar: number; parent?: number}>;
+  getSymbols(fileOrUri?: string): Symbol[];
   /** Returns the current search term. */
   getSearchTerm(): string;
+  /** Opens the search and replace panel */
+  openSearchPanel(): void;
 }
 
 /**

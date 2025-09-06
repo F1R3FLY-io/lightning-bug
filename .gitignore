@@ -13,6 +13,7 @@
 !/karma.conf.js
 !/LICENSE.txt
 !/NOTICE.txt
+!/.npmignore
 !/.npmrc
 !/package.json
 !/package-lock.json

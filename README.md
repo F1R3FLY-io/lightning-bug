@@ -65,12 +65,12 @@ Install the Clojure CLI tools. Install Node.js dependencies with `npm install`. 
 
 | Target | Description | Compile Command | Watch Command | Release Command |
 |--------|-------------|-----------------|---------------|-----------------|
-| `:libs` | Core library and extensions | `npx shadow-cljs compile libs` | `npx shadow-cljs watch libs` | `npx shadow-cljs release libs` |
-| `:app` | Full development app with Re-frame UI | `npx shadow-cljs compile app` | `npx shadow-cljs watch app` | - |
-| `:demo` | Minimal standalone demo | `npm run build:demo` | `npx shadow-cljs watch demo` | - |
-| `:test` | Browser tests | - | `npx shadow-cljs watch test` | - |
-| `:karma-test` | Karma tests | `npx shadow-cljs compile karma-test` | - | - |
-| `:karma-test-advanced` | Karma tests against release-compiled library | `npx shadow-cljs compile karma-test-advanced` | - | - |
+| `:libs` | Core library and extensions | `npm run build:debug` | `npm run watch:libs` | `npm run build:release` |
+| `:app` | Full development app with Re-frame UI | `npx shadow-cljs compile app` | `npm run serve:app` | - |
+| `:demo` | Minimal standalone demo | `npm run build:demo` | `npm run serve:demo` | - |
+| `:test` | Browser tests | - | `npm run serve:test` | - |
+| `:karma-test` | Karma tests | `npm run test:debug` | - | - |
+| `:karma-test-advanced` | Karma tests against release-compiled library | `npm run test:release` | - | - |
 
 For multiple targets, run `npx shadow-cljs watch libs app test`.
 
@@ -84,16 +84,21 @@ TypeScript bindings (.d.ts files) are manually maintained for the core library a
 
 - `types/lib.d.ts`: Bindings for the main `Editor` component and related types/interfaces.
 - `types/ext.d.ts`: Bindings for language extensions (e.g., `RholangExtension`).
+- `types/embedded.tree-sitter.d.ts`: Bindings for the embedded Tree-Sitter WASM URL.
+- `types/embedded.rholang.d.ts`: Bindings for the embedded Rholang grammar WASM URL.
+- `types/embedded.rholang-queries.d.ts`: Bindings for the embedded Rholang query URLs (highlights and indents).
+
+Type tests (`.test-d.ts` files) validate the bindings using `tsd` and are run via `npm run test:types`.
 
 The bindings are referenced in `package.json` via the `"types"` fields in `"exports"`. To keep them updated, change the public API (e.g., add props to `Editor`, new methods on the ref, or updates to exported configs). Then, review and manually adjust the .d.ts files to match. Use tools like GitHub Copilot or an AI assistant (e.g., Grok) to help generate or update the bindings based on the ClojureScript code. Always validate changes with `npm run test:types` to ensure type safety and catch mismatches.
 
 ## Running Tests
 
-To run browser tests interactively, execute `npx shadow-cljs watch test`. Open `http://localhost:8021` in a browser to run and view tests.
+To run browser tests interactively, execute `npm run serve:test`. Open `http://localhost:8021` in a browser to run and view tests.
 
-To run headless tests for CI or command-line, execute `npm run test:headless`.
+To run headless tests for CI or command-line, execute `npm run test:debug`.
 
-To run headless tests against the release-compiled library, execute `npm run test:headless-advanced`.
+To run headless tests against the release-compiled library, execute `npm run test:release`.
 
 To validate TypeScript bindings, run `npm run test:types`.
 
@@ -101,7 +106,7 @@ To validate TypeScript bindings, run `npm run test:types`.
 
 The development app is a full-featured Re-frame application located under `src/app/`. It includes a multi-file workspace, logs panel, and integration with Datascript/Re-posh for managing diagnostics and symbols. The app serves as the primary environment for developing and testing the editor's UI and features.
 
-To watch, run `npx shadow-cljs watch app` (or include in multi-watch). Access it at `http://localhost:3000`.
+To watch, run `npm run serve:app` (or include in multi-watch). Access it at `http://localhost:3000`.
 
 Features include file management, search, rename modals, LSP diagnostics in logs panel, and cursor/selection subscriptions.
 
@@ -274,41 +279,48 @@ Lightning Bug supports pluggable language extensions via the `languages` prop. T
 
 ### Configuration Attributes
 
-Each language configuration can include the following attributes:
+Each language configuration can include the following attributes. Note that some attributes (e.g., paths) support dynamic resolution via functions for lazy loading or computed values (e.g., data URLs for embedded resources).
 
-| Attribute              | Type      | Required | Description                                                                 |
-|------------------------|-----------|----------|-----------------------------------------------------------------------------|
-| `grammarWasm`          | `string`    | No       | Path to the Tree-Sitter grammar WASM file for syntax parsing.               |
-| `highlightQueryPath`   | `string`    | No       | Path to the SCM query file for syntax highlighting captures.                |
-| `indentsQueryPath`     | `string`    | No       | Path to the SCM query file for indentation rules.                           |
-| `lspUrl`               | `string`    | No       | WebSocket URL for connecting to a Language Server Protocol (LSP) server (optional, enables advanced features like diagnostics and symbols). |
-| `extensions`           | `string[]`  | Yes      | Array of strings representing file extensions associated with the language (required, e.g., `[".rho"]`). |
-| `fileIcon`             | `string`    | No       | String CSS class for the file icon in the UI (optional, e.g., `"fas fa-code"`). |
-| `fallbackHighlighter`  | `string`    | No       | String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `"none"`). |
-| `indentSize`           | `integer`   | No       | Integer specifying the number of spaces for indentation (optional, defaults to 2). |
+| Attribute              | Type                        | Required | Description                                                                 |
+|------------------------|-----------------------------|----------|-----------------------------------------------------------------------------|
+| `grammarWasm`          | `string \| () => string`    | No       | Path or function returning the path to the Tree-Sitter grammar WASM file for syntax parsing. Optional if `parser` is provided. |
+| `parser`               | `(() => Parser \| Promise<Parser>) \| Parser` | No       | Alternative to `grammarWasm`: a function returning a Tree-Sitter Parser instance (sync or async Promise) or the instance directly. Useful for custom or pre-loaded parsers. |
+| `highlightQueryPath`   | `string \| () => string`    | No       | Path or function returning the path to the SCM query file for syntax highlighting captures. Alternative: provide `highlightsQuery` directly. |
+| `highlightsQuery`      | `string`                    | No       | Direct SCM query string for syntax highlighting (alternative to `highlightQueryPath`). |
+| `indentsQueryPath`     | `string \| () => string`    | No       | Path or function returning the path to the SCM query file for indentation rules. Alternative: provide `indentsQuery` directly. |
+| `indentsQuery`         | `string`                    | No       | Direct SCM query string for indentation rules (alternative to `indentsQueryPath`). |
+| `lspUrl`               | `string`                    | No       | WebSocket URL for connecting to a Language Server Protocol (LSP) server (optional, enables advanced features like diagnostics and symbols). |
+| `extensions`           | `string[]`                  | Yes      | Array of strings representing file extensions associated with the language (required, e.g., `[".rho"]`). |
+| `fileIcon`             | `string`                    | No       | String CSS class for the file icon in the UI (optional, e.g., `"fas fa-code"`). |
+| `fallbackHighlighter`  | `string`                    | No       | String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `"none"`). |
+| `indentSize`           | `integer`                   | No       | Integer specifying the number of spaces for indentation (optional, defaults to 2). |
 
-For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` during postinstall.
+For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` during postinstall. Bundled extensions (e.g., Rholang) may use exported functions like `treeSitterRholangWasmUrl` for data URLs.
 
 ### Overriding Defaults
 
-The editor includes a default `"text"` language with basic support. To override or add languages, pass a custom `languages` map in the `Editor` props. You can extend existing configurations (e.g., `RholangExtension`) or define new ones.
+The editor includes a default `"text"` language with basic support. To override or add languages, pass a custom `languages` map in the `Editor` props. You can extend existing configurations (e.g., `RholangExtension`) or define new ones. Paths and WASM can be provided as functions for dynamic resolution (e.g., for embedded data URLs).
 
 Example in JavaScript:
 
 ```js
 import { Editor } from '@f1r3fly-io/lightning-bug';
 import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
+import { treeSitterRholangWasmUrl } from '@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter';
+import { highlightsQueryUrl } from '@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries';
 
 const customLanguages = {
   "rholang": {
     ...RholangExtension, // Start with the default Rholang config
+    grammarWasm: treeSitterRholangWasmUrl, // Function returning data URL for WASM
+    highlightsQueryPath: highlightsQueryUrl, // Function returning data URL for query
     lspUrl: "ws://custom-server:port", // Override LSP URL
     indentSize: 4 // Override indent size
   },
   "customLang": {
     extensions: [".ext"], // Required
-    grammarWasm: "/path/to/custom-grammar.wasm",
-    highlightQueryPath: "/path/to/highlights.scm",
+    grammarWasm: () => "/path/to/custom-grammar.wasm", // Function for lazy loading
+    highlightsQuery: "(block) @indent", // Direct query string (alternative to path)
     indentsQueryPath: "/path/to/indents.scm",
     lspUrl: "ws://custom-lsp:port",
     fileIcon: "fas fa-file-code",
@@ -342,9 +354,12 @@ The `Editor` component accepts the following props for initialization and config
 
 ```typescript
 interface LanguageConfig {
-  grammarWasm?: string;          // Path to Tree-Sitter grammar WASM file.
-  highlightQueryPath?: string;   // Path to SCM query file for syntax highlighting.
-  indentsQueryPath?: string;     // Path to SCM query file for indentation rules.
+  grammarWasm?: string | (() => string);          // Path or function returning path to Tree-Sitter grammar WASM file. Optional if parser provided.
+  parser?: (() => Parser | Promise<Parser>) | Parser;  // Function returning Parser (sync/async) or direct instance. Optional if grammarWasm provided.
+  highlightQueryPath?: string | (() => string);   // Path or function returning path to SCM query file for syntax highlighting.
+  highlightsQuery?: string;                       // Direct SCM query string for syntax highlighting (alternative to highlightQueryPath).
+  indentsQueryPath?: string | (() => string);     // Path or function returning path to SCM query file for indentation rules.
+  indentsQuery?: string;                          // Direct SCM query string for indentation rules (alternative to indentsQueryPath).
   lspUrl?: string;               // WebSocket URL for LSP server (enables diagnostics/symbols).
   extensions: string[];          // File extensions associated with the language (required, e.g., [".rho"]).
   fileIcon?: string;             // CSS class for file icon (e.g., "fas fa-code").

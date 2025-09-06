@@ -2,6 +2,19 @@
 
 // Externs to prevent property renaming in advanced compilation for key libraries.
 
+// Lightning Bug embedded exports
+var lightningBug = {};
+lightningBug.treeSitterWasmUrl = function() {};
+lightningBug.extensions = {};
+lightningBug.extensions.lang = {};
+lightningBug.extensions.lang.rholang = {};
+lightningBug.extensions.lang.rholang.treeSitter = {};
+lightningBug.extensions.lang.rholang.treeSitter.treeSitterRholangWasmUrl = function() {};
+lightningBug.extensions.lang.rholang.treeSitter.queries = {};
+lightningBug.extensions.lang.rholang.treeSitter.queries.highlightsQueryUrl = function() {};
+lightningBug.extensions.lang.rholang.treeSitter.queries.indentsQueryUrl = function() {};
+lightningBug.RholangExtension = {};
+
 // CodeMirror (@codemirror/state, @codemirror/view, @codemirror/language, etc.)
 var codemirror = {};
 codemirror.state = {};

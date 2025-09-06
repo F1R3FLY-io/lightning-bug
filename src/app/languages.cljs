@@ -10,7 +10,7 @@
 (defonce default-lang (atom nil))
 
 (s/def ::grammar-wasm string?)
-(s/def ::highlight-query-path string?)
+(s/def ::highlights-query-path string?)
 (s/def ::indents-query-path string?)
 (s/def ::lsp-url string?)
 (s/def ::extensions (s/coll-of string? :min-count 1))
@@ -18,14 +18,14 @@
 (s/def ::fallback-highlighter string?)
 (s/def ::indent-size pos-int?)
 
-(s/def ::config (s/keys :req-un [::extensions]
-                        :opt-un [::grammar-wasm
-                                 ::highlight-query-path
-                                 ::indents-query-path
-                                 ::lsp-url
-                                 ::file-icon
-                                 ::fallback-highlighter
-                                 ::indent-size]))
+(s/def ::language-config (s/keys :req-un [::extensions]
+                                 :opt-un [::grammar-wasm
+                                          ::highlights-query-path
+                                          ::indents-query-path
+                                          ::lsp-url
+                                          ::file-icon
+                                          ::fallback-highlighter
+                                          ::indent-size]))
 
 (s/def ::lang-key string?)
 
@@ -46,7 +46,7 @@
   (when-not (string? lang-key)
     (log/warn "Attempted to register language with non-string key:" lang-key))
   (let [lang-key-str (if (keyword? lang-key) (name lang-key) lang-key)]
-    (when-not (s/valid? ::config config)
-      (throw (ex-info "Invalid language config" (s/explain-data ::config config))))
+    (when-not (s/valid? ::language-config config)
+      (throw (ex-info "Invalid language config" (s/explain-data ::language-config config))))
     (swap! registry assoc lang-key-str config)
     (log/debug "Registered language:" lang-key-str)))

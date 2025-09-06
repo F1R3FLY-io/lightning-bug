@@ -5,10 +5,21 @@
                                       :exports {Editor lib.core/Editor}}
                            :ext.lang.rholang {:entries [ext.lang.rholang]
                                               :depends-on #{:lib.core}
-                                              :exports {RholangExtension ext.lang.rholang/RholangExtension}}}
+                                              :exports {RholangExtension ext.lang.rholang/RholangExtension}}
+                           :embedded.tree-sitter {:entries [lib.embedded.tree-sitter]
+                                                  :depends-on #{:lib.core}
+                                                  :exports {treeSitterWasmUrl lib.embedded.tree-sitter/treeSitterWasmUrl}}
+                           :embedded.rholang {:entries [ext.embedded.lang.rholang]
+                                              :depends-on #{:lib.core}
+                                              :exports {treeSitterRholangWasmUrl ext.embedded.lang.rholang/treeSitterRholangWasmUrl}}
+                           :embedded.rholang-queries {:entries [ext.embedded.lang.rholang-queries]
+                                                      :depends-on #{:lib.core}
+                                                      :exports {highlightsQueryUrl ext.embedded.lang.rholang-queries/highlightsQueryUrl
+                                                                indentsQueryUrl ext.embedded.lang.rholang-queries/indentsQueryUrl}}}
                  :js-options {:resolve {"fs" false
                                         "fs/promises" false
-                                        "path" false}
+                                        "path" false
+                                        "url" false}
                               :keep-as-import #{"react" "react-dom" "rxjs"
                                                 "@codemirror/autocomplete" "@codemirror/commands" "@codemirror/language" "@codemirror/state" "@codemirror/view"
                                                 "web-tree-sitter"}}
@@ -34,7 +45,8 @@
                 :compiler-options {:closure-defines {"re_frame.trace.trace_enabled_QMARK_" true}}
                 :js-options {:resolve {"fs" false
                                        "fs/promises" false
-                                       "path" false}}}
+                                       "path" false
+                                       "url" false}}}
           :demo {:target :browser
                  :output-dir "resources/public/demo/js"
                  :asset-path "/js"
@@ -43,7 +55,8 @@
                             :http-port 3001}
                  :js-options {:resolve {"fs" false
                                         "fs/promises" false
-                                        "path" false}}}
+                                        "path" false
+                                        "url" false}}}
           :test {:target :browser-test
                  :test-dir "resources/public/js/test"
                  :ns-regexp "-test$"
@@ -52,14 +65,16 @@
                             :autorun true}
                  :js-options {:resolve {"fs" false
                                         "fs/promises" false
-                                        "path" false}}}
+                                        "path" false
+                                        "url" false}}}
           :karma-test {:target :karma
                        :output-to "target/karma-test.js"
                        :ns-regexp "-test$"
                        :entries [cljs-test-runner]
                        :js-options {:resolve {"fs" false
                                               "fs/promises" false
-                                              "path" false}}
+                                              "path" false
+                                              "url" false}}
                        :compiler-options {:optimizations :none}}
           :karma-test-advanced {:target :karma
                                 :output-to "target/karma-test-advanced.js"
@@ -67,7 +82,8 @@
                                 :entries [cljs-test-runner]
                                 :js-options {:resolve {"fs" false
                                                        "fs/promises" false
-                                                       "path" false}}
+                                                       "path" false
+                                                       "url" false}}
                                 :compiler-options {:optimizations :advanced
                                                    :pseudo-names true
                                                    :externs ["externs/libs.ext.js"
