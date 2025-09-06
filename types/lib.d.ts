@@ -42,7 +42,7 @@ export interface EditorProps {
   /** Default protocol for file paths (e.g., "inmemory://"). Defaults to "inmemory://". */
   defaultProtocol?: string;
   /** URL to the `tree-sitter.wasm` */
-  treeSitterWasm?: string;
+  treeSitterWasm?: string | (() => string);
 }
 
 export interface Position {

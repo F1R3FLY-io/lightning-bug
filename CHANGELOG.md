@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2025-09-05
+
+### Changed
+
+- Updates TypeScript bindings to include function parameter type as value to `treeSitterWasm`.
+
 ## [0.6.2] - 2025-09-05
 
 ### Changed

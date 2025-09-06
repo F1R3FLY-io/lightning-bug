@@ -13,6 +13,19 @@ expectAssignable<EditorProps>({
   treeSitterWasm: "js/tree-sitter.wasm"
 });
 
+// Additional test for treeSitterWasm as function
+expectAssignable<EditorProps>({
+  languages: { text: { extensions: ['.txt'] } },
+  extraExtensions: [] as Extension[],
+  defaultProtocol: "inmemory://",
+  treeSitterWasm: () => "js/tree-sitter.wasm"
+});
+
+// Negative test: invalid type for treeSitterWasm
+// @ts-expect-error
+const invalidTsWasm: EditorProps = { treeSitterWasm: 123 };
+void invalidTsWasm; // suppress unused
+
 // Check ref methods
 const ref = React.createRef<EditorRef>();
 if (ref.current) {
