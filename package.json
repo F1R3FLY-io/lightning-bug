@@ -1,6 +1,6 @@
 {
   "name": "@f1r3fly-io/lightning-bug",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "A modern, extensible text editor built with ClojureScript and CodeMirror 6.",
   "author": "Dylon Edwards dylon@vinarytree.io",
   "homepage": "https://f1r3fly.io",

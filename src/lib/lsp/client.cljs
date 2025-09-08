@@ -27,12 +27,16 @@
 (defn send-raw
   "Sends the full message string over the WebSocket if connected and reachable."
   [lang full-msg state-atom]
-  (let [lsp-state (get-in @state-atom [:lsp lang])]
-    (if (:connected? lsp-state false)
+  (let [lsp-state (get-in @state-atom [:lsp lang])
+        connected? (:connected? lsp-state false)
+        warned? (:warned-unreachable? lsp-state false)]
+    (if connected?
       (when-let [ws (:ws lsp-state)]
         (log/trace "Sending raw message over WS for lang:" lang)
         (.send ws full-msg))
-      (log/warn "LSP server unreachable for lang" lang "; not sending message"))))
+      (when-not warned?
+        (log/warn "LSP server unreachable for lang" lang "; not sending message")
+        (swap! state-atom assoc-in [:lsp lang :warned-unreachable?] true)))))
 
 (defn send
   "Constructs and sends an LSP message with JSON and Content-Length header.
@@ -282,12 +286,14 @@
                        :connected? false
                        :reachable? false
                        :connecting? true
+                       :warned-unreachable? false
                        :url url)
                 (set! (.-onopen socket) #(do (log/info "LSP WS open for lang" lang)
                                              (swap! state-atom update-in [:lsp lang] assoc
                                                     :connected? true
                                                     :reachable? true
-                                                    :connecting? false)
+                                                    :connecting? false
+                                                    :warned-unreachable? false)
                                              (.next events (clj->js {:type "connect" :data {:lang lang}}))
                                              (request-initialize lang state-atom)))
                 (set! (.-onmessage socket) #(handle-message lang (.-data %) state-atom events))

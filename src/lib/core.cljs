@@ -71,10 +71,9 @@
       (log/error "Invalid Editor props:" explain)
       (throw (ex-info "Invalid Editor props" {:explain explain}))))
   (let [languages (normalize-languages (merge default-languages (:languages props)))
-        editor-config (normalize-editor-config (select-keys props [:tree-sitter-wasm]))
-        extra-extensions (:extraExtensions props #js [])
-        default-protocol (or (:defaultProtocol props) "inmemory://")
-        tree-sitter-wasm (:tree-sitter-wasm editor-config "js/tree-sitter.wasm")]
+        extra-extensions (:extra-extensions props #js [])
+        default-protocol (or (:default-protocol props) "inmemory://")
+        tree-sitter-wasm (:tree-sitter-wasm props "js/tree-sitter.wasm")]
     (when-not (every? string? (keys languages))
       (log/warn "Non-string keys found in languages map:" (keys languages)))
     {:cursor {:line 1 :column 1}
@@ -274,7 +273,7 @@
 
 ;; Inner React functional component, handling CodeMirror integration and state management.
 (let [inner (fn [js-props forwarded-ref]
-              (let [props (js->clj js-props :keywordize-keys true)
+              (let [props (normalize-editor-config (js->clj js-props :keywordize-keys true))
                     state-ref (react/useRef nil)]
                 (when (nil? (.-current state-ref))
                   (set! (.-current state-ref) (r/atom (default-state props))))
@@ -282,7 +281,7 @@
                       view-ref (react/useRef nil)
                       [ready set-ready] (react/useState false)
                       events (react/useMemo (fn [] (ReplaySubject. 1)) #js [])
-                      on-content-change (:onContentChange props)
+                      on-content-change (:on-content-change props)
                       container-ref (react/useRef nil)]
                   (react/useImperativeHandle
                    forwarded-ref

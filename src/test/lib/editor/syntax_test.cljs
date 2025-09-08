@@ -188,8 +188,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    state-atom (atom {:language "rholang" :languages {"rholang" {:grammar-wasm wasm-path
@@ -223,8 +221,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    state-atom (atom {:languages {:rholang {:grammar-wasm wasm-path
@@ -258,8 +254,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [wasm-path "/invalid/path/to/tree-sitter-rholang.wasm"
                                    state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
                                                                             :highlights-query-path "/invalid/path/highlights.scm"
@@ -291,8 +285,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
                                                                             :highlights-query-path "/invalid/path/highlights.scm"
@@ -324,8 +316,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    highlight-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
@@ -412,6 +402,96 @@
                  (u/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
+
+;; FIXME
+;; (deftest indentation-after-par
+;;   (async done
+;;          (go
+;;            (let [res (<! (go
+;;                            (try
+;;                              (<! (promise->chan @syntax/ts-init-promise))
+;;                              (<! (timeout 100))
+;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
+;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+;;                                    parser (doto (new Parser) (.setLanguage lang))
+;;                                    indents-query (new Query lang indents-str)
+;;                                    doc "new x in { x!(\"Hello\") | }"
+;;                                    language-state-field (syntax/make-language-state parser)
+;;                                    state (.create EditorState #js {:doc doc
+;;                                                                    :extensions #js [language-state-field]})
+;;                                    pos (+ (str/index-of doc "|") 1) ; just after '|' in 'x!(\"Hello\") |'
+;;                                    ctx #js {:state state :pos pos :unit "  "}]
+;;                                (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after '|' by 2 spaces, matching block scope")
+;;                                [:ok nil])
+;;                              (catch :default e
+;;                                [:error (js/Error. "indentation-after-par failed" #js {:cause e})]))))]
+;;              (when (= :error (first res))
+;;                (let [err (second res)
+;;                      err-msg (str "Test failed with error: " (pr-str err))]
+;;                  (u/log-error-with-cause err)
+;;                  (is false err-msg)))
+;;              (done)))))
+
+;; FIXME
+;; (deftest indentation-after-second-par
+;;   (async done
+;;          (go
+;;            (let [res (<! (go
+;;                            (try
+;;                              (<! (promise->chan @syntax/ts-init-promise))
+;;                              (<! (timeout 100))
+;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
+;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+;;                                    parser (doto (new Parser) (.setLanguage lang))
+;;                                    indents-query (new Query lang indents-str)
+;;                                    doc "new x in { x!(\"Hello\") | x!(\"World\") | }"
+;;                                    language-state-field (syntax/make-language-state parser)
+;;                                    state (.create EditorState #js {:doc doc
+;;                                                                    :extensions #js [language-state-field]})
+;;                                    pos (+ (str/last-index-of doc "|") 1) ; just after second '|'
+;;                                    ctx #js {:state state :pos pos :unit "  "}]
+;;                                (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after second '|' by 2 spaces, aligning with previous processes")
+;;                                [:ok nil])
+;;                              (catch :default e
+;;                                [:error (js/Error. "indentation-after-second-par failed" #js {:cause e})]))))]
+;;              (when (= :error (first res))
+;;                (let [err (second res)
+;;                      err-msg (str "Test failed with error: " (pr-str err))]
+;;                  (u/log-error-with-cause err)
+;;                  (is false err-msg)))
+;;              (done)))))
+
+;; FIXME
+;; (deftest indentation-demo-example
+;;   (async done
+;;          (go
+;;            (let [res (<! (go
+;;                            (try
+;;                              (<! (promise->chan @syntax/ts-init-promise))
+;;                              (<! (timeout 100))
+;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
+;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+;;                                    parser (doto (new Parser) (.setLanguage lang))
+;;                                    indents-query (new Query lang indents-str)
+;;                                    doc "new x in { x!(\"Hello\") | Nil }"
+;;                                    language-state-field (syntax/make-language-state parser)
+;;                                    state (.create EditorState #js {:doc doc
+;;                                                                    :extensions #js [language-state-field]})
+;;                                    pos 25 ; approximate position after '|' in the example code
+;;                                    ctx #js {:state state :pos pos :unit "  "}]
+;;                                (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after '|' in demo example by 2 spaces")
+;;                                [:ok nil])
+;;                              (catch :default e
+;;                                [:error (js/Error. "indentation-demo-example failed" #js {:cause e})]))))]
+;;              (when (= :error (first res))
+;;                (let [err (second res)
+;;                      err-msg (str "Test failed with error: " (pr-str err))]
+;;                  (u/log-error-with-cause err)
+;;                  (is false err-msg)))
+;;              (done)))))
 
 (deftest parser-as-instance
   (async done
@@ -521,8 +601,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    state-atom (atom {:languages {"rholang" {:grammar-wasm wasm
@@ -554,8 +632,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [state-atom (atom {:languages {"test" {:grammar-wasm (fn [] "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm")
                                                                          :highlights-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
                                                                          :extensions [".test"]}}})]
@@ -584,8 +660,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    state-atom (atom {:languages {"test" {:grammar-wasm wasm-path
                                                                          :highlights-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
@@ -615,8 +689,6 @@
          (go
            (let [res (<! (go
                            (try
-                             (<! (promise->chan @syntax/ts-init-promise))
-                             (<! (timeout 100))
                              (let [state-atom (atom {:languages {"rholang" {:grammar-wasm treeSitterRholangWasmUrl
                                                                             :highlights-query-path highlightsQueryUrl
                                                                             :indents-query-path indentsQueryUrl
@@ -640,93 +712,3 @@
                  (u/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
-
-;; FIXME
-;; (deftest indentation-after-par
-;;   (async done
-;;          (go
-;;            (let [res (<! (go
-;;                            (try
-;;                              (<! (promise->chan @syntax/ts-init-promise))
-;;                              (<! (timeout 100))
-;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-;;                                    parser (doto (new Parser) (.setLanguage lang))
-;;                                    indents-query (new Query lang indents-str)
-;;                                    doc "new x in { x!(\"Hello\") | }"
-;;                                    language-state-field (syntax/make-language-state parser)
-;;                                    state (.create EditorState #js {:doc doc
-;;                                                                    :extensions #js [language-state-field]})
-;;                                    pos (+ (str/index-of doc "|") 1) ; just after '|' in 'x!(\"Hello\") |'
-;;                                    ctx #js {:state state :pos pos :unit "  "}]
-;;                                (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after '|' by 2 spaces, matching block scope")
-;;                                [:ok nil])
-;;                              (catch :default e
-;;                                [:error (js/Error. "indentation-after-par failed" #js {:cause e})]))))]
-;;              (when (= :error (first res))
-;;                (let [err (second res)
-;;                      err-msg (str "Test failed with error: " (pr-str err))]
-;;                  (u/log-error-with-cause err)
-;;                  (is false err-msg)))
-;;              (done)))))
-
-;; FIXME
-;; (deftest indentation-after-second-par
-;;   (async done
-;;          (go
-;;            (let [res (<! (go
-;;                            (try
-;;                              (<! (promise->chan @syntax/ts-init-promise))
-;;                              (<! (timeout 100))
-;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-;;                                    parser (doto (new Parser) (.setLanguage lang))
-;;                                    indents-query (new Query lang indents-str)
-;;                                    doc "new x in { x!(\"Hello\") | x!(\"World\") | }"
-;;                                    language-state-field (syntax/make-language-state parser)
-;;                                    state (.create EditorState #js {:doc doc
-;;                                                                    :extensions #js [language-state-field]})
-;;                                    pos (+ (str/last-index-of doc "|") 1) ; just after second '|'
-;;                                    ctx #js {:state state :pos pos :unit "  "}]
-;;                                (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after second '|' by 2 spaces, aligning with previous processes")
-;;                                [:ok nil])
-;;                              (catch :default e
-;;                                [:error (js/Error. "indentation-after-second-par failed" #js {:cause e})]))))]
-;;              (when (= :error (first res))
-;;                (let [err (second res)
-;;                      err-msg (str "Test failed with error: " (pr-str err))]
-;;                  (u/log-error-with-cause err)
-;;                  (is false err-msg)))
-;;              (done)))))
-
-;; FIXME
-;; (deftest indentation-demo-example
-;;   (async done
-;;          (go
-;;            (let [res (<! (go
-;;                            (try
-;;                              (<! (promise->chan @syntax/ts-init-promise))
-;;                              (<! (timeout 100))
-;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-;;                                    parser (doto (new Parser) (.setLanguage lang))
-;;                                    indents-query (new Query lang indents-str)
-;;                                    doc "new x in { x!(\"Hello\") | Nil }"
-;;                                    language-state-field (syntax/make-language-state parser)
-;;                                    state (.create EditorState #js {:doc doc
-;;                                                                    :extensions #js [language-state-field]})
-;;                                    pos 25 ; approximate position after '|' in the example code
-;;                                    ctx #js {:state state :pos pos :unit "  "}]
-;;                                (is (= 2 (syntax/calculate-indent ctx pos indents-query 2 language-state-field)) "Indents after '|' in demo example by 2 spaces")
-;;                                [:ok nil])
-;;                              (catch :default e
-;;                                [:error (js/Error. "indentation-demo-example failed" #js {:cause e})]))))]
-;;              (when (= :error (first res))
-;;                (let [err (second res)
-;;                      err-msg (str "Test failed with error: " (pr-str err))]
-;;                  (u/log-error-with-cause err)
-;;                  (is false err-msg)))
-;;              (done)))))

@@ -34,6 +34,36 @@
 (s/def ::languages
   (s/map-of (s/or :string string? :keyword keyword?) ::language-config))
 
+;; LSP state specs
+(s/def ::ws any?)  ;; js/WebSocket
+(s/def ::initialized? boolean?)
+(s/def ::connected? boolean?)
+(s/def ::reachable? boolean?)
+(s/def ::connecting? boolean?)
+(s/def ::warned-unreachable? boolean?)
+(s/def ::url string?)
+(s/def ::next-id pos-int?)
+(s/def ::pending (s/map-of any? (s/keys :opt-un [::response-type ::uri])))
+(s/def ::response-type keyword?)
+(s/def ::uri string?)
+(s/def ::promise-res-fn fn?)
+(s/def ::promise-rej-fn fn?)
+
+(s/def ::lsp-entry
+  (s/keys :opt-un [::ws
+                   ::initialized?
+                   ::connected?
+                   ::reachable?
+                   ::connecting?
+                   ::warned-unreachable?
+                   ::url
+                   ::next-id
+                   ::pending
+                   ::promise-res-fn
+                   ::promise-rej-fn]))
+
+(s/def ::lsp (s/map-of string? ::lsp-entry))
+
 (defn kebab-keyword
   "Converts a camelCase keyword to kebab-case keyword.
   e.g., :grammarWasm -> :grammar-wasm"

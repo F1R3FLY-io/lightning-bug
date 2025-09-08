@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2025-09-08
+
+### Fixed
+
+- Use of incorrect WASM path on Editor initialization.
+
 ## [0.6.3] - 2025-09-05
 
 ### Changed
