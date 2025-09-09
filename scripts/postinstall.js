@@ -1,8 +1,8 @@
-const fs = require('fs');
-const path = require('path');
-const { findPkgDir } = require('./utils');
+import fs from 'fs';
+import path from 'path';
+import { findPkgDir } from './utils.js';
 
-const baseDir = path.dirname(__dirname);
+const baseDir = path.dirname(new URL(import.meta.url).pathname);
 
 const treeSitterDir = findPkgDir('web-tree-sitter');
 const rholangDir = findPkgDir('@f1r3fly-io/tree-sitter-rholang-js-with-comments');

@@ -1,7 +1,8 @@
-const path = require('path');
-const { runCmd } = require('./utils');
+import path from 'path';
+import { runCmd } from './utils.js';
 
-const baseDir = path.dirname(__dirname);
+const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+const baseDir = path.dirname(scriptDir);
 const demoDir = path.join(baseDir, 'resources/public/demo');
 
 // MODE can be 'dev' or 'release', defaults to 'dev'

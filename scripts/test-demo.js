@@ -1,11 +1,11 @@
-const fs = require('fs');
-const http = require('http');
-const path = require('path');
-const puppeteer = require('puppeteer-core');
+import fs from 'fs';
+import http from 'http';
+import path from 'path';
+import puppeteer from 'puppeteer-core';
 
 (async () => {
   console.log('Starting sanity test...');
-  const demoDir = path.resolve(__dirname, '..', 'resources', 'public', 'demo');
+  const demoDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'resources', 'public', 'demo');
   const port = 3002; // Arbitrary port
 
   // Simple HTTP server to serve the demo directory

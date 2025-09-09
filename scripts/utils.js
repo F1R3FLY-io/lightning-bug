@@ -1,6 +1,9 @@
-const child_process = require('child_process');
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 /**
  * Finds the directory of a package by searching up the directory tree.
@@ -9,25 +12,36 @@ const path = require('path');
  * @returns {string} The path to the package directory.
  * @throws {Error} If the package is not found.
  */
-exports.findPkgDir = function findPkgDir(pkgName, startDir = __dirname) {
-  let dir = startDir;
-  const root = path.parse(dir).root;
-  while (dir !== root) {
-    const nm = path.join(dir, 'node_modules', pkgName);
-    if (fs.existsSync(nm)) {
-      return nm;
+function findPkgDir(pkg) {
+  // Walk up from current dir until package.json is found, then resolve node_modules/pkg
+  let currentDir = __dirname;
+  while (currentDir !== path.parse(currentDir).root) {
+    const pkgPath = path.join(currentDir, 'node_modules', pkg);
+    if (fs.existsSync(pkgPath)) {
+      return pkgPath;
     }
-    dir = path.dirname(dir);
+    currentDir = path.dirname(currentDir);
   }
-  throw new Error(`Package ${pkgName} not found`);
-};
+  throw new Error(`Package ${pkg} not found in node_modules`);
+}
 
 /**
  * Runs a shell command synchronously in the specified directory.
  * @param {string} cmd - The command to run.
- * @param {string} [cwd=path.dirname(__dirname)] - The working directory.
+ * @param {string} [cwd=__dirname] - The working directory.
  */
-exports.runCmd = function runCmd(cmd, cwd = path.dirname(__dirname)) {
-  console.log(`Running: ${cmd} in ${cwd}`);
-  child_process.execSync(cmd, { stdio: 'inherit', cwd });
-};
+function runCmd(cmd, cwd = __dirname) {
+  const parts = cmd.trim().split(/\s+/);
+  const command = parts[0];
+  const args = parts.slice(1);
+  const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`Command failed: ${cmd} (exit code: ${result.status})`);
+  }
+  return result;
+}
+
+export { findPkgDir, runCmd };
