@@ -1,12 +1,17 @@
-module.exports = function (config) {
-  var karmaFile = process.env.KARMA_FILE || 'target/karma-test.js';
+export default async function (config) {
+  const karmaFile = process.env.KARMA_FILE || 'target/karma-test.js';
+  const [karmaCljsTest, karmaChromeLauncher, karmaSpecReporter] = await Promise.all([
+    import('karma-cljs-test'),
+    import('karma-chrome-launcher'),
+    import('karma-spec-reporter')
+  ]);
+
   config.set({
     frameworks: ['cljs-test'],
     files: [
       karmaFile,
       { pattern: 'resources/public/js/test/extensions/**', watched: false, included: false, served: true },
-      { pattern: 'resources/public/js/test/js/tree-sitter.wasm', watched: false, included: false, served: true },
-      { pattern: 'target/*.map', watched: false, included: false, served: true } // Serve source maps
+      { pattern: 'resources/public/js/test/js/tree-sitter.wasm', watched: false, included: false, served: true }
     ],
     proxies: {
       '/extensions/': '/base/resources/public/js/test/extensions/',
@@ -23,15 +28,11 @@ module.exports = function (config) {
     mime: {
       'application/wasm': ['wasm']
     },
-    preprocessors: {
-      '**/*.js': ['sourcemap'] // Enable source map loading for JS files
-    },
     reporters: ['spec'],
     plugins: [
-      require('karma-cljs-test'),
-      require('karma-chrome-launcher'),
-      require('karma-sourcemap-loader'),
-      require('karma-spec-reporter')
+      karmaCljsTest.default,
+      karmaChromeLauncher.default,
+      karmaSpecReporter.default
     ]
   });
 };

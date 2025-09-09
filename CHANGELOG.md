@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.6] - 2025-09-09
+
+### Changed
+
+- Sets `"type": "module"` in `package.json` so NPM understands the generated sources are ESM modules.
+- Removes partial support for source maps from Karma tests since `shadow-cljs` will not generate them for `:karma` targets.
+- Renames build targets `karma-test` to `karma-test-debug` and `karma-test-advanced` to `karma-test-release`
+
 ## [0.6.5] - 2025-09-08
 
 ### Added

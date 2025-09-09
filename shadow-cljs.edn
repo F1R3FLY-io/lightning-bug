@@ -67,27 +67,27 @@
                                         "fs/promises" false
                                         "path" false
                                         "url" false}}}
-          :karma-test {:target :karma
-                       :output-to "target/karma-test.js"
-                       :ns-regexp "-test$"
-                       :entries [cljs-test-runner]
-                       :js-options {:resolve {"fs" false
-                                              "fs/promises" false
-                                              "path" false
-                                              "url" false}}
-                       :compiler-options {:optimizations :none}}
-          :karma-test-advanced {:target :karma
-                                :output-to "target/karma-test-advanced.js"
-                                :ns-regexp "-test$"
-                                :entries [cljs-test-runner]
-                                :js-options {:resolve {"fs" false
-                                                       "fs/promises" false
-                                                       "path" false
-                                                       "url" false}}
-                                :compiler-options {:optimizations :advanced
-                                                   :pseudo-names true
-                                                   :externs ["externs/libs.ext.js"
-                                                             "datascript/externs.js"
-                                                             "externs/goog.ext.js"]}}}
+          :karma-test-debug {:target :karma
+                             :output-to "target/karma-test-debug.js"
+                             :ns-regexp "-test$"
+                             :entries [cljs-test-runner]
+                             :js-options {:resolve {"fs" false
+                                                    "fs/promises" false
+                                                    "path" false
+                                                    "url" false}}
+                             :compiler-options {:optimizations :none}}
+          :karma-test-release {:target :karma
+                               :output-to "target/karma-test-release.js"
+                               :ns-regexp "-test$"
+                               :entries [cljs-test-runner]
+                               :js-options {:resolve {"fs" false
+                                                      "fs/promises" false
+                                                      "path" false
+                                                      "url" false}}
+                               :compiler-options {:optimizations :advanced
+                                                  :pseudo-names true
+                                                  :externs ["externs/libs.ext.js"
+                                                            "datascript/externs.js"
+                                                            "externs/goog.ext.js"]}}}
  :dev-http {3000 "resources/public"}
  :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]}

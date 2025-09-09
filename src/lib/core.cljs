@@ -283,7 +283,7 @@
                    forwarded-ref
                    (fn []
                      #js {;; Returns the full current state (workspace, diagnostics, symbols, etc.).
-                        ;; Example: (.getState editor)
+                          ;; Example: (.getState editor)
                           :getState (fn []
                                       (try
                                         (log/trace "Fetching editor state")
@@ -299,11 +299,11 @@
                                                                       :operation "getState"})
                                           (log/error "Error in getState:" (.-message error))
                                           #js {})))
-                        ;; Returns RxJS observable for subscribing to events.
-                        ;; Example: (.subscribe (.getEvents editor) (fn [evt] (js/console.log (.-type evt) (.-data evt))))
+                          ;; Returns RxJS observable for subscribing to events.
+                          ;; Example: (.subscribe (.getEvents editor) (fn [evt] (js/console.log (.-type evt) (.-data evt))))
                           :getEvents (fn [] events)
-                        ;; Returns current cursor position (1-based) for active document.
-                        ;; Example: (.getCursor editor)
+                          ;; Returns current cursor position (1-based) for active document.
+                          ;; Example: (.getCursor editor)
                           :getCursor (fn []
                                        (try
                                          (log/trace "Fetching cursor position")
@@ -313,8 +313,8 @@
                                                                        :operation "getCursor"})
                                            (log/error "Error in getCursor:" (.-message error))
                                            #js {:line 1 :column 1})))
-                        ;; Sets cursor position for active document (triggers `selection-change` event).
-                        ;; Example: (.setCursor editor #js {:line 1 :column 3})
+                          ;; Sets cursor position for active document (triggers `selection-change` event).
+                          ;; Example: (.setCursor editor #js {:line 1 :column 3})
                           :setCursor (fn [pos-js]
                                        (try
                                          (let [pos (js->clj pos-js :keywordize-keys true)]
@@ -342,8 +342,8 @@
                                            (emit-event events "error" {:message (.-message error)
                                                                        :operation "setCursor"})
                                            (log/error "Error in setCursor:" (.-message error)))))
-                        ;; Returns current selection range and text for active document, or `null` if no selection.
-                        ;; Example: (.getSelection editor)
+                          ;; Returns current selection range and text for active document, or `null` if no selection.
+                          ;; Example: (.getSelection editor)
                           :getSelection (fn []
                                           (try
                                             (log/trace "Fetching selection")
@@ -353,8 +353,8 @@
                                                                           :operation "getSelection"})
                                               (log/error "Error in getSelection:" (.-message error))
                                               nil)))
-                        ;; Sets selection range for active document (triggers `selection-change` event).
-                        ;; Example: (.setSelection editor #js {:line 1 :column 1} #js {:line 1 :column 6})
+                          ;; Sets selection range for active document (triggers `selection-change` event).
+                          ;; Example: (.setSelection editor #js {:line 1 :column 1} #js {:line 1 :column 6})
                           :setSelection (fn [from-js to-js]
                                           (try
                                             (let [from (js->clj from-js :keywordize-keys true)
@@ -387,12 +387,12 @@
                                               (emit-event events "error" {:message (.-message error)
                                                                           :operation "setSelection"})
                                               (log/error "Error in setSelection:" (.-message error)))))
-                        ;; Opens or activates a document with file path or URI, optional content and language (triggers `document-open`).
-                        ;; Reuses if exists, updates if provided. Notifies LSP if connected. If fourth param make-active-js is false,
-                        ;; opens without activating.
-                        ;; Example: (.openDocument editor "demo.rho" "new x in { x!(\"Hello\") | Nil }" "rholang")
-                        ;;          (.openDocument editor "demo.rho") ; activates existing
-                        ;;          (.openDocument editor "demo.rho" nil nil false) ; opens without activating
+                          ;; Opens or activates a document with file path or URI, optional content and language (triggers `document-open`).
+                          ;; Reuses if exists, updates if provided. Notifies LSP if connected. If fourth param make-active-js is false,
+                          ;; opens without activating.
+                          ;; Example: (.openDocument editor "demo.rho" "new x in { x!(\"Hello\") | Nil }" "rholang")
+                          ;;          (.openDocument editor "demo.rho") ; activates existing
+                          ;;          (.openDocument editor "demo.rho" nil nil false) ; opens without activating
                           :openDocument (fn [file-or-uri-js text-js lang-js & [make-active-js]]
                                           (if-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
                                             (try
@@ -442,9 +442,9 @@
                                                                           :operation "openDocument"
                                                                           :uri file-or-uri-js})
                                               (log/error "Failed to open document:" error-message))))
-                        ;; Closes the specified or active document (triggers `document-close`). Notifies LSP if open.
-                        ;; Example: (.closeDocument editor)
-                        ;; Example: (.closeDocument editor "specific-uri")
+                          ;; Closes the specified or active document (triggers `document-close`). Notifies LSP if open.
+                          ;; Example: (.closeDocument editor)
+                          ;; Example: (.closeDocument editor "specific-uri")
                           :closeDocument (fn [file-or-uri-js]
                                            (try
                                              (when-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -469,9 +469,9 @@
                                                                            :operation "closeDocument"
                                                                            :uri file-or-uri-js})
                                                (log/error "Error in closeDocument:" (.-message error)))))
-                        ;; Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.
-                        ;; Example: (.renameDocument editor "new-name.rho")
-                        ;;          (.renameDocument editor "new-name.rho" "old-uri")
+                          ;; Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.
+                          ;; Example: (.renameDocument editor "new-name.rho")
+                          ;;          (.renameDocument editor "new-name.rho" "old-uri")
                           :renameDocument (fn [new-file-or-uri-js old-file-or-uri-js]
                                             (go
                                               (try
@@ -519,9 +519,9 @@
                                                                               :new-uri new-file-or-uri-js})
                                                   (let [error-with-cause (js/Error. (str "(.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause error})]
                                                     (lib-utils/log-error-with-cause error-with-cause))))))
-                        ;; Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
-                        ;; Example: (.saveDocument editor)
-                        ;; Example: (.saveDocument editor "specific-uri")
+                          ;; Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
+                          ;; Example: (.saveDocument editor)
+                          ;; Example: (.saveDocument editor "specific-uri")
                           :saveDocument (fn [file-or-uri-js]
                                           (try
                                             (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
@@ -542,11 +542,11 @@
                                                                           :operation "saveDocument"
                                                                           :uri file-or-uri-js})
                                               (log/error "Error in saveDocument:" (.-message error)))))
-                        ;; Returns `true` if editor is initialized and ready for methods.
-                        ;; Example: (.isReady editor)
+                          ;; Returns `true` if editor is initialized and ready for methods.
+                          ;; Example: (.isReady editor)
                           :isReady (fn [] ready)
-                        ;; Highlights a range in active document (triggers `highlight-change` with range).
-                        ;; Example: (.highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 5})
+                          ;; Highlights a range in active document (triggers `highlight-change` with range).
+                          ;; Example: (.highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 5})
                           :highlightRange (fn [from-js to-js]
                                             (try
                                               (let [from (js->clj from-js :keywordize-keys true)
@@ -576,8 +576,8 @@
                                               (catch js/Error error
                                                 (emit-event events "error" {:message (.-message error) :operation "highlightRange"})
                                                 (log/error "Error in highlightRange:" (.-message error)))))
-                        ;; Clears highlight in active document (triggers `highlight-change` with `null`).
-                        ;; Example: (.clearHighlight editor)
+                          ;; Clears highlight in active document (triggers `highlight-change` with `null`).
+                          ;; Example: (.clearHighlight editor)
                           :clearHighlight (fn []
                                             (try
                                               (log/trace "Clearing highlight")
@@ -593,8 +593,8 @@
                                                 (emit-event events "error" {:message (.-message error)
                                                                             :operation "clearHighlight"})
                                                 (log/error "Error in clearHighlight:" (.-message error)))))
-                        ;; Scrolls to center on a range in active document (triggers `scroll` event).
-                        ;; Example: (.centerOnRange editor #js {:line 1 :column 1} #js {:line 1 :column 6})
+                          ;; Scrolls to center on a range in active document (triggers `scroll` event).
+                          ;; Example: (.centerOnRange editor #js {:line 1 :column 1} #js {:line 1 :column 6})
                           :centerOnRange (fn [from-js to-js]
                                            (try
                                              (let [from (js->clj from-js :keywordize-keys true)
@@ -624,9 +624,9 @@
                                                (emit-event events "error" {:message (.-message error)
                                                                            :operation "centerOnRange"})
                                                (log/error "Error in centerOnRange:" (.-message error)))))
-                        ;; Returns text for specified or active document, or `null` if not found.
-                        ;; Example: (.getText editor)
-                        ;; Example: (.getText editor "specific-uri")
+                          ;; Returns text for specified or active document, or `null` if not found.
+                          ;; Example: (.getText editor)
+                          ;; Example: (.getText editor "specific-uri")
                           :getText (fn [file-or-uri-js]
                                      (try
                                        (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
@@ -639,9 +639,9 @@
                                                                      :uri file-or-uri-js})
                                          (log/error "Error in getText:" (.-message error))
                                          nil)))
-                        ;; Replaces entire text for specified or active document (triggers `content-change`).
-                        ;; Example: (.setText editor "new text")
-                        ;; Example: (.setText editor "new text" "specific-uri")
+                          ;; Replaces entire text for specified or active document (triggers `content-change`).
+                          ;; Example: (.setText editor "new text")
+                          ;; Example: (.setText editor "new text" "specific-uri")
                           :setText (fn [text-js file-or-uri-js]
                                      (try
                                        (let [text (js->clj text-js :keywordize-keys true)
@@ -678,9 +678,9 @@
                                                                      :operation "setText"
                                                                      :uri file-or-uri-js})
                                          (log/error "Error in setText:" (.-message error)))))
-                        ;; Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.
-                        ;; Example: (.getFilePath editor)
-                        ;; Example: (.getFilePath editor "specific-uri")
+                          ;; Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.
+                          ;; Example: (.getFilePath editor)
+                          ;; Example: (.getFilePath editor "specific-uri")
                           :getFilePath (fn [file-or-uri-js]
                                          (try
                                            (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
@@ -693,9 +693,9 @@
                                                                          :uri file-or-uri-js})
                                              (log/error "Error in getFilePath:" (.-message error))
                                              nil)))
-                        ;; Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.
-                        ;; Example: (.getFileUri editor)
-                        ;; Example: (.getFileUri editor "specific-uri")
+                          ;; Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.
+                          ;; Example: (.getFileUri editor)
+                          ;; Example: (.getFileUri editor "specific-uri")
                           :getFileUri (fn [file-or-uri-js]
                                         (try
                                           (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -707,8 +707,8 @@
                                                                         :uri file-or-uri-js})
                                             (log/error "Error in getFileUri:" (.-message error))
                                             nil)))
-                        ;; Sets the active document if exists, loads content to view, opens in LSP if not (triggers `document-open`).
-                        ;; Example: (.activateDocument editor "demo.rho")
+                          ;; Sets the active document if exists, loads content to view, opens in LSP if not (triggers `document-open`).
+                          ;; Example: (.activateDocument editor "demo.rho")
                           :activateDocument (fn [file-or-uri-js]
                                               (try
                                                 (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -725,9 +725,9 @@
                                                                               :operation "activateDocument"
                                                                               :uri file-or-uri-js})
                                                   (log/error "Error in activateDocument:" (.-message error)))))
-                        ;; Queries the internal DataScript database with the given query and optional params.
-                        ;; Returns the result as JS array.
-                        ;; Example: (.query editor '[:find ?uri :where [?e :document/uri ?uri]])
+                          ;; Queries the internal DataScript database with the given query and optional params.
+                          ;; Returns the result as JS array.
+                          ;; Example: (.query editor '[:find ?uri :where [?e :document/uri ?uri]])
                           :query (fn [query-js params-js]
                                    (try
                                      (let [query (js->clj query-js :keywordize-keys true)
@@ -739,12 +739,12 @@
                                                                    :operation "query"})
                                        (log/error "Error in query:" (.-message error))
                                        #js [])))
-                        ;; Returns the DataScript connection object for direct access (advanced use).
-                        ;; Example: (.getDb editor)
+                          ;; Returns the DataScript connection object for direct access (advanced use).
+                          ;; Example: (.getDb editor)
                           :getDb (fn [] conn)
-                        ;; Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active).
-                        ;; Example: (.getDiagnostics editor)
-                        ;; Example: (.getDiagnostics editor 'inmemory://demo.rho')
+                          ;; Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active).
+                          ;; Example: (.getDiagnostics editor)
+                          ;; Example: (.getDiagnostics editor 'inmemory://demo.rho')
                           :getDiagnostics (fn [file-or-uri-js]
                                             (try
                                               (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -756,9 +756,9 @@
                                                                             :uri file-or-uri-js})
                                                 (log/error "Error in getDiagnostics:" (.-message error))
                                                 #js [])))
-                        ;; Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active).
-                        ;; Example: (.getSymbols editor)
-                        ;; Example: (.getSymbols editor 'inmemory://demo.rho')
+                          ;; Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active).
+                          ;; Example: (.getSymbols editor)
+                          ;; Example: (.getSymbols editor 'inmemory://demo.rho')
                           :getSymbols (fn [file-or-uri-js]
                                         (try
                                           (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
@@ -770,8 +770,8 @@
                                                                         :uri file-or-uri-js})
                                             (log/error "Error in getSymbols:" (.-message error))
                                             #js [])))
-                        ;; Returns the current search term.
-                        ;; Example: (.getSearchTerm editor)
+                          ;; Returns the current search term.
+                          ;; Example: (.getSearchTerm editor)
                           :getSearchTerm (fn []
                                            (try
                                              (log/trace "Fetching search term")
@@ -781,8 +781,8 @@
                                                                            :operation "getSearchTerm"})
                                                (log/error "Error in getSearchTerm:" (.-message error))
                                                "")))
-                        ;; Opens the search panel in the editor.
-                        ;; Example: (.openSearchPanel editor)
+                          ;; Opens the search panel in the editor.
+                          ;; Example: (.openSearchPanel editor)
                           :openSearchPanel (fn []
                                              (try
                                                (if-let [^js editor-view (.-current view-ref)]
@@ -815,8 +815,8 @@
                    #js [(db/active-text)])
                   (react/useEffect
                    (fn []
-                   ;; Internal subscription to events for handling diagnostics updates by dispatching
-                   ;; a transaction to update the diagnostic StateField.
+                     ;; Internal subscription to events for handling diagnostics updates by dispatching
+                     ;; a transaction to update the diagnostic StateField.
                      (if-let [^js editor-view (.-current view-ref)]
                        (let [sub (.subscribe events
                                              (fn [evt-js]

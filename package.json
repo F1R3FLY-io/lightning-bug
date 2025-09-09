@@ -1,6 +1,7 @@
 {
   "name": "@f1r3fly-io/lightning-bug",
-  "version": "0.6.5",
+  "version": "0.6.6",
+  "type": "module",
   "description": "A modern, extensible text editor built with ClojureScript and CodeMirror 6.",
   "author": "Dylon Edwards dylon@vinarytree.io",
   "homepage": "https://f1r3fly.io",
@@ -68,8 +69,8 @@
     "lint:kibit": "clojure -X:dev:kibit",
     "lint": "npm run lint:clj-kondo && npm run lint:eastwood && npm run lint:splint && npm run lint:kibit",
     "test:types": "tsd",
-    "test:debug": "npx shadow-cljs compile karma-test && KARMA_FILE=target/karma-test.js npx karma start --single-run",
-    "test:release": "npx shadow-cljs compile karma-test-advanced && KARMA_FILE=target/karma-test-advanced.js npx karma start --single-run",
+    "test:debug": "npx shadow-cljs compile karma-test-debug && KARMA_FILE=target/karma-test-debug.js npx karma start --single-run",
+    "test:release": "npx shadow-cljs compile karma-test-release && KARMA_FILE=target/karma-test-release.js npx karma start --single-run",
     "test:demo": "node scripts/test-demo.js",
     "test": "npm run test:types && npm run test:debug && npm run test:release && MODE=release npm run build:demo && npm run test:demo"
   },
