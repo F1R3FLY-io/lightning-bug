@@ -119,10 +119,9 @@
   (log/info "LSP initialized for lang" lang)
   (notify-initialized lang state-atom)
   (swap! state-atom assoc-in [:lsp lang :initialized?] true)
-  (let [res-fn (get-in @state-atom [:lsp lang :promise-res-fn])]
-    (when res-fn
-      (res-fn)
-      (swap! state-atom update-in [:lsp lang] dissoc :promise-res-fn :promise-rej-fn)))
+  (when-let [res-fn (get-in @state-atom [:lsp lang :promise-res-fn])]
+    (res-fn)
+    (swap! state-atom update-in [:lsp lang] dissoc :promise-res-fn :promise-rej-fn))
   (.next events (clj->js {:type "lsp-initialized" :data {:lang lang}})))
 
 (defn handle-document-symbol-response [lang uri result _state-atom events]
@@ -249,10 +248,9 @@
                                   (log/error "LSP response error for lang" lang ":" (:error parsed))
                                   (.next events (clj->js {:type "lsp-error" :data (assoc (:error parsed) :lang lang)}))
                                   (when (= pending-type :initialize)
-                                    (let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
-                                      (when rej-fn
-                                        (rej-fn)
-                                        (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn)))))
+                                    (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
+                                      (rej-fn)
+                                      (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn))))
                                 (case pending-type
                                   :initialize (handle-initialize-response lang (:result parsed) state-atom events)
                                   :document-symbol (handle-document-symbol-response lang pending-uri (:result parsed) state-atom events)
@@ -302,10 +300,9 @@
                                                      :connected? false
                                                      :reachable? false
                                                      :connecting? false)
-                                              (let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
-                                                (when rej-fn
-                                                  (rej-fn)
-                                                  (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn)))
+                                              (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
+                                                (rej-fn (js/Error. (str "LSP WebSocket closed for language " lang))))
+                                              (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn)
                                               (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
                 (set! (.-onerror socket) #(do (log/warn "LSP connection error for lang" lang "; marking unreachable:" %)
                                               (swap! state-atom update-in [:lsp lang] assoc
@@ -314,7 +311,6 @@
                                                      :connecting? false)
                                               (js/window.console.debug %)
                                               (.next events (clj->js {:type "lsp-error" :data {:message "WebSocket connection error" :lang lang}}))
-                                              (let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
-                                                (when rej-fn
-                                                  (rej-fn)
-                                                  (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn))))))))))
+                                              (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
+                                                (rej-fn (js/Error. (str "LSP connection error for language " lang))))
+                                              (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn))))))))

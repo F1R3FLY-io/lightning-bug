@@ -91,6 +91,8 @@
     "exit" nil))
 
 (defn with-mock-lsp
+  ([body-fn]
+   (with-mock-lsp default-handler-fn body-fn))
   ([handle-fn body-fn]
    (let [mock (create-mock-socket handle-fn)
          sock (:sock mock)
@@ -113,6 +115,4 @@
          (finally
            ((:trigger-close mock))
            (log/trace "Mock: restoring original js/WebSocket")
-           (set! js/WebSocket original-WebSocket))))))
-  ([body-fn]
-   (with-mock-lsp default-handler-fn body-fn)))
+           (set! js/WebSocket original-WebSocket)))))))

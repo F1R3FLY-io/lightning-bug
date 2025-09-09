@@ -18,8 +18,9 @@
    [ext.lang.rholang :refer [language-config]]
    [lib.db :as db]
    [lib.editor.syntax :as syntax]
-   [lib.utils :as u]
-   [test.lib.mock-lsp :as mock :refer [parse-message]]
+   [lib.state :refer [normalize-editor-config]]
+   [lib.utils :as lib-utils]
+   [test.lib.mock-lsp :refer [parse-message with-mock-lsp]]
    [taoensso.timbre :as log]))
 
 (use-fixtures :once
@@ -109,28 +110,28 @@
   (.getState editor))
 
 (defn editor->file-path
-  ([^js editor uri]
-   (.getFilePath editor uri))
   ([^js editor]
-   (.getFilePath editor)))
+   (.getFilePath editor))
+  ([^js editor uri]
+   (.getFilePath editor uri)))
 
 (defn editor->file-uri
-  ([^js editor uri]
-   (.getFileUri editor uri))
   ([^js editor]
-   (.getFileUri editor)))
+   (.getFileUri editor))
+  ([^js editor uri]
+   (.getFileUri editor uri)))
 
 (defn editor->diagnostics
-  ([^js editor uri]
-   (.getDiagnostics editor uri))
   ([^js editor]
-   (.getDiagnostics editor)))
+   (.getDiagnostics editor))
+  ([^js editor uri]
+   (.getDiagnostics editor uri)))
 
 (defn editor->symbols
-  ([^js editor uri]
-   (.getSymbols editor uri))
   ([^js editor]
-   (.getSymbols editor)))
+   (.getSymbols editor))
+  ([^js editor uri]
+   (.getSymbols editor uri)))
 
 (defn editor->db [^js editor]
   (.getDb editor))
@@ -139,10 +140,10 @@
   (.getSearchTerm editor))
 
 (defn editor-query
-  ([^js editor query params]
-   (.query editor query params))
   ([^js editor query]
-   (.query editor query)))
+   (.query editor query))
+  ([^js editor query params]
+   (.query editor query params)))
 
 (defn wait-for
   [pred timeout-ms]
@@ -193,16 +194,16 @@
   (f)
   (flush-render))
 
-(defn cleanup-container [container]
-  (when (.contains js/document.body container)
-    (js/document.body.removeChild container)))
+(defn cleanup-container [^js/HTMLDivElement container]
+  (when #_{:splint/disable [style/prefer-clj-string]} (.contains js/document.body container)
+        (js/document.body.removeChild container)))
 
 (deftest editor-renders
   (async done
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}})]
                                  (<! (timeout 100))
@@ -216,7 +217,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -225,8 +226,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [contents (atom [])
                                      root (mount-component container {:onContentChange (fn [content]
@@ -243,8 +244,8 @@
                                    (wrap-flush #(editor->set-text! editor "updated" "inmemory://test.txt"))
                                    (<! (timeout 100))
                                    (is (= 2 (count @contents)) "Expected 2 contents.")
-                                   (is (= (nth @contents 0) "initial") "Initial text did not fire on-content-change")
-                                   (is (= (nth @contents 1) "updated") "Updated text did not fire on-content-change")
+                                   (is (= "initial" (nth @contents 0)) "Initial text did not fire on-content-change")
+                                   (is (= "updated" (nth @contents 1)) "Updated text did not fire on-content-change")
                                    (.unmount root)
                                    (<! (timeout 100))) ;; Delay to allow React cleanup.
                                  (cleanup-container container)
@@ -254,38 +255,38 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
 (deftest language-config-key-normalization
-  (let [props {:languages {"rholang" {"grammarWasm" "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
-                                      "highlightsQueryPath" "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"
-                                      "indentsQueryPath" "/extensions/lang/rholang/tree-sitter/queries/indents.scm"
-                                      "lspUrl" "ws://localhost:41551"
-                                      "extensions" [".rho"]
-                                      "fileIcon" "fas fa-file-code text-primary"
-                                      "fallbackHighlighter" "none"}}}
-        state (#'lib.core/default-state props)]
-    (is (= (get-in props [:languages "rholang" "grammarWasm"])
+  (let [config {:languages {"rholang" {"grammarWasm" "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                       "highlightsQueryPath" "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"
+                                       "indentsQueryPath" "/extensions/lang/rholang/tree-sitter/queries/indents.scm"
+                                       "lspUrl" "ws://localhost:41551"
+                                       "extensions" [".rho"]
+                                       "fileIcon" "fas fa-file-code text-primary"
+                                       "fallbackHighlighter" "none"}}}
+        state (#'lib.core/default-state (normalize-editor-config config))]
+    (is (= (get-in config [:languages "rholang" "grammarWasm"])
            (get-in state [:languages "rholang" :grammar-wasm]))
         "grammarWasm normalized to :grammar-wasm")
-    (is (= (get-in props [:languages "rholang" "highlightsQueryPath"])
+    (is (= (get-in config [:languages "rholang" "highlightsQueryPath"])
            (get-in state [:languages "rholang" :highlights-query-path]))
         "highlightsQueryPath normalized")
-    (is (= (get-in props [:languages "rholang" "indentsQueryPath"])
+    (is (= (get-in config [:languages "rholang" "indentsQueryPath"])
            (get-in state [:languages "rholang" :indents-query-path]))
         "indentsQueryPath normalized")
-    (is (= (get-in props [:languages "rholang" "lspUrl"])
+    (is (= (get-in config [:languages "rholang" "lspUrl"])
            (get-in state [:languages "rholang" :lsp-url]))
         "lspUrl normalized")
-    (is (= (get-in props [:languages "rholang" "extensions"])
+    (is (= (get-in config [:languages "rholang" "extensions"])
            (get-in state [:languages "rholang" :extensions]))
         "extensions remain unchanged")
-    (is (= (get-in props [:languages "rholang" "fileIcon"])
+    (is (= (get-in config [:languages "rholang" "fileIcon"])
            (get-in state [:languages "rholang" :file-icon]))
         "fileIcon normalized")
-    (is (= (get-in props [:languages "rholang" "fallbackHighlighter"])
+    (is (= (get-in config [:languages "rholang" "fallbackHighlighter"])
            (get-in state [:languages "rholang" :fallback-highlighter]))
         "fallbackHighlighter normalized")))
 
@@ -294,8 +295,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
@@ -305,7 +306,7 @@
                                    (throw (second ready-res))
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)
-                                     mock-res (<! (mock/with-mock-lsp
+                                     mock-res (<! (with-mock-lsp
                                                     (fn [mock]
                                                       (go
                                                         (try
@@ -343,7 +344,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -355,8 +356,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    captured-logs (atom [])]
                                (log/merge-config! {:appenders {:capture {:enabled? true
                                                                          :fn (fn [data] (swap! captured-logs conj data))}}})
@@ -368,10 +369,17 @@
                                      (throw (second ready-res))
                                      (is (second ready-res) "Editor ready within timeout")))
                                  (let [editor (ref->editor ref)]
+                                   ;; Open a document first to ensure valid content/offsets
+                                   (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "12345" "text"))
+                                   (<! (timeout 100))
+                                   ;; First call: should succeed (no warning)
                                    (wrap-flush #(editor->highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 5}))
                                    (<! (timeout 100))
+                                   (is (empty? (filter #(str/includes? (str/join " " (:vargs %)) "Cannot highlight range") @captured-logs))
+                                       "No warning on first highlightRange (valid doc)")
                                    (.unmount root)
                                    (<! (timeout 100))
+                                   ;; Second call: after unmount, view-ref is nil
                                    (wrap-flush #(editor->highlightRange editor #js {:line 1 :column 1} #js {:line 1 :column 5}))
                                    (<! (timeout 100))
                                    (is (some #(str/includes? (str/join " " (:vargs %)) "Cannot highlight range: view-ref is nil") @captured-logs)
@@ -383,7 +391,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -392,8 +400,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
@@ -403,7 +411,7 @@
                                    (throw (second ready-res))
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)
-                                     mock-res (<! (mock/with-mock-lsp
+                                     mock-res (<! (with-mock-lsp
                                                     (fn [mock]
                                                       (go
                                                         (try
@@ -447,7 +455,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -456,8 +464,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -482,7 +490,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -491,8 +499,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -572,7 +580,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -581,8 +589,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
@@ -592,7 +600,7 @@
                                    (throw (second ready-res))
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)
-                                     mock-res (<! (mock/with-mock-lsp
+                                     mock-res (<! (with-mock-lsp
                                                     (fn [mock]
                                                       (go
                                                         (try
@@ -623,7 +631,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -632,8 +640,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -658,7 +666,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -667,8 +675,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -679,6 +687,9 @@
                                      (is (second ready-res) "Editor ready within timeout")))
                                  (let [editor (ref->editor ref)]
                                    (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                                   ;; Open a document with sufficient content to make selection valid
+                                   (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "1234567" "text"))
+                                   (<! (timeout 100))  ;; Wait for document to load
                                    (wrap-flush #(editor->set-selection! editor #js {:line 1 :column 1} #js {:line 1 :column 7}))
                                    (<! (timeout 100))
                                    (let [wait-res (<! (wait-for-event events "selection-change" 1000))]
@@ -696,7 +707,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -705,8 +716,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -715,6 +726,9 @@
                                      (throw (second ready-res))
                                      (is (second ready-res) "Editor ready within timeout")))
                                  (let [editor (ref->editor ref)]
+                                   ;; Open a document with sufficient content to make selection valid
+                                   (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "1234567" "text"))
+                                   (<! (timeout 100))  ;; Wait for document to load
                                    (wrap-flush #(editor->highlight-range! editor #js {:line 1 :column 1} #js {:line 1 :column 5}))
                                    (<! (timeout 100))
                                    (wrap-flush #(editor->clear-highlight! editor))
@@ -730,7 +744,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -739,8 +753,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -749,6 +763,9 @@
                                      (throw (second ready-res))
                                      (is (second ready-res) "Editor ready within timeout")))
                                  (let [editor (ref->editor ref)]
+                                   ;; Open a document with sufficient content to make selection valid
+                                   (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "0123456789\nabcdefghijk" "text"))
+                                   (<! (timeout 100))  ;; Wait for document to load
                                    (wrap-flush #(editor->center-on-range! editor #js {:line 2 :column 1} #js {:line 2 :column 10}))
                                    (<! (timeout 100))
                                    ;; No direct assertion for scroll, but ensure no error
@@ -762,7 +779,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -771,8 +788,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -796,7 +813,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -805,8 +822,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -832,7 +849,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -841,8 +858,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -876,7 +893,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -885,8 +902,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -911,7 +928,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -920,8 +937,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -963,7 +980,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -972,8 +989,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -1007,7 +1024,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1019,8 +1036,8 @@
                                 (go
                                   (let [res (<! (go
                                                   (try
-                                                    (let [container (js/document.createElement "div")
-                                                          ref (react/createRef)]
+                                                    (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                                          ^js/React.RefObject ref (react/createRef)]
                                                       (js/document.body.appendChild container)
                                                       (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                                              :ref ref})]
@@ -1053,8 +1070,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -1088,7 +1105,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1096,8 +1113,8 @@
   (async done
          (go (let [res (<! (go
                              (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)]
+                               (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                     ^js/React.RefObject ref (react/createRef)]
                                  (js/document.body.appendChild container)
                                  (let [root (mount-component container {:defaultProtocol "file://"
                                                                         :languages {"text" {:extensions [".txt"]}}
@@ -1123,130 +1140,145 @@
 
 (deftest open-document-without-activating
   (async done
-         (go (let [res (<! (go
-                             (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)]
-                                 (js/document.body.appendChild container)
-                                 (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
-                                                                        :ref ref})]
-                                   (let [ready? (<! (wait-for-ready ref 1000))]
-                                     (is ready? "Editor ready within timeout"))
-                                   (let [editor (ref->editor ref)]
-                                     (wrap-flush #(editor->open-document! editor "inmemory://active.txt" "active" "text"))
-                                     (<! (timeout 100))
-                                     (<! (wait-for-uri "inmemory://active.txt" 1000))
-                                     (wrap-flush #(editor->open-document! editor "inmemory://background.txt" "background" "text" false))
-                                     (<! (timeout 100))
-                                     (<! (wait-for-uri "inmemory://background.txt" 1000))
-                                     (is (= "active" (editor->text editor)) "Active document remains after opening without activate")
-                                     (is (= "background" (editor->text editor "inmemory://background.txt")) "Background document opened"))
-                                   (.unmount root)
-                                   (<! (timeout 100))) ;; Delay to allow React cleanup.
-                                 (cleanup-container container)
-                                 [:ok nil])
-                               (catch :default e
-                                 [:error (js/Error. "open-document-without-activating failed" #js {:cause e})]))))]
-               (if (= :error (first res))
-                 (do
-                   (is false (str "Test failed with error: " (pr-str (second res))))
-                   (done))
-                 (done))))))
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
+                               (js/document.body.appendChild container)
+                               (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
+                                                                      :ref ref})]
+                                 (let [ready? (<! (wait-for-ready ref 1000))]
+                                   (is ready? "Editor ready within timeout"))
+                                 (let [editor (ref->editor ref)]
+                                   (wrap-flush #(editor->open-document! editor "inmemory://active.txt" "active" "text"))
+                                   (<! (timeout 100))
+                                   (<! (wait-for-uri "inmemory://active.txt" 1000))
+                                   (wrap-flush #(editor->open-document! editor "inmemory://background.txt" "background" "text" false))
+                                   (<! (timeout 100))
+                                   (<! (wait-for-uri "inmemory://background.txt" 1000))
+                                   (is (= "active" (editor->text editor)) "Active document remains after opening without activate")
+                                   (is (= "background" (editor->text editor "inmemory://background.txt")) "Background document opened"))
+                                 (.unmount root)
+                                 (<! (timeout 100))) ;; Delay to allow React cleanup.
+                               (cleanup-container container)
+                               [:ok nil])
+                             (catch :default e
+                               [:error (js/Error. "open-document-without-activating failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (is false (str "Test failed with error: " (pr-str (second res)))))
+             (done)))))
 
 (deftest language-change-event
   (async done
-         (go (let [res (<! (go
-                             (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)
-                                     events (atom [])]
-                                 (js/document.body.appendChild container)
-                                 (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}
-                                                                                    "rholang" language-config}
-                                                                        :ref ref})]
-                                   (let [ready? (<! (wait-for-ready ref 1000))]
-                                     (is ready? "Editor ready within timeout"))
-                                   (let [editor (ref->editor ref)]
-                                     (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
-                                     (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "test" "text"))
-                                     (<! (timeout 100))
-                                     (wrap-flush #(editor->open-document! editor "inmemory://test.rho" "new x in {}" "rholang"))
-                                     (<! (timeout 100))
-                                     (<! (wait-for-event events "language-change" 1000))
-                                     (is (some #(= "language-change" (:type %)) @events)
-                                         "Emitted language-change on switch"))
-                                   (.unmount root)
-                                   (<! (timeout 100))) ;; Delay to allow React cleanup.
-                                 (cleanup-container container)
-                                 [:ok nil])
-                               (catch :default e
-                                 [:error (js/Error. "language-change-event failed" #js {:cause e})]))))]
-               (if (= :error (first res))
-                 (do
-                   (is false (str "Test failed with error: " (pr-str (second res))))
-                   (done))
-                 (done))))))
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
+                                   events (atom [])]
+                               (js/document.body.appendChild container)
+                               (let [mock-res (<! (with-mock-lsp
+                                                    (fn [_mock]
+                                                      (go
+                                                        (try
+                                                          (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}
+                                                                                                             "rholang" (assoc language-config :lsp-url "ws://mock")}
+                                                                                                 :ref ref})]
+                                                            (let [ready? (<! (wait-for-ready ref 1000))]
+                                                              (is ready? "Editor ready within timeout"))
+                                                            (let [editor (ref->editor ref)]
+                                                              (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
+                                                              (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "test" "text"))
+                                                              (<! (timeout 100))
+                                                              (wrap-flush #(editor->open-document! editor "inmemory://test.rho" "new x in {}" "rholang"))
+                                                              (<! (timeout 100))
+                                                              (<! (wait-for-event events "language-change" 1000))
+                                                              (is (some #(= "language-change" (:type %)) @events)
+                                                                  "Emitted language-change on switch"))
+                                                            (.unmount root)
+                                                            (<! (timeout 100))
+                                                            (cleanup-container container)
+                                                            [:ok nil])
+                                                          (catch :default e
+                                                            [:error (js/Error. "language-change-event failed" #js {:cause e})]))))))]
+                                 (if (= :error (first mock-res))
+                                   (throw (second mock-res))
+                                   [:ok nil])))
+                             (catch :default e
+                               [:error (js/Error. "language-change-event failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (is false (str "Test failed with error: " (pr-str (second res)))))
+             (done)))))
 
 (deftest destroy-event-on-unmount
   (async done
-         (go (let [res (<! (go
-                             (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)
-                                     events (atom [])]
-                                 (js/document.body.appendChild container)
-                                 (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
-                                                                        :ref ref})]
-                                   (let [ready? (<! (wait-for-ready ref 1000))]
-                                     (is ready? "Editor ready within timeout"))
-                                   (let [editor (ref->editor ref)]
-                                     (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true))))
-                                   (.unmount root)
-                                   (<! (timeout 100))
-                                   (is (some #(= "destroy" (:type %)) @events) "Emitted destroy on unmount")
-                                   (cleanup-container container)
-                                   [:ok nil]))
-                               (catch :default e
-                                 [:error (js/Error. "destroy-event-on-unmount failed" #js {:cause e})]))))]
-               (if (= :error (first res))
-                 (do
-                   (is false (str "Test failed with error: " (pr-str (second res))))
-                   (done))
-                 (done))))))
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
+                                   events (atom [])]
+                               (js/document.body.appendChild container)
+                               ;; Mock LSP to isolate (no-op handler since no connection expected)
+                               (let [mock-res (<! (with-mock-lsp
+                                                    (fn [_mock]  ;; No-op: ignore any sends
+                                                      (go
+                                                        (try
+                                                          (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
+                                                                                                 :ref ref})]
+                                                            (let [ready? (<! (wait-for-ready ref 1000))]
+                                                              (is ready? "Editor ready within timeout"))
+                                                            (let [editor (ref->editor ref)]
+                                                              (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true))))
+                                                            (.unmount root)
+                                                            (<! (timeout 100))
+                                                            (is (some #(= "destroy" (:type %)) @events) "Emitted destroy on unmount")
+                                                            (cleanup-container container)
+                                                            [:ok nil])
+                                                          (catch :default e
+                                                            [:error (js/Error. "Mocked destroy-event-on-unmount failed" #js {:cause e})]))))))]
+                                 (if (= :error (first mock-res))
+                                   (throw (second mock-res))
+                                   [:ok nil])))
+                             (catch :default e
+                               [:error (js/Error. "destroy-event-on-unmount failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (is false (str "Test failed with error: " (pr-str (second res)))))
+             (done)))))
 
 (deftest fallback-to-basic-on-no-lsp
   (async done
-         (go (let [res (<! (go
-                             (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)]
-                                 (js/document.body.appendChild container)
-                                 (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
-                                                                        :ref ref})]
-                                   (let [ready? (<! (wait-for-ready ref 1000))]
-                                     (is ready? "Editor ready within timeout"))
-                                   (let [editor (ref->editor ref)]
-                                     (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "test" "text"))
-                                     (<! (timeout 100))
-                                     (is (nil? (get-in (editor->state editor) [:lsp "text" :url])) "No LSP for text, fallback to basic"))
-                                   (.unmount root)
-                                   (<! (timeout 100))) ;; Delay to allow React cleanup.
-                                 (cleanup-container container)
-                                 [:ok nil])
-                               (catch :default e
-                                 [:error (js/Error. "fallback-to-basic-on-no-lsp failed" #js {:cause e})]))))]
-               (if (= :error (first res))
-                 (do
-                   (is false (str "Test failed with error: " (pr-str (second res))))
-                   (done))
-                 (done))))))
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
+                               (js/document.body.appendChild container)
+                               (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
+                                                                      :ref ref})]
+                                 (let [ready? (<! (wait-for-ready ref 1000))]
+                                   (is ready? "Editor ready within timeout"))
+                                 (let [editor (ref->editor ref)]
+                                   (wrap-flush #(editor->open-document! editor "inmemory://test.txt" "test" "text"))
+                                   (<! (timeout 100))
+                                   (is (nil? (get-in (editor->state editor) [:lsp "text" :url])) "No LSP for text, fallback to basic"))
+                                 (.unmount root)
+                                 (<! (timeout 100))) ;; Delay to allow React cleanup.
+                               (cleanup-container container)
+                               [:ok nil])
+                             (catch :default e
+                               [:error (js/Error. "fallback-to-basic-on-no-lsp failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (is false (str "Test failed with error: " (pr-str (second res)))))
+             (done)))))
 
 (deftest open-document-full-uri
   (async done
          (go (let [res (<! (go
                              (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)]
+                               (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                     ^js/React.RefObject ref (react/createRef)]
                                  (js/document.body.appendChild container)
                                  (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                         :ref ref})]
@@ -1273,8 +1305,8 @@
   (async done
          (go (let [res (<! (go
                              (try
-                               (let [container (js/document.createElement "div")
-                                     ref (react/createRef)]
+                               (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                     ^js/React.RefObject ref (react/createRef)]
                                  (js/document.body.appendChild container)
                                  (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                         :ref ref})]
@@ -1311,8 +1343,8 @@
                          (let [text (str/join "\n" doc)
                                state (.create EditorState #js {:doc text :extensions #js []})
                                ^js cm-doc (.-doc state)
-                               offset (u/pos-to-offset cm-doc pos true)
-                               back-pos (when offset (u/offset-to-pos cm-doc offset true))]
+                               offset (lib-utils/pos->offset cm-doc pos true)
+                               back-pos (when offset (lib-utils/offset->pos cm-doc offset true))]
                            (if (and offset (<= (:line pos) (count doc)))
                              (= pos back-pos)
                              true)))]
@@ -1325,8 +1357,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
@@ -1336,7 +1368,7 @@
                                    (throw (second ready-res))
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)
-                                     mock-res (<! (mock/with-mock-lsp
+                                     mock-res (<! (with-mock-lsp
                                                     (fn [mock]
                                                       (go
                                                         (try
@@ -1378,7 +1410,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1387,8 +1419,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -1422,7 +1454,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1431,7 +1463,7 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}})]
                                  (<! (timeout 100))
@@ -1449,7 +1481,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1458,8 +1490,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -1496,7 +1528,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1506,8 +1538,8 @@
                                 (go
                                   (let [res (<! (go
                                                   (try
-                                                    (let [container (js/document.createElement "div")
-                                                          ref (react/createRef)]
+                                                    (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                                          ^js/React.RefObject ref (react/createRef)]
                                                       (js/document.body.appendChild container)
                                                       (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                                              :ref ref})]
@@ -1545,8 +1577,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
@@ -1556,7 +1588,7 @@
                                    (throw (second ready-res))
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)
-                                     mock-res (<! (mock/with-mock-lsp
+                                     mock-res (<! (with-mock-lsp
                                                     (fn [mock]
                                                       (go
                                                         (try
@@ -1592,7 +1624,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1601,8 +1633,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -1625,7 +1657,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1634,8 +1666,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -1659,7 +1691,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1668,8 +1700,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)]
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
                                                                       :ref ref})]
@@ -1711,7 +1743,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1720,8 +1752,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
                                (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
@@ -1746,7 +1778,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1755,8 +1787,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
@@ -1768,7 +1800,7 @@
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)]
                                  (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
-                                 (let [mock-res (<! (mock/with-mock-lsp
+                                 (let [mock-res (<! (with-mock-lsp
                                                       (fn [mock]
                                                         (go
                                                           (try
@@ -1807,7 +1839,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -1816,8 +1848,8 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [container (js/document.createElement "div")
-                                   ref (react/createRef)
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
                                    events (atom [])
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
@@ -1829,7 +1861,7 @@
                                    (is (second ready-res) "Editor ready within timeout")))
                                (let [editor (ref->editor ref)]
                                  (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true)))
-                                 (let [mock-res (<! (mock/with-mock-lsp
+                                 (let [mock-res (<! (with-mock-lsp
                                                       (fn [mock]
                                                         (go
                                                           (try
@@ -1869,6 +1901,6 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))

@@ -564,7 +564,7 @@
     (when-not (s/valid? :workspace/active-uri uri)
       (log/warn (s/explain-str :workspace/active-uri uri))))
   (let [prev-eids (d/q '[:find [?e ...] :where [?e :workspace/active-uri _]] @conn)
-        retracts (map (fn [eid] [:db/retractEntity eid]) prev-eids)
+        retracts (for [item prev-eids] [:db/retractEntity item])
         add {:workspace/active-uri uri :type :active-uri}
         tx (conj retracts add)]
     (when DEBUG
@@ -599,7 +599,7 @@
 
 (defn first-document-uri
   []
-  (first (d/q '[:find ?uri . :where [?e :document/uri ?uri]] @conn)))
+  (d/q '[:find ?uri . :where [?e :document/uri ?uri]] @conn))
 
 (defn active-uri?
   [uri]
@@ -676,7 +676,7 @@
                          [?d :document/uri ?uri]
                          [?e :diagnostic/document ?d]]
                        @conn uri)
-          deletions (map (fn [id] [:db/retractEntity id]) old-ids)]
+          deletions (for [item old-ids] [:db/retractEntity item])]
       (if (empty? diags)
         (when (seq deletions) (d/transact! conn deletions))
         (let [creations (create-diagnostics diags doc-eid version)]
@@ -749,7 +749,7 @@
                          :in $ ?doc
                          :where [?e :symbol/document ?doc]]
                        @conn doc-eid)
-          deletions (map (fn [id] [:db/retractEntity id]) old-ids)]
+          deletions (for [item old-ids] [:db/retractEntity item])]
       (if (empty? symbols)
         (when (seq deletions) (d/transact! conn deletions))
         (let [creations (create-symbols doc-eid uri symbols)]

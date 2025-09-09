@@ -5,10 +5,16 @@
 
 (def indents (embed-text "resources/public/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
 
-(defn ^:export highlightsQueryUrl []
+(defn highlights-query-url []
   (let [blob (js/Blob. #js [highlights] #js {:type "text/plain"})]
     (js/URL.createObjectURL blob)))
 
-(defn ^:export indentsQueryUrl []
+(defn indents-query-url []
   (let [blob (js/Blob. #js [indents] #js {:type "text/plain"})]
     (js/URL.createObjectURL blob)))
+
+#_{:splint/disable [naming/lisp-case]}
+(def ^:export highlightsQueryUrl highlights-query-url)
+
+#_{:splint/disable [naming/lisp-case]}
+(def ^:export indentsQueryUrl indents-query-url)

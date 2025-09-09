@@ -17,4 +17,16 @@
         reagent/reagent {:mvn/version "2.0.0-alpha2"}
         thheller/shadow-cljs {:mvn/version "3.2.0"}
         re-posh/re-posh {:mvn/version "0.3.3"}}
- :aliases {:dev {:extra-deps {}}}}
+ :aliases {:dev {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.07.28"}
+                              jonase/eastwood {:mvn/version "1.4.3"}
+                              io.github.noahtheduke/splint {:mvn/version "1.21.0"}
+                              jonase/kibit {:mvn/version "0.1.11"}}}
+           :clj-kondo {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.07.28"}}
+                       :main-opts ["-m" "clj-kondo.main" "--lint" "src"]}
+           :eastwood {:extra-deps {jonase/eastwood {:mvn/version "1.4.3"}}
+                      :main-opts ["-m" "eastwood.lint" "{:source-paths [\"src\"]}"]}
+           :splint {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.21.0"}}
+                    :main-opts ["-m" "noahtheduke.splint" "src"]}
+           :kibit {:extra-deps {jonase/kibit {:mvn/version "0.1.11"}}
+                   :exec-fn kibit.driver/exec
+                   :exec-args {:paths ["src"]}}}}

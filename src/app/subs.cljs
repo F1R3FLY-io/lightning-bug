@@ -2,7 +2,7 @@
   (:require
    [clojure.string :as str]
    [re-frame.core :as rf]
-   [lib.db :as lib-db :refer [conn]]))
+   [lib.db :as lib-db]))
 
 (rf/reg-sub
  :workspace/files
@@ -35,9 +35,8 @@
 (rf/reg-sub
  :active-name
  (fn [_ _]
-   (let [uri (lib-db/active-uri)]
-     (when uri
-       (last (str/split uri #"/"))))))
+   (when-let [uri (lib-db/active-uri)]
+     (last (str/split uri #"/")))))
 
 (rf/reg-sub
  :active-content

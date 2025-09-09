@@ -1,4 +1,4 @@
-(ns cljs-test-runner
+(ns test.cljs-test-runner
   (:require [shadow.test.karma :as k]
             [test.lib.core-test]
             [test.lib.editor.diagnostics-test]
@@ -7,5 +7,6 @@
             [test.lib.lsp.client-test]
             [test.lib.embedded-test]
             [test.ext.embedded-test]))
+
 (defn ^:export main []
   (k/init))

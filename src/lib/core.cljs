@@ -14,7 +14,6 @@
    ["react" :as react]
    ["rxjs" :as rxjs :refer [ReplaySubject]]
    [clojure.core.async :refer [go <! put! promise-chan]]
-   [clojure.spec.alpha :as s]
    [clojure.string :as str]
    [datascript.core :as d]
    [reagent.core :as r]
@@ -23,8 +22,8 @@
    [lib.editor.highlight :as highlight]
    [lib.editor.syntax :as syntax]
    [lib.lsp.client :as lsp]
-   [lib.state :refer [normalize-languages normalize-editor-config]]
-   [lib.utils :as u :refer [split-uri debounce]]
+   [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config!]]
+   [lib.utils :as lib-utils :refer [split-uri debounce]]
    [taoensso.timbre :as log]))
 
 ;; Hardcoded default languages for the library; uses string keys.
@@ -66,10 +65,7 @@
   "Computes the initial editor state from converted CLJS props.
   Ensures language keys are strings and falls back to 'text' if no language is provided."
   [props]
-  (when-not (s/valid? ::lib.state/editor-config props)
-    (let [explain (s/explain-str ::lib.state/props props)]
-      (log/error "Invalid Editor props:" explain)
-      (throw (ex-info "Invalid Editor props" {:explain explain}))))
+  (validate-editor-config! props)
   (let [languages (normalize-languages (merge default-languages (:languages props)))
         extra-extensions (:extra-extensions props #js [])
         default-protocol (or (:default-protocol props) "inmemory://")
@@ -101,12 +97,12 @@
         anchor (.-anchor main-sel)
         head (.-head main-sel)
         ^js doc (.-doc cm-state)
-        cursor-pos (u/offset-to-pos doc head true)
+        cursor-pos (lib-utils/offset->pos doc head true)
         sel (when (not= anchor head)
               (let [from (min anchor head)
                     to (max anchor head)
-                    from-pos (u/offset-to-pos doc from true)
-                    to-pos (u/offset-to-pos doc to true)
+                    from-pos (lib-utils/offset->pos doc from true)
+                    to-pos (lib-utils/offset->pos doc to true)
                     text (.sliceString doc from to)]
                 {:from from-pos :to to-pos :text text}))
         uri (db/active-uri)
@@ -144,7 +140,7 @@
                                  (debounced-search-emit new-term)))
                              (when (.-docChanged u)
                                (when-let [uri (db/active-uri)]
-                                 (let [new-text (.toString (.-doc (.-state u)))]
+                                 (let [new-text (str (.-doc (.-state u)))]
                                    (log/trace "Document changed for uri:" uri "new length:" (count new-text))
                                    (db/update-document-text-by-uri! uri new-text)
                                    (emit-event events "content-change" {:content new-text :uri uri})
@@ -169,8 +165,9 @@
 
 (defn- promise->chan [p]
   (let [ch (promise-chan)]
-    (.then p #(put! ch :ready))
-    (.catch p #(put! ch :unreachable))
+    (-> p
+        (.then #(put! ch :ready))
+        (.catch #(put! ch :unreachable)))
     ch))
 
 (defn- get-connect-promise [lang lsp-url state-atom events]
@@ -198,7 +195,7 @@
             (when-not (and connected? initialized?)
               (let [p (get-connect-promise lang lsp-url state-atom events)
                     res (<! (promise->chan p))]
-                (when (= res :unreachable)
+                (when (and @state-atom (= res :unreachable))
                   (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
                                                   :lang lang})
                   (log/error "Failed to connect and initialize LSP for lang" lang))))
@@ -245,9 +242,8 @@
               (throw (js/Error. (str "(syntax/init-syntax (.-current view-ref) state-atom) returned nothing in call to (activate-document " uri " state-atom view-ref events)")))))
           (if (get-in @state-atom [:languages new-lang :lsp-url])
             (let [res (<! (ensure-lsp-document-opened new-lang uri state-atom events))]
-              (if (= :error (first res))
-                (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second res)}))
-                nil))
+              (when (= :error (first res))
+                (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second res)}))))
             (db/document-opened-by-uri! uri))
           (emit-event events "document-open" {:uri uri
                                               :content text
@@ -326,7 +322,7 @@
                                            (if-let [^js editor-view (.-current view-ref)]
                                              (let [^js editor-state (.-state editor-view)
                                                    ^js doc (.-doc editor-state)
-                                                   offset (u/pos-to-offset doc pos true)]
+                                                   offset (lib-utils/pos->offset doc pos true)]
                                                (if offset
                                                  (do
                                                    (.dispatch editor-view #js {:selection (EditorSelection.cursor offset)})
@@ -367,8 +363,8 @@
                                               (if-let [^js editor-view (.-current view-ref)]
                                                 (let [^js editor-state (.-state editor-view)
                                                       ^js doc (.-doc editor-state)
-                                                      from-offset (u/pos-to-offset doc from true)
-                                                      to-offset (u/pos-to-offset doc to true)]
+                                                      from-offset (lib-utils/pos->offset doc from true)
+                                                      to-offset (lib-utils/pos->offset doc to true)]
                                                   (if (and from-offset to-offset (<= from-offset to-offset))
                                                     (do
                                                       (.dispatch editor-view #js {:selection (EditorSelection.range from-offset to-offset)})
@@ -461,13 +457,12 @@
                                                                                      :params {:textDocument {:uri uri}}}))
                                                  (db/delete-document-by-id! id)
                                                  (when (db/active-uri? uri)
-                                                   (let [next-uri (db/first-document-uri)]
-                                                     (if next-uri
-                                                       (activate-document next-uri state-atom view-ref events)
-                                                       (emit-event events "document-open" {:uri nil
-                                                                                           :content ""
-                                                                                           :language "text"
-                                                                                           :activated true}))))
+                                                   (if-let [next-uri (db/first-document-uri)]
+                                                     (activate-document next-uri state-atom view-ref events)
+                                                     (emit-event events "document-open" {:uri nil
+                                                                                         :content ""
+                                                                                         :language "text"
+                                                                                         :activated true})))
                                                  (emit-event events "document-close" {:uri uri})))
                                              (catch js/Error error
                                                (emit-event events "error" {:message (.-message error)
@@ -523,7 +518,7 @@
                                                                               :old-uri old-file-or-uri-js
                                                                               :new-uri new-file-or-uri-js})
                                                   (let [error-with-cause (js/Error. (str "(.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause error})]
-                                                    (u/log-error-with-cause error-with-cause))))))
+                                                    (lib-utils/log-error-with-cause error-with-cause))))))
                         ;; Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
                         ;; Example: (.saveDocument editor)
                         ;; Example: (.saveDocument editor "specific-uri")
@@ -560,8 +555,8 @@
                                                 (if-let [^js editor-view (.-current view-ref)]
                                                   (let [^js editor-state (.-state editor-view)
                                                         ^js doc (.-doc editor-state)
-                                                        from-offset (u/pos-to-offset doc from true)
-                                                        to-offset (u/pos-to-offset doc to true)]
+                                                        from-offset (lib-utils/pos->offset doc from true)
+                                                        to-offset (lib-utils/pos->offset doc to true)]
                                                     (if (and from-offset to-offset (<= from-offset to-offset))
                                                       (do
                                                         (.dispatch editor-view
@@ -607,8 +602,8 @@
                                                (log/trace "Centering on range from" from "to" to)
                                                (if-let [^js editor-view (.-current view-ref)]
                                                  (let [^js doc (.-doc ^js (.-state editor-view))
-                                                       from-offset (u/pos-to-offset doc from true)
-                                                       to-offset (u/pos-to-offset doc to true)]
+                                                       from-offset (lib-utils/pos->offset doc from true)
+                                                       to-offset (lib-utils/pos->offset doc to true)]
                                                    (if (and from-offset to-offset)
                                                      (do
                                                        (.dispatch editor-view #js {:effects (EditorView.scrollIntoView
@@ -805,7 +800,7 @@
                    (fn []
                      (when-let [^js editor-view (.-current view-ref)]
                        (let [^js editor-state (.-state editor-view)
-                             current-doc (.toString (.-doc editor-state))
+                             current-doc (str (.-doc editor-state))
                              active-text (db/active-text)]
                          (when (not= active-text current-doc)
                            (log/debug "Updating view content to match db for active uri")
@@ -866,16 +861,20 @@
                          (update-editor-state editor-state state-atom events)
                          (fn []
                            (log/info "Editor: Destroying EditorView")
-                           (doseq [[lang _] (:lsp @state-atom)]
-                             (lsp/request-shutdown lang state-atom))
+                           (doseq [[lang lsp-state] (:lsp @state-atom)]
+                             (lsp/request-shutdown lang state-atom)
+                             (when-let [rej-fn (:promise-rej-fn lsp-state)]
+                               (rej-fn (js/Error. (str "LSP connection cancelled: editor unmounted for language " lang))))
+                             (swap! state-atom update-in [:lsp lang] dissoc :promise-res-fn :promise-rej-fn :connect-promise))
                            (when-let [editor-view (.-current view-ref)]
                              (.destroy editor-view))
                            (set! (.-current view-ref) nil)
+                           (reset! state-atom nil)
                            (emit-event events "destroy" {})))
                        (catch js/Error error
                          (emit-event events "error" {:message (.-message error)
                                                      :operation "initEditorView"})
-                         (u/log-error-with-cause "Error initializing EditorView" error)
+                         (lib-utils/log-error-with-cause "Error initializing EditorView" error)
                          (fn []))))
                    #js [(db/active-lang) (:extra-extensions @state-atom) container-ref])
                   (react/createElement "div" #js {:ref container-ref

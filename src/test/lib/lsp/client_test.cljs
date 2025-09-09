@@ -12,7 +12,7 @@
    ["rxjs" :as rxjs]
    [lib.db :as db :refer [flatten-symbols create-documents! replace-symbols!]]
    [lib.lsp.client :as lsp]
-   [lib.utils :as u]))
+   [lib.utils :as lib-utils]))
 
 (use-fixtures :each
   {:before #(d/reset-conn! db/conn (d/empty-db db/schema))})
@@ -399,6 +399,6 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))

@@ -1,0 +1,33 @@
+{:linters {:unresolved-symbol {:level :error}
+           :unused-binding {:level :warning}
+           :unused-namespace {:level :warning}
+           :refer-all {:level :off}
+           :missing-docstring {:level :off}
+           :invalid-arity {:level :error}
+           :private-call {:level :error}
+           :unused-private-var {:level :warning}
+           :not-a-function {:level :error}}
+ :lint-as {reagent.core/defn reagent.core/defn
+           reagent.core/defnc reagent.core/defn
+           day8.re-frame-10x.preload.react-18/defn
+           day8.re-frame-10x.preload/defn}
+ :hooks {:analyze-call {"@codemirror/state" {:EditorState.create {:fn (fn [{:keys [node]}]
+                                                                        (when-not (:resolved? node)
+                                                                          {:findings [{:message "EditorState.create used without proper resolution"
+                                                                                       :level :warning}]}))}
+                                             :StateField.define {:fn (fn [{:keys [node]}]
+                                                                       (when-not (:resolved? node)
+                                                                         {:findings [{:message "StateField.define used without proper resolution"
+                                                                                      :level :warning}]}))}}
+                        "@codemirror/view" {:EditorView {:fn (fn [{:keys [node]}]
+                                                               (when-not (:resolved? node)
+                                                                 {:findings [{:message "EditorView used without proper resolution"
+                                                                              :level :warning}]}))}}}}
+ :config-in-ns {lib.core {:linters {:unresolved-symbol {:exclude [EditorView EditorState Annotation StateField
+                                                                  lineNumbers bracketMatching closeBrackets
+                                                                  keymap defaultKeymap history historyKeymap
+                                                                  search searchKeymap getSearchQuery openSearchPanel
+                                                                  indentWithTab EditorSelection
+                                                                  ReplaySubject]}}}
+ :output {:format :text
+          :summary true}}}

@@ -1,17 +1,21 @@
 (ns lib.embedded.macros
-  (:import [java.util Base64]
+  (:require [clojure.java.io])
+  (:import [java.util Base64 Base64$Encoder]
            [java.io FileInputStream ByteArrayOutputStream]))
 
-(defn slurp-bytes [path]
-  (with-open [in (FileInputStream. path)
-              out (ByteArrayOutputStream.)]
+#_{:splint/disable [lint/prefer-method-values]}
+(defn slurp-bytes ^bytes [^String path]
+  (with-open [^FileInputStream in (FileInputStream. path)
+              ^ByteArrayOutputStream out (ByteArrayOutputStream.)]
     (clojure.java.io/copy in out)
     (.toByteArray out)))
 
-(defmacro embed-base64 [path]
-  (let [bytes (slurp-bytes path)
-        base64 (.encodeToString (Base64/getEncoder) bytes)]
+#_{:splint/disable [lint/prefer-method-values]}
+(defmacro embed-base64 ^String [^String path]
+  (let [^bytes bytes (slurp-bytes path)
+        ^Base64$Encoder encoder (Base64/getEncoder)
+        ^String base64 (.encodeToString encoder bytes)]
     base64))
 
-(defmacro embed-text [path]
+(defmacro embed-text ^String [^String path]
   (slurp path))

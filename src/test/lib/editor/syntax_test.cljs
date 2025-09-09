@@ -6,7 +6,7 @@
    [taoensso.timbre :as log :include-macros true]
    [lib.db :as db]
    [lib.editor.syntax :as syntax :refer [promise->chan]]
-   [lib.utils :as u]
+   [lib.utils :as lib-utils]
    ["@codemirror/state" :refer [ChangeSet EditorState]]
    ["@codemirror/view" :refer [EditorView]]
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
@@ -45,8 +45,8 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
-                                   query (new (.-Query TreeSitter) lang query-str)
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   query (Query. lang query-str)
                                    language-state-field (syntax/make-language-state parser)
                                    plugin (syntax/make-highlighter-plugin language-state-field query)]
                                (is (some? plugin) "Plugin created successfully"))
@@ -56,7 +56,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -69,7 +69,7 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
+                                   parser (doto (Parser.) (.setLanguage lang))
                                    language-state-field (syntax/make-language-state parser)
                                    plugin (syntax/make-highlighter-plugin language-state-field nil)]
                                (is (some? plugin) "Plugin still created for invalid inputs"))
@@ -79,7 +79,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -93,8 +93,8 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
-                                   query (new (.-Query TreeSitter) lang query-str)
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   query (Query. lang query-str)
                                    ;; Create a dummy state field that is not attached.
                                    dummy-field (syntax/make-language-state parser)
                                    plugin (syntax/make-highlighter-plugin dummy-field query)
@@ -112,7 +112,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -125,7 +125,7 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
+                                   parser (doto (Parser.) (.setLanguage lang))
                                    initial-str "let x = 1"
                                    language-state-field (syntax/make-language-state parser)
                                    state (.create EditorState #js {:doc initial-str :extensions #js [language-state-field]})
@@ -147,7 +147,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -161,8 +161,8 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
-                                   query (new (.-Query TreeSitter) lang query-str)
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   query (Query. lang query-str)
                                    initial-doc ""
                                    language-state-field (syntax/make-language-state parser)
                                    plugin (syntax/make-highlighter-plugin language-state-field query)
@@ -179,7 +179,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -212,7 +212,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -245,7 +245,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -276,7 +276,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -307,7 +307,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -341,7 +341,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -355,8 +355,8 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
-                                   indents-query (new Query lang indents-str)
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   indents-query (Query. lang indents-str)
                                    doc "{ Nil }"
                                    language-state-field (syntax/make-language-state parser)
                                    state (.create EditorState #js {:doc doc
@@ -370,7 +370,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -384,8 +384,8 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
-                                   indents-query (new Query lang indents-str)
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   indents-query (Query. lang indents-str)
                                    doc "new x in {}"
                                    language-state-field (syntax/make-language-state parser)
                                    state (.create EditorState #js {:doc doc
@@ -399,7 +399,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -414,8 +414,8 @@
 ;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
 ;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
 ;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-;;                                    parser (doto (new Parser) (.setLanguage lang))
-;;                                    indents-query (new Query lang indents-str)
+;;                                    parser (doto (Parser.) (.setLanguage lang))
+;;                                    indents-query (Query. lang indents-str)
 ;;                                    doc "new x in { x!(\"Hello\") | }"
 ;;                                    language-state-field (syntax/make-language-state parser)
 ;;                                    state (.create EditorState #js {:doc doc
@@ -444,8 +444,8 @@
 ;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
 ;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
 ;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-;;                                    parser (doto (new Parser) (.setLanguage lang))
-;;                                    indents-query (new Query lang indents-str)
+;;                                    parser (doto (Parser.) (.setLanguage lang))
+;;                                    indents-query (Query. lang indents-str)
 ;;                                    doc "new x in { x!(\"Hello\") | x!(\"World\") | }"
 ;;                                    language-state-field (syntax/make-language-state parser)
 ;;                                    state (.create EditorState #js {:doc doc
@@ -474,8 +474,8 @@
 ;;                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
 ;;                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
 ;;                                    [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
-;;                                    parser (doto (new Parser) (.setLanguage lang))
-;;                                    indents-query (new Query lang indents-str)
+;;                                    parser (doto (Parser.) (.setLanguage lang))
+;;                                    indents-query (Query. lang indents-str)
 ;;                                    doc "new x in { x!(\"Hello\") | Nil }"
 ;;                                    language-state-field (syntax/make-language-state parser)
 ;;                                    state (.create EditorState #js {:doc doc
@@ -503,7 +503,7 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   parser (doto (new Parser) (.setLanguage lang))
+                                   parser (doto (Parser.) (.setLanguage lang))
                                    state-atom (atom {:languages {"test" {:parser parser
                                                                          :highlights-query query-str
                                                                          :extensions [".test"]}}})]
@@ -523,7 +523,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -537,7 +537,7 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
-                                   load-parser (fn [] (doto (new Parser) (.setLanguage lang)))
+                                   load-parser (fn [] (doto (Parser.) (.setLanguage lang)))
                                    state-atom (atom {:languages {"test" {:parser load-parser
                                                                          :highlights-query query-str
                                                                          :extensions [".test"]}}})]
@@ -557,7 +557,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -572,7 +572,7 @@
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
                                    load-parser (fn [] (.then (Language.load wasm-path)
                                                              (fn [lang]
-                                                               (doto (new Parser) (.setLanguage lang)))))
+                                                               (doto (Parser.) (.setLanguage lang)))))
                                    state-atom (atom {:languages {"test" {:parser load-parser
                                                                          :highlights-query query-str
                                                                          :extensions [".test"]}}})]
@@ -592,7 +592,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -623,7 +623,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -651,7 +651,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -680,7 +680,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -709,6 +709,6 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))

@@ -9,7 +9,7 @@
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
    [lib.db :as db]
    [lib.state :refer [normalize-languages]]
-   [lib.utils :as u]))
+   [lib.utils :as lib-utils]))
 
 ;; Compartment for dynamic reconfiguration of the syntax highlighting extension.
 (def syntax-compartment (Compartment.))
@@ -51,7 +51,7 @@
         (.catch (fn [e] (async/put! ch [:error (js/Error. "Promise rejected" #js {:cause e})]))))
     ch))
 
-(defn index-to-point
+(defn index->point
   "Converts a character offset to a Tree-Sitter point (row, column)."
   [^Text doc ^number index]
   (let [^js line (.lineAt doc index)]
@@ -81,12 +81,12 @@
    Handles @indent and @branch captures:
    - For @indent: base indent of the line at the capture start + indent-size.
    - For @branch: base indent of the line at the parent node start + 0 (aligns to the start of the construct, e.g., first process in par)."
-  [ctx pos indents-query indent-size language-state-field]
+  [ctx position indents-query indent-size language-state-field]
   (let [^js state (.-state ctx)
-        pos (or pos (some-> state .-selection .-main .-head) 0)]
-    (if-not (number? pos)
+        position (or position (some-> state .-selection .-main .-head) 0)]
+    (if-not (number? position)
       (do
-        (log/warn "calculate-indent called with invalid pos:" pos)
+        (log/warn "calculate-indent called with invalid pos:" position)
         0)
       (let [^js tree (.. state (field language-state-field) -tree)]
         (if (nil? tree)
@@ -98,24 +98,24 @@
               (do
                 (log/warn "No root node in parse tree")
                 0)
-              (let [bias-pos (max 0 (if (> pos 0) (dec pos) pos))
-                    ^js node (or (.descendantForIndex ^js root bias-pos bias-pos)
-                                 (when (> bias-pos 0)
-                                   (.descendantForIndex ^js root (dec bias-pos) (dec bias-pos)))
+              (let [bias-position (max 0 (if (pos? position) (dec position) position))
+                    ^js node (or (.descendantForIndex ^js root bias-position bias-position)
+                                 (when (pos? bias-position)
+                                   (.descendantForIndex ^js root (dec bias-position) (dec bias-position)))
                                  root)]
                 (if (or (nil? node) (#{"ERROR" "MISSING"} (.-type node)))
                   (do
-                    (log/warn "Invalid node for indentation at pos" pos "node-type" (.-type node))
+                    (log/warn "Invalid node for indentation at pos" position "node-type" (.-type node))
                     0)
                   (let [found (loop [^js cur node]
                                 (cond
                                   (nil? cur) nil
                                   :else
                                   (let [caps (.captures ^js indents-query cur)]
-                                    (cond
-                                      (some #(= "branch" (.-name %)) caps) {:type "branch" :node cur :captures caps}
-                                      (some #(= "indent" (.-name %)) caps) {:type "indent" :node cur :captures caps}
-                                      :else (recur (.-parent cur))))))]
+                                    (condp some caps
+                                      #(= "branch" (.-name %)) {:type "branch" :node cur :captures caps}
+                                      #(= "indent" (.-name %)) {:type "indent" :node cur :captures caps}
+                                      (recur (.-parent cur))))))]
                     (if (nil? found)
                       0
                       (let [{:keys [type node captures]} found
@@ -136,7 +136,7 @@
    Updates incrementally on document changes."
   [parser]
   (.define StateField #js {:create (fn [^js state]
-                                     (let [tree (.parse parser (.toString (.-doc state)))]
+                                     (let [tree (.parse parser (str (.-doc state)))]
                                        #js {:tree tree :parser parser}))
                            :update (fn [value ^js tr]
                                      (if-not (.-docChanged tr)
@@ -147,14 +147,14 @@
                                              new-doc (.-doc (.-state tr))
                                              changes (.-changes tr)]
                                          (if (.-isEmpty changes)
-                                           (let [new-tree (.parse (.-parser ^js value) (.toString new-doc))]
+                                           (let [new-tree (.parse (.-parser ^js value) (str new-doc))]
                                              #js {:tree new-tree :parser (.-parser ^js value)})
                                            (do
                                              (.iterChanges changes
                                                            (fn [fromA toA _fromB toB _]
-                                                             (let [start (index-to-point old-doc fromA)
-                                                                   old-end (index-to-point old-doc toA)
-                                                                   new-end (index-to-point new-doc toB)]
+                                                             (let [start (index->point old-doc fromA)
+                                                                   old-end (index->point old-doc toA)
+                                                                   new-end (index->point new-doc toB)]
                                                                (.edit ^js edited-tree #js {:startIndex fromA
                                                                                            :oldEndIndex toA
                                                                                            :newEndIndex toB
@@ -162,7 +162,7 @@
                                                                                            :oldEndPosition old-end
                                                                                            :newEndPosition new-end})))
                                                            false)
-                                             (let [new-tree (.parse (.-parser ^js value) (.toString new-doc) edited-tree)]
+                                             (let [new-tree (.parse (.-parser ^js value) (str new-doc) edited-tree)]
                                                #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
 
 (defn make-highlighter-plugin
@@ -171,7 +171,7 @@
   [language-state-field highlights-query]
   (let [style-js (clj->js style-map)
         build-decorations (fn [view-or-update]
-                            (let [view (if (.-view view-or-update) (.-view view-or-update) view-or-update)
+                            (let [view (or (.-view view-or-update) view-or-update)
                                   ^js state (.-state view)
                                   ^js lang-state (.field state language-state-field false)
                                   tree (when lang-state (.-tree lang-state))
@@ -179,8 +179,8 @@
                                   builder (RangeSetBuilder.)]
                               (if (nil? tree)
                                 (.finish builder)
-                                (let [start-point (index-to-point doc (.-from (.-viewport view)))
-                                      end-point (index-to-point doc (.-to (.-viewport view)))
+                                (let [start-point (index->point doc (.-from (.-viewport view)))
+                                      end-point (index->point doc (.-to (.-viewport view)))
                                       captures (.captures ^js highlights-query (.-rootNode ^js tree) start-point end-point)]
                                   (doseq [capture captures]
                                     (let [cls (aget style-js (.-name capture))
@@ -192,12 +192,11 @@
              (fn [^js view]
                #js {:decorations (build-decorations view)
                     :update (fn [^js update]
-                              (let [rebuilding? (or (.-docChanged update) (.-viewportChanged update)
-                                                    (not= (.field (.-startState update) language-state-field)
-                                                          (.field (.-state update) language-state-field)))]
-                                (when rebuilding?
-                                  (this-as ^js self
-                                           (set! (.-decorations self) (build-decorations update))))))})
+                              (when (or (.-docChanged update) (.-viewportChanged update)
+                                        (not= (.field (.-startState update) language-state-field)
+                                              (.field (.-state update) language-state-field)))  ;; rebuilding?
+                                (this-as ^js self
+                                         (set! (.-decorations self) (build-decorations update)))))})
              #js {:decorations (fn [^js value] (.-decorations value))})))
 
 (defn- make-indent-ext
@@ -208,10 +207,11 @@
 
 (defn fallback-extension
   "Returns a fallback extension when Tree-Sitter is unavailable (e.g., basic indentation)."
-  [lang-config]
-  (if (= (:fallback-highlighter lang-config) "regex")
-    #js [] ;; Placeholder for regex-based fallback if implemented.
-    #js []))
+  [_lang-config]
+  ;; (if (= (:fallback-highlighter lang-config) "regex")
+  ;;   #js [] ;; Placeholder for regex-based fallback if implemented.
+  ;;   #js [])
+  #js [])
 
 (defn init-syntax
   "Initializes syntax highlighting and indentation for the editor view asynchronously.
@@ -255,43 +255,41 @@
                     indent-unit-ext (.of indentUnit indent-unit-str)
                     cached (get @languages lang-key)
                     highlights-query-str (or (:highlights-query lang-config)
-                                             (let [p (:highlights-query-path lang-config)]
-                                               (when p
-                                                 (let [effective-p (cond (string? p) p
-                                                                         (fn? p) (p)
-                                                                         :else (throw (js/Error. "Invalid :highlights-query-path: must be string or function")))
-                                                       [resp-tag resp] (<! (promise->chan (js/fetch effective-p)))]
-                                                   (if (= resp-tag :ok)
-                                                     (let [[text-tag text] (<! (promise->chan (.text resp)))]
-                                                       (if (= text-tag :ok)
-                                                         (do
-                                                           (swap! state-atom assoc-in [:languages lang-key :highlights-query] text)
-                                                           text)
-                                                         (do
-                                                           (log/error "Failed to read query text for" lang-key ":" (.-message text))
-                                                           nil)))
-                                                     (do
-                                                       (log/error "Failed to fetch query for" lang-key ":" (.-message resp))
-                                                       nil))))))
+                                             (when-let [p (:highlights-query-path lang-config)]
+                                               (let [effective-p (cond (string? p) p
+                                                                       (fn? p) (p)
+                                                                       :else (throw (js/Error. "Invalid :highlights-query-path: must be string or function")))
+                                                     [resp-tag resp] (<! (promise->chan (js/fetch effective-p)))]
+                                                 (if (and (= resp-tag :ok) (.-ok resp))
+                                                   (let [[text-tag text] (<! (promise->chan (.text resp)))]
+                                                     (if (= text-tag :ok)
+                                                       (do
+                                                         (swap! state-atom assoc-in [:languages lang-key :highlights-query] text)
+                                                         text)
+                                                       (do
+                                                         (log/error "Failed to read query text for" lang-key ":" (.-message text))
+                                                         nil)))
+                                                   (do
+                                                     (log/error "Failed to fetch query for" lang-key ": HTTP" (.-status resp) (.-statusText resp))
+                                                     nil)))))
                     indents-query-str (or (:indents-query lang-config)
-                                          (let [p (:indents-query-path lang-config)]
-                                            (when p
-                                              (let [effective-p (cond (string? p) p
-                                                                      (fn? p) (p)
-                                                                      :else (throw (js/Error. "Invalid :indents-query-path: must be string or function")))
-                                                    [resp-tag resp] (<! (promise->chan (js/fetch effective-p)))]
-                                                (if (= resp-tag :ok)
-                                                  (let [[text-tag text] (<! (promise->chan (.text resp)))]
-                                                    (if (= text-tag :ok)
-                                                      (do
-                                                        (swap! state-atom assoc-in [:languages lang-key :indents-query] text)
-                                                        text)
-                                                      (do
-                                                        (log/error "Failed to read indents query text for" lang-key ":" (.-message text))
-                                                        nil)))
-                                                  (do
-                                                    (log/error "Failed to fetch indents query for" lang-key ":" (.-message resp))
-                                                    nil))))))
+                                          (when-let [p (:indents-query-path lang-config)]
+                                            (let [effective-p (cond (string? p) p
+                                                                    (fn? p) (p)
+                                                                    :else (throw (js/Error. "Invalid :indents-query-path: must be string or function")))
+                                                  [resp-tag resp] (<! (promise->chan (js/fetch effective-p)))]
+                                              (if (and (= resp-tag :ok) (.-ok resp))
+                                                (let [[text-tag text] (<! (promise->chan (.text resp)))]
+                                                  (if (= text-tag :ok)
+                                                    (do
+                                                      (swap! state-atom assoc-in [:languages lang-key :indents-query] text)
+                                                      text)
+                                                    (do
+                                                      (log/error "Failed to read indents query text for" lang-key ":" (.-message text))
+                                                      nil)))
+                                                (do
+                                                  (log/error "Failed to fetch indents query for" lang-key ": HTTP" (.-status resp) (.-statusText resp))
+                                                  nil)))))
                     parser (or (:parser cached)
                                (if parser-raw
                                  (let [maybe-promise (if (fn? parser-raw) (parser-raw) parser-raw)]
@@ -310,20 +308,20 @@
                                                           (do
                                                             (log/error "Failed to load language WASM for" lang-key ":" (.-message val))
                                                             nil)))
-                                         ^js parser (new Parser)]
+                                         ^js parser (Parser.)]
                                      (.setLanguage parser language)
                                      parser))))
                     lang (or (:lang cached)
                              (when parser (.-language parser)))
                     highlights-query (when (and lang highlights-query-str)
                                        (try
-                                         (new Query lang highlights-query-str)
+                                         (Query. lang highlights-query-str)
                                          (catch js/Error e
                                            (log/error "Failed to create highlight query for" lang-key ":" (.-message e))
                                            nil)))
                     indents-query (when (and lang indents-query-str)
                                     (try
-                                      (new Query lang indents-query-str)
+                                      (Query. lang indents-query-str)
                                       (catch js/Error e
                                         (log/error "Failed to create indents query for" lang-key ":" (.-message e))
                                         nil)))
@@ -349,7 +347,7 @@
                   (log/debug "No parser created for" lang-key))
                 (if (and lang parser highlights-query)
                   (do
-                    (when (not cached)
+                    (when-not cached
                       (swap! languages assoc lang-key {:lang lang :parser parser}))
                     (.dispatch view #js {:effects (.reconfigure syntax-compartment (clj->js extensions))})
                     [:ok :success])
@@ -359,5 +357,5 @@
                     [:ok :missing-components])))))))
       (catch js/Error error
         (let [error-with-cause (js/Error. "Syntax initialization failed" #js {:cause error})]
-          (u/log-error-with-cause error-with-cause)
+          (lib-utils/log-error-with-cause error-with-cause)
           [:error error-with-cause])))))

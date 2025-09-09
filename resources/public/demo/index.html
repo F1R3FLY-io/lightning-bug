@@ -42,24 +42,15 @@
     var global = globalThis;  // Or window.global = window; for older browsers
   </script>
   <script type="module">
-   (async () => {
+    import * as React from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { Editor } from '@f1r3fly-io/lightning-bug';
+    import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
+    import { treeSitterWasmUrl } from '@f1r3fly-io/lightning-bug/tree-sitter';
+    import { highlightsQueryUrl, indentsQueryUrl } from '@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries';
+    import { wasm } from '@f1r3fly-io/tree-sitter-rholang-js-with-comments';
+    (async () => {
       try {
-        console.log("Start imports");
-        const React = await import('react');
-        console.log("React imported");
-        const { createRoot } = await import('react-dom/client');
-        console.log("react-dom/client imported");
-        const { Editor } = await import('@f1r3fly-io/lightning-bug');
-        console.log("Editor imported");
-        const { RholangExtension } = await import('@f1r3fly-io/lightning-bug/extensions');
-        console.log("RholangExtension imported");
-        const { treeSitterWasmUrl } = await import('@f1r3fly-io/lightning-bug/tree-sitter');
-        console.log("treeSitterWasmUrl imported");
-        const { highlightsQueryUrl, indentsQueryUrl } = await import('@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries');
-        console.log("queries imported");
-        const { wasm } = await import ('@f1r3fly-io/tree-sitter-rholang-js-with-comments');
-        console.log("Rholang wasm imported");
-        console.log("Start render");
         const root = createRoot(document.getElementById('app'));
         const editorRef = React.createRef();
         window.editorRef = editorRef; // Expose for testing

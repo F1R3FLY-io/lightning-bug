@@ -146,8 +146,7 @@ Key code snippet from `demo/index.html`:
   root.render(React.createElement(Editor, {
     ref: editorRef,
     languages: {"rholang": RholangExtension},
-    extraExtensions: customExtensions,
-    preloadLanguages: ["rholang"]
+    extraExtensions: customExtensions
   }));
   const interval = setInterval(() => {
     if (editorRef.current && editorRef.current.isReady()) {
@@ -521,7 +520,9 @@ Subscribe to events via `getEvents()` for reactive updates. Each event is an obj
 
 The `Editor` can be customized using props for initial setup and a React ref for imperative control. This allows dynamic interactions without modifying the Lightning Bug source code. Below are step-by-step guides for vanilla JavaScript and TypeScript.
 
-### Customizing with Vanilla JavaScript
+### Customizing
+
+Below demonstrates how to override default resource locations with their embedded representations:
 
 1. Import dependencies. Use an import map or script tags to load React, React DOM, RxJS, and Lightning Bug modules.
 
@@ -529,20 +530,41 @@ The `Editor` can be customized using props for initial setup and a React ref for
    <script type="importmap">
      {
        "imports": {
-         "react": "https://esm.sh/react@19",
-         "react-dom": "https://esm.sh/react-dom@19",
-         "react-dom/client": "https://esm.sh/react-dom@19/client",
-         "rxjs": "https://esm.sh/rxjs@7",
          "@f1r3fly-io/lightning-bug": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/lib.core.js",
-         "@f1r3fly-io/lightning-bug/extensions": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/ext.lang.rholang.js"
+         "@f1r3fly-io/lightning-bug/extensions": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/ext.lang.rholang.js",
+         "@f1r3fly-io/lightning-bug/tree-sitter": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.tree-sitter.js",
+         "@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.rholang.js",
+         "@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.rholang-queries.js",
+         "@f1r3fly-io/tree-sitter-rholang-js-with-comments": "./node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/dist/tree-sitter-rholang-js.es.js",
+         "react": "https://esm.sh/react@19.0.0-rc-f994737d14-20240522",
+         "react-dom": "https://esm.sh/react-dom@19.0.0-rc-f994737d14-20240522",
+         "react-dom/client": "https://esm.sh/react-dom@19.0.0-rc-f994737d14-20240522/client",
+         "rxjs": "https://esm.sh/rxjs@7.8.2",
+         "@codemirror/autocomplete": "./node_modules/@codemirror/autocomplete/dist/index.js",
+         "@codemirror/commands": "./node_modules/@codemirror/commands/dist/index.js",
+         "@codemirror/language": "./node_modules/@codemirror/language/dist/index.js",
+         "@codemirror/lint": "./node_modules/@codemirror/lint/dist/index.js",
+         "@codemirror/search": "./node_modules/@codemirror/search/dist/index.js",
+         "@codemirror/state": "./node_modules/@codemirror/state/dist/index.js",
+         "@codemirror/view": "./node_modules/@codemirror/view/dist/index.js",
+         "@lezer/common": "./node_modules/@lezer/common/dist/index.js",
+         "@lezer/highlight": "./node_modules/@lezer/highlight/dist/index.js",
+         "style-mod": "./node_modules/style-mod/src/style-mod.js",
+         "w3c-keyname": "./node_modules/w3c-keyname/index.js",
+         "crelt": "./node_modules/crelt/index.js",
+         "@marijn/find-cluster-break": "./node_modules/@marijn/find-cluster-break/src/index.js",
+         "web-tree-sitter": "./node_modules/web-tree-sitter/tree-sitter.js"
        }
      }
    </script>
    <script type="module">
-     import React from 'react';
+     import * as React from 'react';
      import { createRoot } from 'react-dom/client';
      import { Editor } from '@f1r3fly-io/lightning-bug';
      import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
+     import { treeSitterWasmUrl } from '@f1r3fly-io/lightning-bug/tree-sitter';
+     import { highlightsQueryUrl, indentsQueryUrl } from '@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries';
+     import { wasm } from '@f1r3fly-io/tree-sitter-rholang-js-with-comments';
    </script>
    ```
 
@@ -553,114 +575,52 @@ The `Editor` can be customized using props for initial setup and a React ref for
    const editorRef = React.createRef();
    root.render(React.createElement(Editor, {
      ref: editorRef,
-     languages: { rholang: RholangExtension }
+     treeSitterWasm: treeSitterWasmUrl,
+     languages: {"rholang": {
+       ...RholangExtension,
+       grammarWasm: wasm,
+       highlightsQueryPath: highlightsQueryUrl,
+       indentsQueryPath: indentsQueryUrl,
+     }}
    }));
    ```
 
-3. Use ref methods. Access methods via the ref after the editor is ready.
+3. Await the ready state before proceeding.
 
    ```javascript
-   const interval = setInterval(() => {
-     if (editorRef.current && editorRef.current.isReady()) {
-       clearInterval(interval);
-       // Subscribe to events
-       const sub = editorRef.current.getEvents().subscribe(event => console.log(event.type, event.data));
-       // Open a document
-       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!("Hello") }', 'rholang');
-       // Get state
-       const state = editorRef.current.getState();
-       console.log('State:', state.workspace.documents, state.workspace.activeUri);
-       // Set text
-       editorRef.current.setText('updated');
-       // Get cursor
-       const cursor = editorRef.current.getCursor();
-       console.log('Cursor:', cursor.line, cursor.column);
-       // Set cursor
-       editorRef.current.setCursor({ line: 1, column: 5 });
-       // Get selection
-       const selection = editorRef.current.getSelection();
-       if (selection) console.log('Selection:', selection.text);
-       // Set selection
-       editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
-       // Close document
-       editorRef.current.closeDocument();
-       // Rename document (after reopening)
-       editorRef.current.openDocument('inmemory://old.rho', 'text', 'rholang');
-       editorRef.current.renameDocument('new.rho', 'inmemory://old.rho');
-       // Save document
-       editorRef.current.saveDocument();
-       // Highlight range
-       editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 5 });
-       // Clear highlight
-       editorRef.current.clearHighlight();
-       // Center on range
-       editorRef.current.centerOnRange({ line: 2, column: 1 }, { line: 2, column: 10 });
-       // Get text
-       const text = editorRef.current.getText();
-       console.log('Text:', text);
-       // Set text (replace all)
-       editorRef.current.setText('new text');
-       // Switch active
-       editorRef.current.activateDocument('inmemory://new.rho');
-       // Unsubscribe
-       sub.unsubscribe();
-     }
-   }, 100);
+   const waitForReady = (ref) => new Promise(resolve => {
+     const check = () => {
+       console.log("Checking ready...");
+       if (ref.current && ref.current.isReady()) {
+         console.log("Is ready");
+         resolve();
+       } else {
+         setTimeout(check, 100);
+       }
+     };
+     check();
+   });
+   await waitForReady(editorRef);
    ```
 
-### Customizing with TypeScript
+4. Use ref methods. Access methods via the ref after the editor is ready.
 
-To use Lightning Bug in a TypeScript project, import the types from the package.
-
-1. Setup and imports. Use TypeScript with module resolution.
-
-   ```typescript
-   import React, { createRef } from 'react';
-   import { createRoot } from 'react-dom/client';
-   import { Editor, EditorRef, LanguageConfig } from '@f1r3fly-io/lightning-bug';
-   import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
-   import { Observable } from 'rxjs';
-
-   const languages: Record<string, LanguageConfig> = {
-     rholang: RholangExtension
-   };
-
-   const root = createRoot(document.getElementById('app')!);
-   const editorRef = createRef<EditorRef>();
-   root.render(<Editor ref={editorRef} languages={languages} />);
-   ```
-
-2. Use ref methods. Type-safe access to methods.
-
-   ```typescript
-   const interval = setInterval(() => {
-     if (editorRef.current && editorRef.current.isReady()) {
-       clearInterval(interval);
-       const sub: Subscription = editorRef.current.getEvents().subscribe((event: { type: string; data: any }) => console.log(event.type, event.data));
-       editorRef.current.openDocument('inmemory://test.rho', 'new x in { x!("Hello") }', 'rholang');
-       const state = editorRef.current.getState();
-       console.log('State:', state.workspace.documents, state.workspace.activeUri);
-       editorRef.current.setText('updated');
-       const cursor = editorRef.current.getCursor();
-       console.log('Cursor:', cursor.line, cursor.column);
-       editorRef.current.setCursor({ line: 1, column: 5 });
-       const selection = editorRef.current.getSelection();
-       if (selection) console.log('Selection:', selection.text);
-       editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
-       editorRef.current.closeDocument();
-       editorRef.current.openDocument('inmemory://old.rho', 'text', 'rholang');
-       editorRef.current.renameDocument('new.rho', 'inmemory://old.rho');
-       editorRef.current.saveDocument();
-       editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 5 });
-       editorRef.current.clearHighlight();
-       editorRef.current.centerOnRange({ line: 2, column: 1 }, { line: 2, column: 10 });
-       const text = editorRef.current.getText();
-       console.log('Text:', text);
-       editorRef.current.setText('new text');
-       editorRef.current.activateDocument('inmemory://new.rho');
-       sub.unsubscribe();
-     }
-   }, 100);
+   ```javascript
+   console.log("Document opened and activated");
+   console.log('State:', editorRef.current.getState());
+   editorRef.current.setCursor({ line: 1, column: 3 });
+   console.log('Cursor:', editorRef.current.getCursor());
+   editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+   console.log('Selection:', editorRef.current.getSelection());
+   console.log('Text:', editorRef.current.getText());
+   console.log('File Path:', editorRef.current.getFilePath());
+   console.log('File URI:', editorRef.current.getFileUri());
+   console.log('Diagnostics:', editorRef.current.getDiagnostics());
+   console.log('Symbols:', editorRef.current.getSymbols());
+   console.log('Search Term:', editorRef.current.getSearchTerm());
+   const subscription = editorRef.current.getEvents().subscribe(event => {
+     console.log('Event:', event.type, event.data);
+   });
    ```
 
 ## Styling the Editor

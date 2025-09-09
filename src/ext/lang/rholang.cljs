@@ -10,11 +10,12 @@
    :file-icon "fas fa-file-code text-primary"
    :fallback-highlighter "none"})
 
-(defn kebab-to-camel [k]
+(defn kebab->camel [k]
   (let [parts (str/split (name k) #"-")]
     (str/join "" (cons (first parts) (map str/capitalize (rest parts))))))
 
+#_{:splint/disable [naming/lisp-case]}
 (def ^:export RholangExtension
   (clj->js (reduce-kv (fn [m k v]
-                        (assoc m (kebab-to-camel k) v))
+                        (assoc m (kebab->camel k) v))
                       {} language-config)))

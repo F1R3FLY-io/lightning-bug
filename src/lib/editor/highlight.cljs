@@ -2,7 +2,7 @@
   (:require
    ["@codemirror/state" :refer [Annotation RangeSetBuilder StateField]]
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
-   [lib.utils :as u]
+   [lib.utils :as lib-utils]
    [taoensso.timbre :as log]))
 
 ;; Annotation to mark transactions that update the highlight range in the StateField.
@@ -11,12 +11,12 @@
 ;; StateField to hold the current highlight range (or nil if no highlight).
 (def highlight-field
   (.define StateField
-    #js {:create (fn [_] nil)
-         :update (fn [value ^js tr]
-                   (let [ann-val (.annotation tr highlight-annotation)]
-                     (if (identical? ann-val js/undefined)
-                       value
-                       ann-val)))}))
+           #js {:create (fn [_] nil)
+                :update (fn [value ^js tr]
+                          (let [ann-val (.annotation tr highlight-annotation)]
+                            (if (identical? ann-val js/undefined)
+                              value
+                              ann-val)))}))
 
 (defn- build-decorations
   "Builds a RangeSet of decorations for highlighting a specific range in the editor.
@@ -28,8 +28,8 @@
         range (when range-js (js->clj range-js :keywordize-keys true))
         {:keys [from to]} range
         ^js doc (.-doc state)
-        from-offset (u/pos-to-offset doc from true)
-        to-offset (u/pos-to-offset doc to true)]
+        from-offset (lib-utils/pos->offset doc from true)
+        to-offset (lib-utils/pos->offset doc to true)]
     (if (nil? range)
       (.finish builder)
       (do
@@ -41,14 +41,13 @@
 (def highlight-plugin
   "ViewPlugin that renders highlights for a specified range, updating on document or viewport changes."
   (.define ViewPlugin
-    (fn [^js view]
-      #js {:decorations (build-decorations view)
-           :update (fn [^js update]
-                     (let [rebuilding? (or (.-docChanged update) (.-viewportChanged update)
-                                           (not= (.field (.-startState update) highlight-field)
-                                                 (.field (.-state update) highlight-field)))]
-                       (when rebuilding?
-                         (this-as ^js self
-                                  (set! (.-decorations self) (build-decorations (.-view update)))))))})
-    #js {:decorations (fn [^js value]
-                        (.-decorations value))}))
+           (fn [^js view]
+             #js {:decorations (build-decorations view)
+                  :update (fn [^js update]
+                            (when (or (.-docChanged update) (.-viewportChanged update)
+                                      (not= (.field (.-startState update) highlight-field)
+                                            (.field (.-state update) highlight-field)))  ;; rebuilding?
+                              (this-as ^js self
+                                       (set! (.-decorations self) (build-decorations (.-view update))))))})
+           #js {:decorations (fn [^js value]
+                               (.-decorations value))}))

@@ -2,7 +2,7 @@
   (:require
    ["@codemirror/lint" :refer [lintGutter linter]]
    ["@codemirror/state" :refer [StateField StateEffect]]
-   [lib.utils :as u]))
+   [lib.utils :as lib-utils]))
 
 ;; StateEffect to set new diagnostics in the field.
 (def set-diagnostic-effect (.define StateEffect))
@@ -37,11 +37,11 @@
   (linter (fn [view]
             (let [diags (.field ^js (.-state view) diagnostic-field false)]
               (clj->js (map (fn [^js diag]
-                              #js {:from (u/pos-to-offset (.-doc ^js (.-state view))
+                              #js {:from (lib-utils/pos->offset (.-doc ^js (.-state view))
                                                           {:line (inc (.-startLine diag))
                                                            :column (inc (.-startChar diag))}
                                                           true)
-                                   :to (u/pos-to-offset (.-doc ^js (.-state view))
+                                   :to (lib-utils/pos->offset (.-doc ^js (.-state view))
                                                         {:line (inc (.-endLine diag))
                                                          :column (inc (.-endChar diag))}
                                                         true)

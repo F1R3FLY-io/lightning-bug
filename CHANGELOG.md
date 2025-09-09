@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.5] - 2025-09-08
+
+### Added
+
+- Linter integration with `clj-kondo`, `eastwood`, `splint`, and `kibit`.
+
+### Changed
+
+- `resources/public/js/tree-sitter.wasm` and `resources/public/extensions/` are no longer copied to the demo app.
+- Replaces `const ... = await import('...');` statements in demo app with equivalent ESM imports `import ... from '...';`
+- Improves error handling in sources and tests.
+
 ## [0.6.4] - 2025-09-08
 
 ### Fixed

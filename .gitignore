@@ -6,7 +6,9 @@
 
 # Include specific file patterns
 !/CHANGELOG.md
+!/.clj-kondo/config.edn
 !/deps.edn
+!/.eastwood.edn
 !/externs/**/*.js
 !/.github/workflows/*.yaml
 !/.gitignore

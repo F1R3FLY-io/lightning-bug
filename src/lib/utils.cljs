@@ -38,13 +38,13 @@
         ext (get-extension db lang)]
     (str "untitled" (when (pos? n) (str "-" n)) ext)))
 
-(defn offset-to-pos [^js/Text doc ^number offset one-based?]
+(defn offset->pos [^js/Text doc ^number offset one-based?]
   (let [line (.lineAt doc offset)
         l (if one-based? (.-number line) (dec (.-number line)))
         c (if one-based? (inc (- offset (.-from line))) (- offset (.-from line)))]
     {:line l :column c}))
 
-(defn pos-to-offset [^js/Text doc pos one-based?]
+(defn pos->offset [^js/Text doc pos one-based?]
   (let [line-num (:line pos)
         l (if one-based? line-num (inc line-num))
         max-line (.-lines doc)]

@@ -5,8 +5,7 @@
    ["@codemirror/state" :refer [EditorState]]
    ["@codemirror/view" :refer [EditorView]]
    [lib.editor.highlight :as highlight]
-   [lib.utils :as u]
-   [taoensso.timbre :as log]))
+   [lib.utils :as lib-utils]))
 
 (defn range-set->iter [^js range-set from]
   (.iter range-set from))
@@ -29,7 +28,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -58,7 +57,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -83,7 +82,7 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
 
@@ -107,6 +106,6 @@
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
-                 (u/log-error-with-cause err)
+                 (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
