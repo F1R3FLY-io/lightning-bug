@@ -3,6 +3,8 @@ import { Extension } from '@codemirror/state';
 import { Observable } from 'rxjs';
 import { Parser } from 'web-tree-sitter';
 
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'report';
+
 /**
  * Configuration interface for a language extension.
  * Defines paths and settings for Tree-Sitter, LSP, and file handling.
@@ -228,6 +230,12 @@ export interface EditorRef {
   getSearchTerm(): string;
   /** Opens the search and replace panel */
   openSearchPanel(): void;
+  /** Returns the current log level as a string ('trace', 'debug', etc.). */
+  getLogLevel(): LogLevel;
+  /** Sets the log level (accepts 'trace', 'debug', etc.). */
+  setLogLevel(level: LogLevel): void;
+  /** Shuts down LSP connections for all languages or a specific one. */
+  shutdownLsp(lang?: string): void;
 }
 
 /**

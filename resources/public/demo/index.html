@@ -108,6 +108,9 @@
         console.log('Diagnostics:', editorRef.current.getDiagnostics());
         console.log('Symbols:', editorRef.current.getSymbols());
         console.log('Search Term:', editorRef.current.getSearchTerm());
+        console.log('Log Level:', editorRef.current.getLogLevel());
+        editorRef.current.setLogLevel('debug');
+        console.log('New Log Level:', editorRef.current.getLogLevel());
         const subscription = editorRef.current.getEvents().subscribe(event => {
           console.log('Event:', event.type, event.data);
         });

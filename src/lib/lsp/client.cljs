@@ -2,7 +2,7 @@
   (:require
    [clojure.spec.alpha :as s]
    [clojure.string :as str]
-   [lib.db :as db :refer [flatten-diags flatten-symbols]]
+   [lib.db :as db :refer [flatten-diags flatten-symbols close-all-opened-by-lang!]]
    [taoensso.timbre :as log]))
 
 (s/def ::jsonrpc string?)
@@ -106,9 +106,13 @@
               :response-type :document-symbol
               :uri uri} state-atom))
 
-(defn request-shutdown [lang state-atom]
-  (send lang {:method "shutdown"
-              :response-type :shutdown} state-atom))
+(defn request-shutdown
+  ([state-atom]
+   (doseq [[lang _] (:lsp @state-atom)]
+     (request-shutdown lang state-atom)))
+  ([lang state-atom]
+   (send lang {:method "shutdown"
+               :response-type :shutdown} state-atom)))
 
 (defn notify-exit [lang state-atom]
   (send lang {:method "exit"} state-atom))
@@ -132,6 +136,7 @@
 
 (defn handle-shutdown-response [lang _result state-atom _events]
   (log/info "Received shutdown response for lang" lang)
+  (close-all-opened-by-lang! lang)
   (notify-exit lang state-atom)
   (when-let [ws (get-in @state-atom [:lsp lang :ws])]
     (.close ws)))
@@ -295,14 +300,10 @@
                                              (.next events (clj->js {:type "connect" :data {:lang lang}}))
                                              (request-initialize lang state-atom)))
                 (set! (.-onmessage socket) #(handle-message lang (.-data %) state-atom events))
-                (set! (.-onclose socket) #(do (log/warn "LSP WS closed for lang" lang "; marking unreachable")
-                                              (swap! state-atom update-in [:lsp lang] assoc
-                                                     :connected? false
-                                                     :reachable? false
-                                                     :connecting? false)
+                (set! (.-onclose socket) #(do (log/trace "LSP WS closed for lang" lang)
                                               (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
                                                 (rej-fn (js/Error. (str "LSP WebSocket closed for language " lang))))
-                                              (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn)
+                                              (swap! state-atom update :lsp dissoc lang)
                                               (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
                 (set! (.-onerror socket) #(do (log/warn "LSP connection error for lang" lang "; marking unreachable:" %)
                                               (swap! state-atom update-in [:lsp lang] assoc

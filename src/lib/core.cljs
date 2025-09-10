@@ -72,7 +72,8 @@
         tree-sitter-wasm (:tree-sitter-wasm props "js/tree-sitter.wasm")]
     (when-not (every? string? (keys languages))
       (log/warn "Non-string keys found in languages map:" (keys languages)))
-    {:cursor {:line 1 :column 1}
+    {:mounted? true
+     :cursor {:line 1 :column 1}
      :selection nil
      :search-term ""
      :lsp {}
@@ -82,7 +83,7 @@
      :default-protocol default-protocol
      :debounce-timer nil}))
 
-(defn- emit-event
+(defn emit-event
   "Emits an event to the RxJS ReplaySubject with debouncing for frequent updates.
   Ensures consistent event emission for all state changes."
   [events type data]
@@ -195,7 +196,9 @@
             (when-not (and connected? initialized?)
               (let [p (get-connect-promise lang lsp-url state-atom events)
                     res (<! (promise->chan p))]
-                (when (and @state-atom (= res :unreachable))
+                (when (and @state-atom
+                           (:mounted? @state-atom)
+                           (= res :unreachable))
                   (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
                                                   :lang lang})
                   (log/error "Failed to connect and initialize LSP for lang" lang))))
@@ -216,6 +219,10 @@
                                                   :opened true}))
             [:ok nil]
             (catch :default e
+              (when (and @state-atom (:mounted? @state-atom))
+                (emit-event events "error" {:message (str "ensure-lsp-document-opened failed: " (.-message e))
+                                            :lang lang
+                                            :uri uri}))
               [:error (js/Error. (str "(ensure-lsp-document-opened " lang " " uri " state-atom events) failed") #js {:cause e})])))))))
 
 (defn- activate-document
@@ -251,7 +258,8 @@
                                               :activated true})))
       [:ok nil]
       (catch js/Error error
-        (emit-event events "error" {:message (.-message error) :uri uri})
+        (when (and @state-atom (:mounted? @state-atom))
+          (emit-event events "error" {:message (.-message error) :uri uri}))
         (log/error "Failed to activate document" uri ":" (.-message error))
         [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
 
@@ -471,7 +479,7 @@
                                                (log/error "Error in closeDocument:" (.-message error)))))
                           ;; Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.
                           ;; Example: (.renameDocument editor "new-name.rho")
-                          ;;          (.renameDocument editor "new-name.rho" "old-uri")
+                          ;; Example: (.renameDocument editor "new-name.rho" "old-uri")
                           :renameDocument (fn [new-file-or-uri-js old-file-or-uri-js]
                                             (go
                                               (try
@@ -513,12 +521,14 @@
                                                                                                 :new-uri new-uri}))))))
                                                 [:ok nil]
                                                 (catch js/Error error
-                                                  (emit-event events "error" {:message (.-message error)
-                                                                              :operation "renameDocument"
-                                                                              :old-uri old-file-or-uri-js
-                                                                              :new-uri new-file-or-uri-js})
+                                                  (when (and @state-atom (:mounted? @state-atom))
+                                                    (emit-event events "error" {:message (.-message error)
+                                                                                :operation "renameDocument"
+                                                                                :old-uri old-file-or-uri-js
+                                                                                :new-uri new-file-or-uri-js}))
                                                   (let [error-with-cause (js/Error. (str "(.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause error})]
-                                                    (lib-utils/log-error-with-cause error-with-cause))))))
+                                                    (lib-utils/log-error-with-cause error-with-cause)
+                                                    [:error error-with-cause])))))
                           ;; Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
                           ;; Example: (.saveDocument editor)
                           ;; Example: (.saveDocument editor "specific-uri")
@@ -794,7 +804,46 @@
                                                (catch js/Error error
                                                  (emit-event events "error" {:message (.-message error)
                                                                              :operation "openSearchPanel"})
-                                                 (log/error "Error in openSearchPanel:" (.-message error)))))})
+                                                 (log/error "Error in openSearchPanel:" (.-message error)))))
+                          ;; Returns the current log level from taoensso.timbre.
+                          ;; Example: (.getLogLevel editor)
+                          :getLogLevel (fn []
+                                         (try
+                                           (log/trace "Fetching log level")
+                                           (name (:min-level log/*config*))
+                                           (catch js/Error error
+                                             (emit-event events "error" {:message (.-message error)
+                                                                         :operation "getLogLevel"})
+                                             (log/error "Error in getLogLevel:" (.-message error))
+                                             "info")))
+                          ;; Sets the log level for taoensso.timbre (accepts 'trace', 'debug', 'info', 'warn', 'error', 'fatal', 'report').
+                          ;; Example: (.setLogLevel editor "debug")
+                          :setLogLevel (fn [level-js]
+                                         (try
+                                           (let [level-kw (keyword level-js)]
+                                             (log/trace "Setting log level to" level-kw)
+                                             (log/set-min-level! level-kw))
+                                           (catch js/Error error
+                                             (emit-event events "error" {:message (.-message error)
+                                                                         :operation "setLogLevel"
+                                                                         :level level-js})
+                                             (log/error "Error in setLogLevel:" (.-message error)))))
+                          ;; Shuts down LSP connections for all languages or a specific one.
+                          ;; Example: (.shutdownLsp editor)
+                          ;; Example: (.shutdownLsp "text" editor)
+                          :shutdownLsp (fn [lang]
+                                         (try
+                                           (if lang
+                                             (do
+                                               (log/info "Shutting down LSP connection for lang" lang)
+                                               (lsp/request-shutdown lang state-atom))
+                                             (do
+                                               (log/info "Shutting down all LSP connections")
+                                               (lsp/request-shutdown state-atom)))
+                                           (catch js/Error error
+                                             (emit-event events "error" {:message (.-message error)
+                                                                         :operation "shutdownAllLsp"})
+                                             (log/error "Error in shutdownAllLsp:" (.-message error)))))})
                    #js [@state-atom (.-current view-ref) ready])
                   (react/useEffect
                    (fn []
@@ -815,25 +864,6 @@
                    #js [(db/active-text)])
                   (react/useEffect
                    (fn []
-                     ;; Internal subscription to events for handling diagnostics updates by dispatching
-                     ;; a transaction to update the diagnostic StateField.
-                     (if-let [^js editor-view (.-current view-ref)]
-                       (let [sub (.subscribe events
-                                             (fn [evt-js]
-                                               (let [evt (js->clj evt-js :keywordize-keys true)
-                                                     type (:type evt)]
-                                                 (when (= type "diagnostics")
-                                                   (let [diags (:data evt)]
-                                                     (log/trace "Updating diagnostics in view for uri:" (:uri evt))
-                                                     (.dispatch editor-view #js {:effects #js [(.of set-diagnostic-effect (clj->js diags))]})
-                                                     (let [uri (:uri evt)]
-                                                       (when-let [lang (db/document-language-by-uri uri)]
-                                                         (lsp/request-document-symbol lang uri state-atom))))))))]
-                         (fn [] (.unsubscribe sub)))
-                       js/undefined))
-                   #js [(.-current view-ref)])
-                  (react/useEffect
-                   (fn []
                      (let [shutdown-all (fn []
                                           (doseq [[lang _] (:lsp @state-atom)]
                                             (lsp/request-shutdown lang state-atom)))]
@@ -850,7 +880,18 @@
                              editor-state (EditorState.create #js {:doc ""
                                                                    :extensions exts})
                              editor-view (EditorView. #js {:state editor-state
-                                                           :parent container})]
+                                                           :parent container})
+                             sub (.subscribe events
+                                             (fn [evt-js]
+                                               (let [evt (js->clj evt-js :keywordize-keys true)
+                                                     type (:type evt)]
+                                                 (when (= type "diagnostics")
+                                                   (let [diags (:data evt)]
+                                                     (log/trace "Updating diagnostics in view for uri:" (:uri evt))
+                                                     (.dispatch editor-view #js {:effects #js [(.of set-diagnostic-effect (clj->js diags))]})
+                                                     (let [uri (:uri evt)]
+                                                       (when-let [lang (db/document-language-by-uri uri)]
+                                                         (lsp/request-document-symbol lang uri state-atom))))))))]
                          (set! (.-current view-ref) editor-view)
                          (js/setTimeout
                           (fn []
@@ -861,16 +902,14 @@
                          (update-editor-state editor-state state-atom events)
                          (fn []
                            (log/info "Editor: Destroying EditorView")
-                           (doseq [[lang lsp-state] (:lsp @state-atom)]
-                             (lsp/request-shutdown lang state-atom)
-                             (when-let [rej-fn (:promise-rej-fn lsp-state)]
-                               (rej-fn (js/Error. (str "LSP connection cancelled: editor unmounted for language " lang))))
-                             (swap! state-atom update-in [:lsp lang] dissoc :promise-res-fn :promise-rej-fn :connect-promise))
+                           (swap! state-atom assoc :mounted? false)
+                           (lsp/request-shutdown state-atom)
                            (when-let [editor-view (.-current view-ref)]
                              (.destroy editor-view))
                            (set! (.-current view-ref) nil)
-                           (reset! state-atom nil)
-                           (emit-event events "destroy" {})))
+                           (.unsubscribe sub)
+                           (emit-event events "destroy" {})
+                           (set-ready false)))
                        (catch js/Error error
                          (emit-event events "error" {:message (.-message error)
                                                      :operation "initEditorView"})

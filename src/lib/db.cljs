@@ -210,7 +210,7 @@
    (d/q '[:find [?e ?version]
           :in $ ?uri
           :where [?e :document/uri ?uri]
-          [?e :document/version ?version]]
+                 [?e :document/version ?version]]
         @conn uri)
    [nil nil]))
 
@@ -223,17 +223,6 @@
          :in $ ?uri
          :where [?e :document/uri ?uri]
                 [?e :document/opened ?opened]]
-       @conn uri))
-
-(defn document-dirty-by-uri?
-  [uri]
-  (when DEBUG
-    (when-not (s/valid? :document/uri uri)
-      (log/warn (s/explain-str :document/uri uri))))
-  (d/q '[:find ?dirty .
-         :in $ ?uri
-         :where [?e :document/uri ?uri]
-                [?e :document/dirty ?dirty]]
        @conn uri))
 
 (defn documents
@@ -422,8 +411,8 @@
    (d/q '[:find [?lang ?opened]
           :in $ ?uri
           :where [?e :document/uri ?uri]
-                 [?e :document/language ?lang]
-                 [?e :document/opened ?opened]]
+          [?e :document/language ?lang]
+          [?e :document/opened ?opened]]
         @conn uri)
    [nil nil]))
 
@@ -520,18 +509,6 @@
       (d/transact! conn tx))
     (log/error "No entity exists with id" id)))
 
-(defn update-document-language-by-id!
-  [id language]
-  (when DEBUG
-    (when-not (s/valid? ::id id)
-      (log/warn (s/explain-str ::id id)))
-    (when-not (s/valid? ::language language)
-      (log/warn (s/explain-str ::language language))))
-  (if (d/entity @conn id)
-    (let [tx [[:db/add id :document/language language]]]
-      (d/transact! conn tx))
-    (log/error "No entity exists with id" id)))
-
 (defn update-document-text-language-by-id!
   [id text lang]
   (when DEBUG
@@ -557,6 +534,32 @@
   (when-let [id (document-id-by-uri uri)]
     (let [tx [[:db/add id :document/opened true]]]
       (d/transact! conn tx))))
+
+(defn document-closed-by-uri!
+  [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (when-let [id (document-id-by-uri uri)]
+    (let [tx [[:db/add id :document/opened false]]]
+      (d/transact! conn tx))))
+
+(defn opened-uris-by-lang
+  [lang]
+  (when DEBUG
+    (when-not (s/valid? :document/language lang)
+      (log/warn (s/explain-str :document/language lang))))
+  (d/q '[:find [?uri ...]
+         :in $ ?lang
+         :where [?e :document/language ?lang]
+                [?e :document/opened true]
+                [?e :document/uri ?uri]]
+       @conn lang))
+
+(defn close-all-opened-by-lang!
+  [lang]
+  (doseq [uri (opened-uris-by-lang lang)]
+    (document-closed-by-uri! uri)))
 
 (defn update-active-uri!
   [uri]

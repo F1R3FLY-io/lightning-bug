@@ -139,6 +139,12 @@
 (defn editor->search-term [^js editor]
   (.getSearchTerm editor))
 
+(defn editor->log-level [^js editor]
+  (.getLogLevel editor))
+
+(defn editor->set-log-level! [^js editor level]
+  (.setLogLevel editor level))
+
 (defn editor-query
   ([^js editor query]
    (.query editor query))
@@ -1111,32 +1117,31 @@
 
 (deftest default-protocol-in-open-document
   (async done
-         (go (let [res (<! (go
-                             (try
-                               (let [^js/HTMLDivElement container (js/document.createElement "div")
-                                     ^js/React.RefObject ref (react/createRef)]
-                                 (js/document.body.appendChild container)
-                                 (let [root (mount-component container {:defaultProtocol "file://"
-                                                                        :languages {"text" {:extensions [".txt"]}}
-                                                                        :ref ref})]
-                                   (let [ready? (<! (wait-for-ready ref 1000))]
-                                     (is ready? "Editor ready within timeout"))
-                                   (let [editor (ref->editor ref)]
-                                     (wrap-flush #(editor->open-document! editor "test.txt" "content" "text"))
-                                     (<! (timeout 100))
-                                     (<! (wait-for-uri "file://test.txt" 1000))
-                                     (is (= "file://test.txt" (editor->file-uri editor)) "Uses defaultProtocol for file path"))
-                                   (.unmount root)
-                                   (<! (timeout 100))) ;; Delay to allow React cleanup.
-                                 (cleanup-container container)
-                                 [:ok nil])
-                               (catch :default e
-                                 [:error (js/Error. "default-protocol-in-open-document failed" #js {:cause e})]))))]
-               (if (= :error (first res))
-                 (do
-                   (is false (str "Test failed with error: " (pr-str (second res))))
-                   (done))
-                 (done))))))
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
+                               (js/document.body.appendChild container)
+                               (let [root (mount-component container {:defaultProtocol "file://"
+                                                                      :languages {"text" {:extensions [".txt"]}}
+                                                                      :ref ref})]
+                                 (let [ready? (<! (wait-for-ready ref 1000))]
+                                   (is ready? "Editor ready within timeout"))
+                                 (let [editor (ref->editor ref)]
+                                   (wrap-flush #(editor->open-document! editor "test.txt" "content" "text"))
+                                   (<! (timeout 100))
+                                   (<! (wait-for-uri "file://test.txt" 1000))
+                                   (is (= "file://test.txt" (editor->file-uri editor)) "Uses defaultProtocol for file path"))
+                                 (.unmount root)
+                                 (<! (timeout 100))) ;; Delay to allow React cleanup.
+                               (cleanup-container container)
+                               [:ok nil])
+                             (catch :default e
+                               [:error (js/Error. "default-protocol-in-open-document failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (is false (str "Test failed with error: " (pr-str (second res)))))
+             (done)))))
 
 (deftest open-document-without-activating
   (async done
@@ -1220,27 +1225,18 @@
                                    ^js/React.RefObject ref (react/createRef)
                                    events (atom [])]
                                (js/document.body.appendChild container)
-                               ;; Mock LSP to isolate (no-op handler since no connection expected)
-                               (let [mock-res (<! (with-mock-lsp
-                                                    (fn [_mock]  ;; No-op: ignore any sends
-                                                      (go
-                                                        (try
-                                                          (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
-                                                                                                 :ref ref})]
-                                                            (let [ready? (<! (wait-for-ready ref 1000))]
-                                                              (is ready? "Editor ready within timeout"))
-                                                            (let [editor (ref->editor ref)]
-                                                              (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true))))
-                                                            (.unmount root)
-                                                            (<! (timeout 100))
-                                                            (is (some #(= "destroy" (:type %)) @events) "Emitted destroy on unmount")
-                                                            (cleanup-container container)
-                                                            [:ok nil])
-                                                          (catch :default e
-                                                            [:error (js/Error. "Mocked destroy-event-on-unmount failed" #js {:cause e})]))))))]
-                                 (if (= :error (first mock-res))
-                                   (throw (second mock-res))
-                                   [:ok nil])))
+                               ;; No LSP mock needed here—test doesn't trigger connections
+                               (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
+                                                                      :ref ref})]
+                                 (let [ready? (<! (wait-for-ready ref 1000))]
+                                   (is ready? "Editor ready within timeout"))
+                                 (let [editor (ref->editor ref)]
+                                   (.subscribe (editor->events editor) #(swap! events conj (js->clj % :keywordize-keys true))))
+                                 (.unmount root)
+                                 (<! (timeout 100))
+                                 (is (some #(= "destroy" (:type %)) @events) "Emitted destroy on unmount")
+                                 (cleanup-container container)
+                                 [:ok nil]))
                              (catch :default e
                                [:error (js/Error. "destroy-event-on-unmount failed" #js {:cause e})]))))]
              (when (= :error (first res))
@@ -1898,6 +1894,40 @@
                                (<! (timeout 100)))
                              (catch :default e
                                [:error (js/Error. "shutdown-on-window-close failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest log-level-methods
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
+                               (js/document.body.appendChild container)
+                               (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
+                                                                      :ref ref})]
+                                 (let [ready-res (<! (wait-for-ready ref 1000))]
+                                   (if (= :error (first ready-res))
+                                     (throw (second ready-res))
+                                     (is (second ready-res) "Editor ready within timeout")))
+                                 (let [editor (ref->editor ref)]
+                                   (is (string? (editor->log-level editor)) "getLogLevel returns string")
+                                   (let [initial (editor->log-level editor)]
+                                     (editor->set-log-level! editor "debug")
+                                     (is (= "debug" (editor->log-level editor)) "setLogLevel changes to debug")
+                                     (editor->set-log-level! editor initial)
+                                     (is (= initial (editor->log-level editor)) "setLogLevel reverts to initial")))
+                                 (.unmount root)
+                                 (<! (timeout 100))) ;; Delay to allow React cleanup.
+                               (cleanup-container container)
+                               [:ok nil])
+                             (catch :default e
+                               [:error (js/Error. "log-level-methods failed" #js {:cause e})]))))]
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]

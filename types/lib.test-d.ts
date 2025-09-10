@@ -3,7 +3,7 @@ import * as React from 'react';
 import { Extension } from '@codemirror/state';
 import { Observable } from 'rxjs';
 import { Parser } from 'web-tree-sitter';
-import type { EditorProps, EditorRef, EditorState, LanguageConfig, EditorEvent, Diagnostic, Symbol } from './lib.d.ts';
+import type { EditorProps, EditorRef, EditorState, LanguageConfig, EditorEvent, Diagnostic, Symbol, LogLevel } from './lib.d.ts';
 
 // Check props interface
 expectAssignable<EditorProps>({
@@ -57,6 +57,8 @@ if (ref.current) {
   expectType<Symbol[]>(ref.current.getSymbols('uri'));
   expectType<string>(ref.current.getSearchTerm());
   expectType<void>(ref.current.openSearchPanel());
+  expectType<LogLevel>(ref.current.getLogLevel());
+  expectType<void>(ref.current.setLogLevel('debug'));
 }
 
 // Check state shape
@@ -132,3 +134,22 @@ expectAssignable<LanguageConfig>({
   parser: async () => new Parser(),
   extensions: []
 });
+
+if (ref.current) {
+  // Negative test: invalid log level
+  // @ts-expect-error
+  ref.current.setLogLevel('invalid');
+  void ref.current; // suppress unused
+
+  // Valid log levels
+  ref.current.setLogLevel('trace');
+  ref.current.setLogLevel('debug');
+  ref.current.setLogLevel('info');
+  ref.current.setLogLevel('warn');
+  ref.current.setLogLevel('error');
+  ref.current.setLogLevel('fatal');
+  ref.current.setLogLevel('report');
+
+  ref.current.shutdownLsp();
+  ref.current.shutdownLsp("text");
+}

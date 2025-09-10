@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2025-09-10
+
+### Added
+
+- New API methods to `setLogLevel` and `getLogLevel` for the Editor.
+- New API method to `shutdownLsp` connections (useful for shutdown hooks).
+
+### Fixed
+
+- Incorrect state reset which fixed some tests but broke the Embers frontend.
+- All known Vite HMR (Hot Module Reload) issues, particularly those related to LSP communication.
+
 ## [0.6.6] - 2025-09-09
 
 ### Changed
