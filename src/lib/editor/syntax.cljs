@@ -105,7 +105,7 @@
                                  root)]
                 (if (or (nil? node) (#{"ERROR" "MISSING"} (.-type node)))
                   (do
-                    (log/warn "Invalid node for indentation at pos" position "node-type" (.-type node))
+                    (log/warn (str "Invalid node for indentation at pos=" position ", node-type=" (.-type node)))
                     0)
                   (let [found (loop [^js cur node]
                                 (cond
@@ -267,10 +267,10 @@
                                                          (swap! state-atom assoc-in [:languages lang-key :highlights-query] text)
                                                          text)
                                                        (do
-                                                         (log/error "Failed to read query text for" lang-key ":" (.-message text))
+                                                         (log/error (str "Failed to read query text for " lang-key ": " (.-message text)))
                                                          nil)))
                                                    (do
-                                                     (log/error "Failed to fetch query for" lang-key ": HTTP" (.-status resp) (.-statusText resp))
+                                                     (log/error (str "Failed to fetch query for " lang-key ": HTTP " (.-status resp) " - " (.-statusText resp)))
                                                      nil)))))
                     indents-query-str (or (:indents-query lang-config)
                                           (when-let [p (:indents-query-path lang-config)]
@@ -285,10 +285,10 @@
                                                       (swap! state-atom assoc-in [:languages lang-key :indents-query] text)
                                                       text)
                                                     (do
-                                                      (log/error "Failed to read indents query text for" lang-key ":" (.-message text))
+                                                      (log/error (str "Failed to read indents query text for " lang-key ": " (.-message text)))
                                                       nil)))
                                                 (do
-                                                  (log/error "Failed to fetch indents query for" lang-key ": HTTP" (.-status resp) (.-statusText resp))
+                                                  (log/error (str "Failed to fetch indents query for " lang-key ": HTTP " (.-status resp) " - " (.-statusText resp)))
                                                   nil)))))
                     parser (or (:parser cached)
                                (if parser-raw
@@ -298,7 +298,7 @@
                                        (if (= tag :ok)
                                          val
                                          (do
-                                           (log/error "Failed to load parser from function for" lang-key ":" (.-message val))
+                                           (log/error (str "Failed to load parser from function for " lang-key ": " (.-message val)))
                                            nil)))
                                      maybe-promise))
                                  (when lang-wasm-path
@@ -306,7 +306,7 @@
                                                         (if (= tag :ok)
                                                           val
                                                           (do
-                                                            (log/error "Failed to load language WASM for" lang-key ":" (.-message val))
+                                                            (log/error (str "Failed to load language WASM for " lang-key ": " (.-message val)))
                                                             nil)))
                                          ^js parser (Parser.)]
                                      (.setLanguage parser language)
@@ -317,13 +317,13 @@
                                        (try
                                          (Query. lang highlights-query-str)
                                          (catch js/Error e
-                                           (log/error "Failed to create highlight query for" lang-key ":" (.-message e))
+                                           (log/error (str "Failed to create highlight query for " lang-key ": " (.-message e)))
                                            nil)))
                     indents-query (when (and lang indents-query-str)
                                     (try
                                       (Query. lang indents-query-str)
                                       (catch js/Error e
-                                        (log/error "Failed to create indents query for" lang-key ":" (.-message e))
+                                        (log/error (str "Failed to create indents query for " lang-key ": " (.-message e)))
                                         nil)))
                     language-state-field (when parser (make-language-state parser))
                     highlight-plugin (when highlights-query (make-highlighter-plugin language-state-field highlights-query))
@@ -340,7 +340,7 @@
                 (when-not highlights-query-str
                   (log/debug "No valid highlight query string for" lang-key))
                 (when-not indents-query-str
-                  (log/debug "No indents query for" lang-key "; default indentation behavior will apply"))
+                  (log/debug (str "No indents query for " lang-key "; default indentation behavior will apply")))
                 (when-not lang
                   (log/debug "No language loaded for" lang-key))
                 (when-not parser
@@ -352,7 +352,11 @@
                     (.dispatch view #js {:effects (.reconfigure syntax-compartment (clj->js extensions))})
                     [:ok :success])
                   (do
-                    (log/debug "Missing required components for" lang-key ": lang=" (boolean lang) ", parser=" (boolean parser) ", highlights-query=" (boolean highlights-query) "; falling back to basic mode")
+                    (log/debug (str "Missing required components for " lang-key
+                                    ": lang=" (boolean lang)
+                                    ", parser=" (boolean parser)
+                                    ", highlights-query=" (boolean highlights-query)
+                                    "; falling back to basic mode"))
                     (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension lang-config))})
                     [:ok :missing-components])))))))
       (catch js/Error error

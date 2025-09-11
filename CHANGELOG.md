@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2025-09-11
+
+### Changed
+
+- Improves LSP shutdown request logic.
+- Improves log messages (superficial change for debuggability)
+
 ## [0.7.0] - 2025-09-10
 
 ### Added

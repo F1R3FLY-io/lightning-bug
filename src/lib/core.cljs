@@ -51,7 +51,7 @@
   [languages ext]
   (let [matches (filter (fn [[_ conf]] (some #(= ext %) (:extensions conf))) languages)]
     (when (> (count matches) 1)
-      (log/warn "Multiple languages match extension" ext ":" (keys matches) "- using first"))
+      (log/warn (str "Multiple languages match extension " ext ": " (keys matches) " - using first")))
     (or (ffirst matches) "text")))
 
 (defn- get-ext-from-path
@@ -142,7 +142,7 @@
                              (when (.-docChanged u)
                                (when-let [uri (db/active-uri)]
                                  (let [new-text (str (.-doc (.-state u)))]
-                                   (log/trace "Document changed for uri:" uri "new length:" (count new-text))
+                                   (log/trace (str "Document changed for uri: " uri ", new length:" (count new-text)))
                                    (db/update-document-text-by-uri! uri new-text)
                                    (emit-event events "content-change" {:content new-text :uri uri})
                                    (when on-content-change
@@ -176,7 +176,7 @@
       (let [p (js/Promise. (fn [res-fn rej-fn]
                              (swap! state-atom assoc-in [:lsp lang :promise-res-fn] res-fn)
                              (swap! state-atom assoc-in [:lsp lang :promise-rej-fn] rej-fn)
-                             (log/info "Initiating LSP connection for lang:" lang "url:" lsp-url)
+                             (log/info (str "Initiating LSP connection for lang: " lang ", url: " lsp-url))
                              (lsp/connect lang {:url lsp-url} state-atom events)))]
         (swap! state-atom assoc-in [:lsp lang :connect-promise] p)
         p)))
@@ -190,7 +190,7 @@
       (let [lsp-state (get-in @state-atom [:lsp lang])
             connected? (:connected? lsp-state)
             initialized? (:initialized? lsp-state)]
-        (log/debug "Ensuring LSP document opened for lang:" lang "uri:" uri "connected?" connected? "initialized?" initialized?)
+        (log/debug (str "Ensuring LSP document opened for lang: " lang ", uri: " uri ", connected? " connected? ", initialized? " initialized?))
         (go
           (try
             (when-not (and connected? initialized?)
@@ -201,7 +201,7 @@
                            (= res :unreachable))
                   (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
                                                   :lang lang})
-                  (log/error "Failed to connect and initialize LSP for lang" lang))))
+                  (log/error "Failed to connect and initialize LSP for lang:" lang))))
             (when (and (get-in @state-atom [:lsp lang :connected?])
                        (get-in @state-atom [:lsp lang :initialized?])
                        (not (db/document-opened-by-uri? uri)))
@@ -260,7 +260,7 @@
       (catch js/Error error
         (when (and @state-atom (:mounted? @state-atom))
           (emit-event events "error" {:message (.-message error) :uri uri}))
-        (log/error "Failed to activate document" uri ":" (.-message error))
+        (log/error (str "Failed to activate document " uri ": " (.-message error)))
         [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
 
 (defn- normalize-uri [file-or-uri-js default-protocol]
@@ -326,7 +326,7 @@
                           :setCursor (fn [pos-js]
                                        (try
                                          (let [pos (js->clj pos-js :keywordize-keys true)]
-                                           (log/trace "Setting cursor to" pos)
+                                           (log/trace "Setting cursor to:" pos)
                                            (if-let [^js editor-view (.-current view-ref)]
                                              (let [^js editor-state (.-state editor-view)
                                                    ^js doc (.-doc editor-state)
@@ -367,7 +367,7 @@
                                           (try
                                             (let [from (js->clj from-js :keywordize-keys true)
                                                   to (js->clj to-js :keywordize-keys true)]
-                                              (log/trace "Setting selection from" from "to" to)
+                                              (log/trace (str "Setting selection from: " from ", to: " to))
                                               (if-let [^js editor-view (.-current view-ref)]
                                                 (let [^js editor-state (.-state editor-view)
                                                       ^js doc (.-doc editor-state)
@@ -386,7 +386,7 @@
                                                                                   :operation "setSelection"
                                                                                   :from from
                                                                                   :to to})
-                                                      (log/warn "Cannot set selection: invalid offsets" from to))))
+                                                      (log/warn (str "Cannot set selection: invalid offsets: from=" from ", to=" to)))))
                                                 (do
                                                   (emit-event events "error" {:message "View not ready"
                                                                               :operation "setSelection"})
@@ -490,7 +490,7 @@
                                                 (let [default-protocol (:default-protocol @state-atom)
                                                       new-uri (normalize-uri new-file-or-uri-js default-protocol)
                                                       old-uri (normalize-uri old-file-or-uri-js default-protocol)]
-                                                  (log/info "Renaming document from" old-uri "to" new-uri)
+                                                  (log/info (str "Renaming document from: " old-uri ", to: " new-uri))
                                                   (when (not= new-uri old-uri)
                                                     (let [new-ext (get-ext-from-path new-uri)
                                                           new-lang (when new-ext (get-lang-from-ext (:languages @state-atom) new-ext))
@@ -561,7 +561,7 @@
                                             (try
                                               (let [from (js->clj from-js :keywordize-keys true)
                                                     to (js->clj to-js :keywordize-keys true)]
-                                                (log/trace "Highlighting range from" from "to" to)
+                                                (log/trace (str "Highlighting range from: " from ", to: " to))
                                                 (if-let [^js editor-view (.-current view-ref)]
                                                   (let [^js editor-state (.-state editor-view)
                                                         ^js doc (.-doc editor-state)
@@ -609,7 +609,7 @@
                                            (try
                                              (let [from (js->clj from-js :keywordize-keys true)
                                                    to (js->clj to-js :keywordize-keys true)]
-                                               (log/trace "Centering on range from" from "to" to)
+                                               (log/trace (str "Centering on range from: " from ", to: " to))
                                                (if-let [^js editor-view (.-current view-ref)]
                                                  (let [^js doc (.-doc ^js (.-state editor-view))
                                                        from-offset (lib-utils/pos->offset doc from true)
@@ -625,7 +625,7 @@
                                                                                    :operation "centerOnRange"
                                                                                    :from from
                                                                                    :to to})
-                                                       (log/warn "Cannot center on range: invalid offsets"))))
+                                                       (log/warn (str "Cannot center on range: invalid offsets: from=" from ", to=" to)))))
                                                  (do
                                                    (emit-event events "error" {:message "View not ready"
                                                                                :operation "centerOnRange"})
@@ -660,7 +660,7 @@
                                              [lang opened?] (db/document-language-opened-by-uri uri)
                                              current-text (db/document-text-by-uri uri)
                                              changed? (not= current-text text)]
-                                         (log/info "Setting text for uri:" uri "length:" (count text))
+                                         (log/info (str "Setting text for uri: " uri ", length: " (count text)))
                                          (when uri
                                            (when changed?
                                              (db/update-document-text-by-id! id text)
@@ -729,7 +729,7 @@
                                                       (emit-event events "error" {:message "Document not found"
                                                                                   :operation "activateDocument"
                                                                                   :uri uri})
-                                                      (log/warn "Document not found for activation" uri))))
+                                                      (log/warn "Document not found for activation:" uri))))
                                                 (catch js/Error error
                                                   (emit-event events "error" {:message (.-message error)
                                                                               :operation "activateDocument"
@@ -742,7 +742,7 @@
                                    (try
                                      (let [query (js->clj query-js :keywordize-keys true)
                                            params (if params-js (js->clj params-js) [])]
-                                       (log/trace "Executing query:" query "with params:" params)
+                                       (log/trace (str "Executing query=" query " with params=" params))
                                        (clj->js (apply d/q query @conn params)))
                                      (catch js/Error error
                                        (emit-event events "error" {:message (.-message error)
@@ -821,7 +821,7 @@
                           :setLogLevel (fn [level-js]
                                          (try
                                            (let [level-kw (keyword level-js)]
-                                             (log/trace "Setting log level to" level-kw)
+                                             (log/trace "Setting log level to:" level-kw)
                                              (log/set-min-level! level-kw))
                                            (catch js/Error error
                                              (emit-event events "error" {:message (.-message error)
@@ -835,7 +835,7 @@
                                          (try
                                            (if lang
                                              (do
-                                               (log/info "Shutting down LSP connection for lang" lang)
+                                               (log/info "Shutting down LSP connection for lang:" lang)
                                                (lsp/request-shutdown lang state-atom))
                                              (do
                                                (log/info "Shutting down all LSP connections")

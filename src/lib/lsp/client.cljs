@@ -32,10 +32,10 @@
         warned? (:warned-unreachable? lsp-state false)]
     (if connected?
       (when-let [ws (:ws lsp-state)]
-        (log/trace "Sending raw message over WS for lang:" lang)
+        (log/trace (str "Sending raw LSP message over WebSocket for lang=" lang ", length=" (.-length full-msg) ":\n" full-msg))
         (.send ws full-msg))
       (when-not warned?
-        (log/warn "LSP server unreachable for lang" lang "; not sending message")
+        (log/warn (str "LSP server unreachable for lang=" lang "; not sending message:\n" full-msg))
         (swap! state-atom assoc-in [:lsp lang :warned-unreachable?] true)))))
 
 (defn send
@@ -50,16 +50,14 @@
         msg (cond-> (assoc msg :jsonrpc "2.0") id (assoc :id id))
         json-str (js/JSON.stringify (clj->js msg))
         header (str "Content-Length: " (.-length json-str) "\r\n\r\n")
-        full (str header json-str)]
-    (log/info "Sending LSP message for lang" lang ":" (:method msg) "id" id)
-    (log/trace "Full LSP send message:\n" full)
+        full-msg (str header json-str)]
     (when id
       (swap! state-atom assoc-in [:lsp lang :pending id]
              (if (:uri msg)
                {:type (:response-type msg)
                 :uri (:uri msg)}
                (:response-type msg))))
-    (send-raw lang full state-atom)))
+    (send-raw lang full-msg state-atom)))
 
 ;; Sending functions (client -> server)
 
@@ -108,8 +106,9 @@
 
 (defn request-shutdown
   ([state-atom]
-   (doseq [[lang _] (:lsp @state-atom)]
-     (request-shutdown lang state-atom)))
+   (doseq [[lang lsp-state] (:lsp @state-atom)]
+     (when (and (:ws lsp-state) (:connected? lsp-state) (:reachable? lsp-state))
+       (request-shutdown lang state-atom))))
   ([lang state-atom]
    (send lang {:method "shutdown"
                :response-type :shutdown} state-atom)))
@@ -182,9 +181,9 @@
   (try
     (let [text (get-text msg)
           header-end (.indexOf text "\r\n\r\n")]
-      (log/trace "Received raw LSP message for lang:" lang "length:" (.-length text))
+      (log/trace (str "Received raw LSP message for lang=" lang ", length=" (.-length text) ":\n" text))
       (if (= -1 header-end)
-        (log/error "No header found in LSP message for lang" lang ":" text)
+        (log/error (str "No header found in LSP message for lang=" lang ":" text))
         (let [header (.substring text 0 header-end)
               match (.match header #"Content-Length: (\d+)")
               length (when match (js/parseInt (aget match 1)))
@@ -196,8 +195,6 @@
               (let [parsed-js (js/JSON.parse body)
                     parsed (js->clj parsed-js :keywordize-keys true)
                     parsed-with-lang (assoc parsed :lang lang)]
-                (log/info "Received LSP message for lang" lang ":" (:method parsed) "id" (:id parsed))
-                (log/trace "Full LSP received message:\n" parsed)
                 (.next events (clj->js {:type "lsp-message" :data parsed-with-lang}))
                 (let [type (cond
                              (and (:method parsed) (:id parsed)) :request
@@ -205,7 +202,7 @@
                              (:id parsed) :response
                              :else :invalid)]
                   (if (= type :invalid)
-                    (log/error "Invalid LSP message: no method or id" parsed)
+                    (log/error "Invalid LSP message: no method or id:" parsed)
                     (do
                       (when-not (s/valid? (case type
                                             :request ::request
@@ -226,7 +223,7 @@
                           (if handler
                             (handler lang (:params parsed) state-atom events)
                             (do
-                              (log/error "No handler for server request" method "lang" lang)
+                              (log/error (str "No handler for server request=" method ", lang=" lang))
                               (send lang {:jsonrpc "2.0"
                                           :id (:id parsed)
                                           :error {:code -32601 :message "Method not found"}} state-atom))))
@@ -237,8 +234,8 @@
                           (if handler
                             (handler lang (:params parsed) state-atom events)
                             (if (str/starts-with? method "$/")
-                              (log/warn "Optional server notification handler missing for" method "lang" lang)
-                              (log/error "Required server notification handler missing for" method "lang" lang))))
+                              (log/warn (str "Optional server notification handler missing for method=" method ", lang=" lang))
+                              (log/error (str "Required server notification handler missing for method=" method ", lang=" lang)))))
 
                         :response
                         (let [id (:id parsed)
@@ -260,12 +257,12 @@
                                   :initialize (handle-initialize-response lang (:result parsed) state-atom events)
                                   :document-symbol (handle-document-symbol-response lang pending-uri (:result parsed) state-atom events)
                                   :shutdown (handle-shutdown-response lang (:result parsed) state-atom events)
-                                  (log/warn "Unhandled response type for lang" lang ":" pending-type))))
-                            (log/warn "Received response for unknown id" id "lang" lang))))))))
+                                  (log/warn (str "Unhandled response type for lang=" lang ":" pending-type)))))
+                            (log/warn (str "Received response for unknown id=" id ", lang=" lang)))))))))
               (catch js/Error e
-                (log/error "Failed to parse LSP message for lang" lang ":" (.-message e) "stack:" (.-stack e))))))))
+                (log/error (str "Failed to parse LSP message for lang=" lang ":" (.-message e) "\n" (.-stack e)))))))))
     (catch js/Error error
-      (log/error "Error in handle-message:" (.-message error) "stack:" (.-stack error)))))
+      (log/error (str "Error in handle-message: " (.-message error) "\n" (.-stack error))))))
 
 (defn connect
   "Establishes a WebSocket connection to the LSP server for a specific language.
@@ -275,12 +272,12 @@
   (let [url (:url config)
         lsp-state (get-in @state-atom [:lsp lang])]
     (cond
-      (:connected? lsp-state) (log/debug "Already connected to LSP server for lang" lang)
-      (:connecting? lsp-state) (log/debug "Already connecting to LSP server for lang" lang)
+      (:connected? lsp-state) (log/debug (str "Already connected to LSP server for lang=" lang))
+      (:connecting? lsp-state) (log/debug (str "Already connecting to LSP server for lang=" lang))
       :else (do
               (if-let [existing (:ws lsp-state)]
                 (.close existing)
-                (log/debug "No existing WS to close for lang" lang))
+                (log/debug (str "No existing WS to close for lang=" lang)))
               (let [socket (js/WebSocket. url)]
                 (set! (.-binaryType socket) "arraybuffer")
                 (swap! state-atom update-in [:lsp lang] assoc
@@ -291,7 +288,7 @@
                        :connecting? true
                        :warned-unreachable? false
                        :url url)
-                (set! (.-onopen socket) #(do (log/info "LSP WS open for lang" lang)
+                (set! (.-onopen socket) #(do (log/info (str "LSP WS open for lang=" lang))
                                              (swap! state-atom update-in [:lsp lang] assoc
                                                     :connected? true
                                                     :reachable? true
@@ -300,12 +297,12 @@
                                              (.next events (clj->js {:type "connect" :data {:lang lang}}))
                                              (request-initialize lang state-atom)))
                 (set! (.-onmessage socket) #(handle-message lang (.-data %) state-atom events))
-                (set! (.-onclose socket) #(do (log/trace "LSP WS closed for lang" lang)
+                (set! (.-onclose socket) #(do (log/trace (str "LSP WS closed for lang=" lang))
                                               (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
                                                 (rej-fn (js/Error. (str "LSP WebSocket closed for language " lang))))
                                               (swap! state-atom update :lsp dissoc lang)
                                               (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
-                (set! (.-onerror socket) #(do (log/warn "LSP connection error for lang" lang "; marking unreachable:" %)
+                (set! (.-onerror socket) #(do (log/warn (str "LSP connection error for lang=" lang "; marking unreachable:" %))
                                               (swap! state-atom update-in [:lsp lang] assoc
                                                      :connected? false
                                                      :reachable? false
@@ -313,5 +310,5 @@
                                               (js/window.console.debug %)
                                               (.next events (clj->js {:type "lsp-error" :data {:message "WebSocket connection error" :lang lang}}))
                                               (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
-                                                (rej-fn (js/Error. (str "LSP connection error for language " lang))))
+                                                (rej-fn (js/Error. (str "LSP connection error for lang=" lang))))
                                               (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn))))))))
