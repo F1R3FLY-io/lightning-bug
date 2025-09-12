@@ -67,7 +67,10 @@ jobs:
 
   test-debug:
     needs: [lint-and-test-types]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -118,6 +121,40 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
+
+      - name: Setup Firefox
+        id: setup-firefox
+        uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: stable
+
+      - name: Setup Edge
+        id: setup-edge
+        uses: browser-actions/setup-edge@v1
+        with:
+          edge-version: stable
+
+      - name: Setup Opera
+        id: setup-opera
+        uses: browser-actions/setup-opera@v1
+        with:
+          opera-version: stable
+
+      - name: Setup Safari
+        if: matrix.os == 'macos-latest'
+        id: setup-safari
+        uses: browser-actions/setup-safari@v1
+        with:
+          safari-version: stable
+
+      - name: Set KARMA_BROWSERS
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ] || [ "$RUNNER_OS" == "Windows" ]; then
+            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless,Safari" >> $GITHUB_ENV
+          fi
+        shell: bash
 
       - name: Run headless tests
         run: npm run test:debug
@@ -128,11 +165,18 @@ jobs:
       - name: Run sanity test (dev)
         env:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
+          EDGE_BIN: ${{ steps.setup-edge.outputs.edge-path }}
+          OPERA_BIN: ${{ steps.setup-opera.outputs.opera-path }}
+          SAFARI_BIN: ${{ steps.setup-safari.outputs.safari-path }}
         run: node scripts/test-demo.js
 
   test-release:
     needs: [lint-and-test-types]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -183,6 +227,40 @@ jobs:
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
+
+      - name: Setup Firefox
+        id: setup-firefox
+        uses: browser-actions/setup-firefox@v1
+        with:
+          firefox-version: stable
+
+      - name: Setup Edge
+        id: setup-edge
+        uses: browser-actions/setup-edge@v1
+        with:
+          edge-version: stable
+
+      - name: Setup Opera
+        id: setup-opera
+        uses: browser-actions/setup-opera@v1
+        with:
+          opera-version: stable
+
+      - name: Setup Safari
+        if: matrix.os == 'macos-latest'
+        id: setup-safari
+        uses: browser-actions/setup-safari@v1
+        with:
+          safari-version: stable
+
+      - name: Set KARMA_BROWSERS
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ] || [ "$RUNNER_OS" == "Windows" ]; then
+            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless,Safari" >> $GITHUB_ENV
+          fi
+        shell: bash
 
       - name: Run headless advanced tests
         run: npm run test:release
@@ -204,9 +282,14 @@ jobs:
       - name: Run sanity test (release)
         env:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
+          EDGE_BIN: ${{ steps.setup-edge.outputs.edge-path }}
+          OPERA_BIN: ${{ steps.setup-opera.outputs.opera-path }}
+          SAFARI_BIN: ${{ steps.setup-safari.outputs.safari-path }}
         run: node scripts/test-demo.js
 
       - name: Upload libs artifact
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: libs-artifact
