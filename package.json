@@ -1,6 +1,6 @@
 {
   "name": "@f1r3fly-io/lightning-bug",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "type": "module",
   "description": "A modern, extensible text editor built with ClojureScript and CodeMirror 6.",
   "author": "Dylon Edwards dylon@vinarytree.io",
@@ -53,7 +53,9 @@
     "tsd": "^0.33.0"
   },
   "scripts": {
-    "postinstall": "node scripts/postinstall.js",
+    "prepare:app": "node scripts/prepare-app.js",
+    "prepare:test": "node scripts/prepare-test.js",
+    "prepare:all": "npm run prepare:app && npm run prepare:test",
     "build:debug": "npx shadow-cljs compile libs",
     "build:release": "npx shadow-cljs release libs && node scripts/strip-goog.js dist/libs/lib.core.js",
     "build:demo": "node scripts/build-demo.js",

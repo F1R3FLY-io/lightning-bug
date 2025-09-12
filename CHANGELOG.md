@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2025-09-12
+
+### Added
+
+- `scripts/prepare-app.js` and `scripts/prepare-test.js` to prepare the `app` and `test` build targets, respectively.
+
+### Removed
+
+- `scripts/postinstall.js` since its logic is only needed for development and not by clients. Its logic has been split into `scripts/prepare-app.js` and `scripts/prepare-test.js`.
+
 ## [0.7.2] - 2025-09-12
 
 ### Changed

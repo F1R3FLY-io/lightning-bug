@@ -110,6 +110,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Prepare test
+        run: npm run prepare:test
+
       - name: Setup Chrome
         id: setup-chrome
         uses: browser-actions/setup-chrome@v1
@@ -171,6 +174,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+
+      - name: Prepare test
+        run: npm run prepare:test
 
       - name: Setup Chrome
         id: setup-chrome
