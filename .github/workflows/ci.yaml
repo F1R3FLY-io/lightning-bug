@@ -126,7 +126,7 @@ jobs:
         id: setup-firefox
         uses: browser-actions/setup-firefox@v1
         with:
-          firefox-version: stable
+          firefox-version: latest
 
       - name: Setup Edge
         id: setup-edge
@@ -242,7 +242,7 @@ jobs:
         id: setup-firefox
         uses: browser-actions/setup-firefox@v1
         with:
-          firefox-version: stable
+          firefox-version: latest
 
       - name: Setup Edge
         id: setup-edge
