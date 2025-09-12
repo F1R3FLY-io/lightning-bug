@@ -2,6 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { findPkgDir } from './utils.js';
 
+if (process.env.SKIP_LIGHTNING_BUG_POSTINSTALL) {
+  console.log('Skipping postinstall script for @f1r3fly-io/lightning-bug');
+  process.exit(0);
+}
+
 const scriptDir = path.dirname(new URL(import.meta.url).pathname);
 const baseDir = path.dirname(scriptDir);  // Project root (parent of scripts/)
 const treeSitterDir = findPkgDir('web-tree-sitter');

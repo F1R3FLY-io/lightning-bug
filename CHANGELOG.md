@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-09-12
+
+### Changed
+
+- Optionally disables `postinstall` script with environment variable `SKIP_LIGHTNING_BUG_POSTINSTALL`
+
 ## [0.7.1] - 2025-09-11
 
 ### Changed
