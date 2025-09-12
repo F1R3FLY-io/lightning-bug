@@ -129,10 +129,20 @@ jobs:
           firefox-version: latest
 
       - name: Setup Edge
+        if: matrix.os != 'windows-latest'
         id: setup-edge
         uses: browser-actions/setup-edge@v1
         with:
           edge-version: stable
+
+      - name: Set EDGE_BIN
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "EDGE_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> $GITHUB_ENV
+          else
+            echo "EDGE_BIN=${{ steps.setup-edge.outputs.edge-path }}" >> $GITHUB_ENV
+          fi
 
       - name: Install Opera
         if: matrix.os == 'ubuntu-latest'
@@ -176,7 +186,7 @@ jobs:
         env:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
-          EDGE_BIN: ${{ steps.setup-edge.outputs.edge-path }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
@@ -245,10 +255,20 @@ jobs:
           firefox-version: latest
 
       - name: Setup Edge
+        if: matrix.os != 'windows-latest'
         id: setup-edge
         uses: browser-actions/setup-edge@v1
         with:
           edge-version: stable
+
+      - name: Set EDGE_BIN
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "EDGE_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> $GITHUB_ENV
+          else
+            echo "EDGE_BIN=${{ steps.setup-edge.outputs.edge-path }}" >> $GITHUB_ENV
+          fi
 
       - name: Install Opera
         if: matrix.os == 'ubuntu-latest'
@@ -303,7 +323,7 @@ jobs:
         env:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
-          EDGE_BIN: ${{ steps.setup-edge.outputs.edge-path }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
