@@ -134,18 +134,28 @@ jobs:
         with:
           edge-version: stable
 
-      - name: Setup Opera
-        id: setup-opera
-        uses: browser-actions/setup-opera@v1
-        with:
-          opera-version: stable
+      - name: Install Opera
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt upgrade -y
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl
+          curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
+          echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
+          sudo apt update
+          sudo apt install opera-stable -y
 
-      - name: Setup Safari
+      - name: Install Opera
         if: matrix.os == 'macos-latest'
-        id: setup-safari
-        uses: browser-actions/setup-safari@v1
-        with:
-          safari-version: stable
+        run: brew install --cask opera
+
+      - name: Install Opera
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
+          $operaPath = (Get-Command opera.exe).Path
+          echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
 
       - name: Set KARMA_BROWSERS
         run: |
@@ -167,8 +177,8 @@ jobs:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
           EDGE_BIN: ${{ steps.setup-edge.outputs.edge-path }}
-          OPERA_BIN: ${{ steps.setup-opera.outputs.opera-path }}
-          SAFARI_BIN: ${{ steps.setup-safari.outputs.safari-path }}
+          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' ? '/usr/bin/opera' : matrix.os == 'macos-latest' ? '/Applications/Opera.app/Contents/MacOS/Opera' : '') }}
+          SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
 
   test-release:
@@ -240,18 +250,28 @@ jobs:
         with:
           edge-version: stable
 
-      - name: Setup Opera
-        id: setup-opera
-        uses: browser-actions/setup-opera@v1
-        with:
-          opera-version: stable
+      - name: Install Opera
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt upgrade -y
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl
+          curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
+          echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
+          sudo apt update
+          sudo apt install opera-stable -y
 
-      - name: Setup Safari
+      - name: Install Opera
         if: matrix.os == 'macos-latest'
-        id: setup-safari
-        uses: browser-actions/setup-safari@v1
-        with:
-          safari-version: stable
+        run: brew install --cask opera
+
+      - name: Install Opera
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
+          $operaPath = (Get-Command opera.exe).Path
+          echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
 
       - name: Set KARMA_BROWSERS
         run: |
@@ -284,8 +304,8 @@ jobs:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
           EDGE_BIN: ${{ steps.setup-edge.outputs.edge-path }}
-          OPERA_BIN: ${{ steps.setup-opera.outputs.opera-path }}
-          SAFARI_BIN: ${{ steps.setup-safari.outputs.safari-path }}
+          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' ? '/usr/bin/opera' : matrix.os == 'macos-latest' ? '/Applications/Opera.app/Contents/MacOS/Opera' : '') }}
+          SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
 
       - name: Upload libs artifact
