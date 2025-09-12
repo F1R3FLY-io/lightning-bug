@@ -1,8 +1,9 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { findPkgDir } from './utils.js';
 
-const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+const scriptDir = path.dirname(fileURLToPath(import.meta.url)); // ← changed
 const baseDir = path.dirname(scriptDir);  // Project root (parent of scripts/)
 const treeSitterDir = findPkgDir('web-tree-sitter');
 const rholangDir = findPkgDir('@f1r3fly-io/tree-sitter-rholang-js-with-comments');
