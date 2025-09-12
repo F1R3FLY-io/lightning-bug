@@ -111,7 +111,7 @@ jobs:
         run: npm install
 
       - name: Prepare test
-        run: npm run prepare:test
+        run: npm run prepare:all
 
       - name: Setup Chrome
         id: setup-chrome
@@ -176,7 +176,7 @@ jobs:
         run: npm install
 
       - name: Prepare test
-        run: npm run prepare:test
+        run: npm run prepare:all
 
       - name: Setup Chrome
         id: setup-chrome
