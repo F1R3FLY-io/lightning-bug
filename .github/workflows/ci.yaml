@@ -129,19 +129,25 @@ jobs:
           firefox-version: latest
 
       - name: Setup Edge
-        if: matrix.os != 'windows-latest'
-        id: setup-edge
+        if: matrix.os == 'ubuntu-latest'
+        id: setup-edge-ubuntu
         uses: browser-actions/setup-edge@v1
         with:
           edge-version: stable
+
+      - name: Setup Edge
+        if: matrix.os == 'macos-latest'
+        run: brew install --cask microsoft-edge
 
       - name: Set EDGE_BIN
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
             echo "EDGE_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "EDGE_BIN=/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >> $GITHUB_ENV
           else
-            echo "EDGE_BIN=${{ steps.setup-edge.outputs.edge-path }}" >> $GITHUB_ENV
+            echo "EDGE_BIN=${{ steps.setup-edge-ubuntu.outputs.edge-path }}" >> $GITHUB_ENV
           fi
 
       - name: Install Opera
@@ -255,19 +261,25 @@ jobs:
           firefox-version: latest
 
       - name: Setup Edge
-        if: matrix.os != 'windows-latest'
-        id: setup-edge
+        if: matrix.os == 'ubuntu-latest'
+        id: setup-edge-ubuntu
         uses: browser-actions/setup-edge@v1
         with:
           edge-version: stable
+
+      - name: Setup Edge
+        if: matrix.os == 'macos-latest'
+        run: brew install --cask microsoft-edge
 
       - name: Set EDGE_BIN
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
             echo "EDGE_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "EDGE_BIN=/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >> $GITHUB_ENV
           else
-            echo "EDGE_BIN=${{ steps.setup-edge.outputs.edge-path }}" >> $GITHUB_ENV
+            echo "EDGE_BIN=${{ steps.setup-edge-ubuntu.outputs.edge-path }}" >> $GITHUB_ENV
           fi
 
       - name: Install Opera
