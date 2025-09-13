@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
  * @returns {string} The path to the package directory.
  * @throws {Error} If the package is not found.
  */
-function findPkgDir(pkg) {
+export function findPkgDir(pkg) {
   // Walk up from current dir until package.json is found, then resolve node_modules/pkg
   let currentDir = __dirname;
   while (currentDir !== path.parse(currentDir).root) {
@@ -30,18 +30,18 @@ function findPkgDir(pkg) {
  * @param {string} cmd - The command to run.
  * @param {string} [cwd=__dirname] - The working directory.
  */
-function runCmd(cmd, cwd = __dirname) {
-  const parts = cmd.trim().split(/\s+/);
-  const command = parts[0];
-  const args = parts.slice(1);
-  const result = spawnSync(command, args, { cwd, stdio: 'inherit' });
+export function runCmd(command, cwd) {
+  const parts = command.split(/\s+/);
+  const options = {
+    cwd,
+    stdio: 'inherit',
+    shell: process.platform === 'win32'
+  };
+  const result = spawnSync(parts[0], parts.slice(1), options);
   if (result.error) {
     throw result.error;
   }
   if (result.status !== 0) {
-    throw new Error(`Command failed: ${cmd} (exit code: ${result.status})`);
+    throw new Error(`Command "${command}" failed with exit code ${result.status}`);
   }
-  return result;
 }
-
-export { findPkgDir, runCmd };
