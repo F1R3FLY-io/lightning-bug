@@ -170,8 +170,12 @@ jobs:
         shell: pwsh
         run: |
           winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
-          $operaPath = (Get-Command opera.exe).Path
-          echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
+          $operaPath = "$env:LOCALAPPDATA\Programs\Opera\opera.exe"
+          if (Test-Path $operaPath) {
+            echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "Opera executable not found at $operaPath"
+          }
 
       - name: Set KARMA_BROWSERS
         run: |
@@ -302,8 +306,12 @@ jobs:
         shell: pwsh
         run: |
           winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
-          $operaPath = (Get-Command opera.exe).Path
-          echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
+          $operaPath = "$env:LOCALAPPDATA\Programs\Opera\opera.exe"
+          if (Test-Path $operaPath) {
+            echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
+          } else {
+            Write-Error "Opera executable not found at $operaPath"
+          }
 
       - name: Set KARMA_BROWSERS
         run: |
