@@ -42,9 +42,23 @@ import puppeteer from 'puppeteer-core';
   ];
   // Safari is not supported by Puppeteer, so exclude it
 
+  const testBrowser = process.env.TEST_BROWSER;
+  let browsersToTest = browsers;
+  if (testBrowser) {
+    browsersToTest = browsers.filter(b => b.name.toLowerCase() === testBrowser.toLowerCase());
+  }
+  if (browsersToTest.length === 0) {
+    console.log(`No browser matches ${testBrowser}, skipping sanity test`);
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+    return;
+  }
+
   let allTestsPassed = true;
 
-  for (const browserConfig of browsers) {
+  for (const browserConfig of browsersToTest) {
     const { name, browser: browserType, executablePath, args } = browserConfig;
     console.log(`Testing with ${name}, executable: ${executablePath}`);
 

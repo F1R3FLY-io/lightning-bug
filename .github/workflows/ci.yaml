@@ -1,7 +1,7 @@
 name: CI and Release
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 on:
   push:
@@ -70,6 +70,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        browser: [chrome, firefox, edge, opera]
+        include:
+          - os: macos-latest
+            browser: safari
     runs-on: ${{ matrix.os }}
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -117,29 +121,32 @@ jobs:
         run: npm run prepare:all
 
       - name: Setup Chrome
+        if: matrix.browser == 'chrome'
         id: setup-chrome
         uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
 
       - name: Setup Firefox
+        if: matrix.browser == 'firefox'
         id: setup-firefox
         uses: browser-actions/setup-firefox@v1
         with:
           firefox-version: latest
 
       - name: Setup Edge
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.browser == 'edge' && matrix.os == 'ubuntu-latest'
         id: setup-edge-ubuntu
         uses: browser-actions/setup-edge@v1
         with:
           edge-version: stable
 
       - name: Setup Edge
-        if: matrix.os == 'macos-latest'
+        if: matrix.browser == 'edge' && matrix.os == 'macos-latest'
         run: brew install --cask microsoft-edge
 
       - name: Set EDGE_BIN
+        if: matrix.browser == 'edge'
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
@@ -151,7 +158,7 @@ jobs:
           fi
 
       - name: Install Opera
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.browser == 'opera' && matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt upgrade -y
@@ -162,11 +169,11 @@ jobs:
           sudo apt install opera-stable -y
 
       - name: Install Opera
-        if: matrix.os == 'macos-latest'
+        if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
         run: brew install --cask opera
 
       - name: Install Opera
-        if: matrix.os == 'windows-latest'
+        if: matrix.browser == 'opera' && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
@@ -177,6 +184,18 @@ jobs:
             Write-Error "Opera executable not found at $operaPath"
           }
 
+      - name: Set OPERA_BIN
+        if: matrix.browser == 'opera'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            echo "OPERA_BIN=/usr/bin/opera" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            echo "OPERA_BIN=${LOCALAPPDATA//\\//}/Programs/Opera/opera.exe" >> $GITHUB_ENV
+          fi
+
       - name: Start services
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -185,11 +204,13 @@ jobs:
 
       - name: Set KARMA_BROWSERS
         run: |
-          if [ "$RUNNER_OS" == "Linux" ] || [ "$RUNNER_OS" == "Windows" ]; then
-            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless,Safari" >> $GITHUB_ENV
-          fi
+          case "${{ matrix.browser }}" in
+            chrome) echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox" >> $GITHUB_ENV ;;
+            firefox) echo "KARMA_BROWSERS=FirefoxHeadless" >> $GITHUB_ENV ;;
+            edge) echo "KARMA_BROWSERS=EdgeHeadless" >> $GITHUB_ENV ;;
+            opera) echo "KARMA_BROWSERS=OperaHeadless" >> $GITHUB_ENV ;;
+            safari) echo "KARMA_BROWSERS=Safari" >> $GITHUB_ENV ;;
+          esac
         shell: bash
 
       - name: Run headless tests
@@ -201,25 +222,28 @@ jobs:
         run: npm run test:debug
 
       - name: Build demo (dev)
+        if: matrix.browser != 'safari'
         run: npm run build:demo
 
       - name: Run sanity test (dev)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.browser != 'safari'
         env:
-          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
-          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
-          EDGE_BIN: ${{ env.EDGE_BIN }}
-          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
+          TEST_BROWSER: ${{ matrix.browser }}
+          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
+          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
+          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
+          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
       - name: Run sanity test (dev)
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os != 'ubuntu-latest' && matrix.browser != 'safari'
         env:
-          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
-          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
-          EDGE_BIN: ${{ env.EDGE_BIN }}
-          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
+          TEST_BROWSER: ${{ matrix.browser }}
+          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
+          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
+          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
+          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
 
@@ -228,6 +252,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
+        browser: [chrome, firefox, edge, opera]
+        include:
+          - os: macos-latest
+            browser: safari
     runs-on: ${{ matrix.os }}
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -275,29 +303,32 @@ jobs:
         run: npm run prepare:all
 
       - name: Setup Chrome
+        if: matrix.browser == 'chrome'
         id: setup-chrome
         uses: browser-actions/setup-chrome@v2
         with:
           chrome-version: stable
 
       - name: Setup Firefox
+        if: matrix.browser == 'firefox'
         id: setup-firefox
         uses: browser-actions/setup-firefox@v1
         with:
           firefox-version: latest
 
       - name: Setup Edge
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.browser == 'edge' && matrix.os == 'ubuntu-latest'
         id: setup-edge-ubuntu
         uses: browser-actions/setup-edge@v1
         with:
           edge-version: stable
 
       - name: Setup Edge
-        if: matrix.os == 'macos-latest'
+        if: matrix.browser == 'edge' && matrix.os == 'macos-latest'
         run: brew install --cask microsoft-edge
 
       - name: Set EDGE_BIN
+        if: matrix.browser == 'edge'
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
@@ -309,7 +340,7 @@ jobs:
           fi
 
       - name: Install Opera
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.browser == 'opera' && matrix.os == 'ubuntu-latest'
         run: |
           sudo apt update
           sudo apt upgrade -y
@@ -320,11 +351,11 @@ jobs:
           sudo apt install opera-stable -y
 
       - name: Install Opera
-        if: matrix.os == 'macos-latest'
+        if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
         run: brew install --cask opera
 
       - name: Install Opera
-        if: matrix.os == 'windows-latest'
+        if: matrix.browser == 'opera' && matrix.os == 'windows-latest'
         shell: pwsh
         run: |
           winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
@@ -335,6 +366,18 @@ jobs:
             Write-Error "Opera executable not found at $operaPath"
           }
 
+      - name: Set OPERA_BIN
+        if: matrix.browser == 'opera'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Linux" ]; then
+            echo "OPERA_BIN=/usr/bin/opera" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "Windows" ]; then
+            echo "OPERA_BIN=${LOCALAPPDATA//\\//}/Programs/Opera/opera.exe" >> $GITHUB_ENV
+          fi
+
       - name: Start services
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -343,11 +386,13 @@ jobs:
 
       - name: Set KARMA_BROWSERS
         run: |
-          if [ "$RUNNER_OS" == "Linux" ] || [ "$RUNNER_OS" == "Windows" ]; then
-            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox,FirefoxHeadless,EdgeHeadless,OperaHeadless,Safari" >> $GITHUB_ENV
-          fi
+          case "${{ matrix.browser }}" in
+            chrome) echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox" >> $GITHUB_ENV ;;
+            firefox) echo "KARMA_BROWSERS=FirefoxHeadless" >> $GITHUB_ENV ;;
+            edge) echo "KARMA_BROWSERS=EdgeHeadless" >> $GITHUB_ENV ;;
+            opera) echo "KARMA_BROWSERS=OperaHeadless" >> $GITHUB_ENV ;;
+            safari) echo "KARMA_BROWSERS=Safari" >> $GITHUB_ENV ;;
+          esac
         shell: bash
 
       - name: Run headless advanced tests
@@ -359,6 +404,7 @@ jobs:
         run: npm run test:release
 
       - name: Build demo (release)
+        if: matrix.browser != 'safari'
         env:
           MODE: release
         run: npm run build:demo
@@ -370,30 +416,33 @@ jobs:
       # it snuck back in somehow ...
       # ----------------------------------------------------------------------
       - name: Strip goog
+        if: matrix.browser != 'safari'
         run: node scripts/strip-goog.js dist/libs/lib.core.js
 
       - name: Run sanity test (release)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.browser != 'safari'
         env:
-          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
-          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
-          EDGE_BIN: ${{ env.EDGE_BIN }}
-          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
+          TEST_BROWSER: ${{ matrix.browser }}
+          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
+          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
+          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
+          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
       - name: Run sanity test (release)
-        if: matrix.os != 'ubuntu-latest'
+        if: matrix.os != 'ubuntu-latest' && matrix.browser != 'safari'
         env:
-          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
-          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
-          EDGE_BIN: ${{ env.EDGE_BIN }}
-          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
+          TEST_BROWSER: ${{ matrix.browser }}
+          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
+          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
+          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
+          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
 
       - name: Upload libs artifact
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && matrix.browser == 'chrome'
         uses: actions/upload-artifact@v4
         with:
           name: libs-artifact
