@@ -193,12 +193,18 @@ jobs:
         shell: bash
 
       - name: Run headless tests
+        if: matrix.os == 'ubuntu-latest'
         run: dbus-run-session -- xvfb-run --auto-servernum npm run test:debug
+
+      - name: Run headless tests
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run test:debug
 
       - name: Build demo (dev)
         run: npm run build:demo
 
       - name: Run sanity test (dev)
+        if: matrix.os == 'ubuntu-latest'
         env:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
@@ -206,6 +212,16 @@ jobs:
           OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
+
+      - name: Run sanity test (dev)
+        if: matrix.os != 'ubuntu-latest'
+        env:
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
+          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
+          SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
+        run: node scripts/test-demo.js
 
   test-release:
     needs: [lint-and-test-types]
@@ -335,7 +351,12 @@ jobs:
         shell: bash
 
       - name: Run headless advanced tests
+        if: matrix.os == 'ubuntu-latest'
         run: dbus-run-session -- xvfb-run --auto-servernum npm run test:release
+
+      - name: Run headless advanced tests
+        if: matrix.os != 'ubuntu-latest'
+        run: npm run test:release
 
       - name: Build demo (release)
         env:
@@ -352,6 +373,7 @@ jobs:
         run: node scripts/strip-goog.js dist/libs/lib.core.js
 
       - name: Run sanity test (release)
+        if: matrix.os == 'ubuntu-latest'
         env:
           CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
           FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
@@ -359,6 +381,16 @@ jobs:
           OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
+
+      - name: Run sanity test (release)
+        if: matrix.os != 'ubuntu-latest'
+        env:
+          CHROME_BIN: ${{ steps.setup-chrome.outputs.chrome-path }}
+          FIREFOX_BIN: ${{ steps.setup-firefox.outputs.firefox-path }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
+          OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
+          SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
+        run: node scripts/test-demo.js
 
       - name: Upload libs artifact
         if: matrix.os == 'ubuntu-latest'
