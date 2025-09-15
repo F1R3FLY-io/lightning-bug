@@ -161,12 +161,12 @@ jobs:
             sudo add-apt-repository ppa:mozillateam/ppa -y
             echo '
             Package: *
-            Pin: release o=LP-PPA-mozillateam
+            Pin: release o=LP-PPA-mozillateam-ppa
             Pin-Priority: 1001
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
             echo '
             Package: firefox*
-            Pin: version 1:1snap*
+            Pin: release o=Ubuntu
             Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
@@ -397,12 +397,12 @@ jobs:
             sudo add-apt-repository ppa:mozillateam/ppa -y
             echo '
             Package: *
-            Pin: release o=LP-PPA-mozillateam
+            Pin: release o=LP-PPA-mozillateam-ppa
             Pin-Priority: 1001
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
             echo '
             Package: firefox*
-            Pin: version 1:1snap*
+            Pin: release o=Ubuntu
             Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
