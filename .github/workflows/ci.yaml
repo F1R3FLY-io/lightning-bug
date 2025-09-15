@@ -160,14 +160,15 @@ jobs:
             sudo apt remove firefox -y || true
             sudo add-apt-repository ppa:mozillateam/ppa -y
             echo '
-            Package: firefox
+            Package: *
             Pin: release o=LP-PPA-mozillateam
             Pin-Priority: 1001
-            
-            Package: firefox
-            Pin: origin "azure.archive.ubuntu.com"
-            Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
+            echo '
+            Package: firefox*
+            Pin: release o=Ubuntu*
+            Pin-Priority: -1
+            ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
             sudo apt install firefox -y
             sudo apt-mark hold firefox
@@ -394,14 +395,15 @@ jobs:
             sudo apt remove firefox -y || true
             sudo add-apt-repository ppa:mozillateam/ppa -y
             echo '
-            Package: firefox
+            Package: *
             Pin: release o=LP-PPA-mozillateam
             Pin-Priority: 1001
-            
-            Package: firefox
-            Pin: origin "azure.archive.ubuntu.com"
-            Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
+            echo '
+            Package: firefox*
+            Pin: release o=Ubuntu*
+            Pin-Priority: -1
+            ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
             sudo apt install firefox -y
             sudo apt-mark hold firefox
