@@ -166,11 +166,10 @@ jobs:
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
             echo '
             Package: firefox*
-            Pin: release o=Ubuntu*
+            Pin: version 1:1snap*
             Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
-            apt-cache policy firefox
             sudo apt install firefox -y
             sudo apt-mark hold firefox
           elif [ "$browser" = "edge" ]; then
@@ -402,7 +401,7 @@ jobs:
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
             echo '
             Package: firefox*
-            Pin: release o=Ubuntu*
+            Pin: version 1:1snap*
             Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
