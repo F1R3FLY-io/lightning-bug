@@ -68,6 +68,7 @@ jobs:
   test-debug:
     needs: [lint-and-test-types]
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         browser: [chrome, firefox, edge, opera]
@@ -117,6 +118,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Install system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt upgrade -y
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
+
       - name: Prepare test
         run: npm run prepare:all
 
@@ -160,9 +168,6 @@ jobs:
       - name: Install Opera
         if: matrix.browser == 'opera' && matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt update
-          sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
           curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
           echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
           sudo apt update
@@ -250,6 +255,7 @@ jobs:
   test-release:
     needs: [lint-and-test-types]
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         browser: [chrome, firefox, edge, opera]
@@ -299,6 +305,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Install system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt update
+          sudo apt upgrade -y
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
+
       - name: Prepare test
         run: npm run prepare:all
 
@@ -342,9 +355,6 @@ jobs:
       - name: Install Opera
         if: matrix.browser == 'opera' && matrix.os == 'ubuntu-latest'
         run: |
-          sudo apt update
-          sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
           curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
           echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
           sudo apt update
