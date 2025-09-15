@@ -155,7 +155,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
           curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
           echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
           sudo apt update
@@ -177,6 +177,12 @@ jobs:
             Write-Error "Opera executable not found at $operaPath"
           }
 
+      - name: Start services
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo service dbus start
+          sudo service upower start
+
       - name: Set KARMA_BROWSERS
         run: |
           if [ "$RUNNER_OS" == "Linux" ] || [ "$RUNNER_OS" == "Windows" ]; then
@@ -187,7 +193,7 @@ jobs:
         shell: bash
 
       - name: Run headless tests
-        run: npm run test:debug
+        run: dbus-run-session -- xvfb-run --auto-servernum npm run test:debug
 
       - name: Build demo (dev)
         run: npm run build:demo
@@ -199,7 +205,7 @@ jobs:
           EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
-        run: node scripts/test-demo.js
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
   test-release:
     needs: [lint-and-test-types]
@@ -291,7 +297,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
           curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
           echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
           sudo apt update
@@ -313,6 +319,12 @@ jobs:
             Write-Error "Opera executable not found at $operaPath"
           }
 
+      - name: Start services
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo service dbus start
+          sudo service upower start
+
       - name: Set KARMA_BROWSERS
         run: |
           if [ "$RUNNER_OS" == "Linux" ] || [ "$RUNNER_OS" == "Windows" ]; then
@@ -323,7 +335,7 @@ jobs:
         shell: bash
 
       - name: Run headless advanced tests
-        run: npm run test:release
+        run: dbus-run-session -- xvfb-run --auto-servernum npm run test:release
 
       - name: Build demo (release)
         env:
@@ -346,7 +358,7 @@ jobs:
           EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN || (matrix.os == 'ubuntu-latest' && '/usr/bin/opera' || matrix.os == 'macos-latest' && '/Applications/Opera.app/Contents/MacOS/Opera' || '') }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
-        run: node scripts/test-demo.js
+        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
       - name: Upload libs artifact
         if: matrix.os == 'ubuntu-latest'
