@@ -170,7 +170,7 @@ jobs:
             Pin-Priority: -1
             ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
-            apt search firefox
+            apt-cache policy firefox
             sudo apt install firefox -y
             sudo apt-mark hold firefox
           elif [ "$browser" = "edge" ]; then
