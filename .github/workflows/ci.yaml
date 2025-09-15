@@ -158,6 +158,7 @@ jobs:
           elif [ "$browser" = "firefox" ]; then
             # Remove any existing Snap Firefox (if present)
             sudo snap remove --purge firefox || true
+            sudo apt remove firefox -y || true
             # Add Mozilla PPA for deb Firefox
             sudo add-apt-repository ppa:mozillateam/ppa -y
             # Pin the deb package to avoid Snap reinstall
@@ -166,6 +167,7 @@ jobs:
             Pin: release o=LP-PPA-mozillateam
             Pin-Priority: 1001
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
+            echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:${distro_codename}";' | sudo tee /etc/apt/preferences.d/mozilla-firefox-unattended-upgrades
             sudo apt update
             sudo apt install firefox -y
           elif [ "$browser" = "edge" ]; then
@@ -389,6 +391,7 @@ jobs:
           elif [ "$browser" = "firefox" ]; then
             # Remove any existing Snap Firefox (if present)
             sudo snap remove --purge firefox || true
+            sudo apt remove firefox -y || true
             # Add Mozilla PPA for deb Firefox
             sudo add-apt-repository ppa:mozillateam/ppa -y
             # Pin the deb package to avoid Snap reinstall
@@ -397,6 +400,7 @@ jobs:
             Pin: release o=LP-PPA-mozillateam
             Pin-Priority: 1001
             ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
+            echo 'Unattended-Upgrade::Allowed-Origins:: "LP-PPA-mozillateam:${distro_codename}";' | sudo tee /etc/apt/preferences.d/mozilla-firefox-unattended-upgrades
             sudo apt update
             sudo apt install firefox -y
           elif [ "$browser" = "edge" ]; then
