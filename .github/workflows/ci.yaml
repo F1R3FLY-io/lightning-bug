@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   lint-and-test-types:
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,6 +67,7 @@ jobs:
         run: npm run test:types
 
   test-debug:
+    timeout-minutes: 10
     needs: [lint-and-test-types]
     strategy:
       fail-fast: false
@@ -123,33 +125,85 @@ jobs:
         run: |
           sudo apt update
           sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb gnupg wget
 
       - name: Prepare test
         run: npm run prepare:all
 
-      - name: Setup Chrome
+      - name: Install Chocolatey
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+      - name: Install Browser
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $browser = "${{ matrix.browser }}"
+          if ($browser -eq "chrome") { choco install googlechrome -y }
+          elseif ($browser -eq "firefox") { choco install firefox -y }
+          elseif ($browser -eq "edge") { choco install microsoft-edge -y }
+          elseif ($browser -eq "opera") { choco install opera -y }
+
+      - name: Install Browser
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          browser="${{ matrix.browser }}"
+          if [ "$browser" = "chrome" ]; then
+            wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+            echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+            sudo apt update
+            sudo apt install google-chrome-stable -y
+          elif [ "$browser" = "firefox" ]; then
+            sudo apt install firefox -y
+          elif [ "$browser" = "edge" ]; then
+            curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+            sudo install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
+            sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge-dev.list'
+            sudo rm microsoft.gpg
+            sudo apt update
+            sudo apt install microsoft-edge-stable -y
+          elif [ "$browser" = "opera" ]; then
+            curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
+            echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
+            sudo apt update
+            sudo apt install opera-stable -y
+          fi
+
+      - name: Install Chrome via brew on macOS
+        if: matrix.browser == 'chrome' && matrix.os == 'macos-latest'
+        run: brew install --cask google-chrome
+
+      - name: Set CHROME_BIN
         if: matrix.browser == 'chrome'
-        id: setup-chrome
-        uses: browser-actions/setup-chrome@v2
-        with:
-          chrome-version: stable
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "CHROME_BIN=C:/Program Files/Google/Chrome/Application/chrome.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "CHROME_BIN=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> $GITHUB_ENV
+          else
+            echo "CHROME_BIN=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
+          fi
 
-      - name: Setup Firefox
+      - name: Install Firefox via brew on macOS
+        if: matrix.browser == 'firefox' && matrix.os == 'macos-latest'
+        run: brew install --cask firefox
+
+      - name: Set FIREFOX_BIN
         if: matrix.browser == 'firefox'
-        id: setup-firefox
-        uses: browser-actions/setup-firefox@v1
-        with:
-          firefox-version: latest
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "FIREFOX_BIN=C:/Program Files/Mozilla Firefox/firefox.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "FIREFOX_BIN=/Applications/Firefox.app/Contents/MacOS/firefox" >> $GITHUB_ENV
+          else
+            echo "FIREFOX_BIN=/usr/bin/firefox" >> $GITHUB_ENV
+          fi
 
-      - name: Setup Edge
-        if: matrix.browser == 'edge' && matrix.os == 'ubuntu-latest'
-        id: setup-edge-ubuntu
-        uses: browser-actions/setup-edge@v1
-        with:
-          edge-version: stable
-
-      - name: Setup Edge
+      - name: Install Edge via brew on macOS
         if: matrix.browser == 'edge' && matrix.os == 'macos-latest'
         run: brew install --cask microsoft-edge
 
@@ -158,36 +212,16 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "EDGE_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> $GITHUB_ENV
+            echo "EDGE_BIN=C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "EDGE_BIN=/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >> $GITHUB_ENV
           else
-            echo "EDGE_BIN=${{ steps.setup-edge-ubuntu.outputs.edge-path }}" >> $GITHUB_ENV
+            echo "EDGE_BIN=/usr/bin/microsoft-edge-stable" >> $GITHUB_ENV
           fi
 
-      - name: Install Opera
-        if: matrix.browser == 'opera' && matrix.os == 'ubuntu-latest'
-        run: |
-          curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
-          echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
-          sudo apt update
-          sudo apt install opera-stable -y
-
-      - name: Install Opera
+      - name: Install Opera via brew on macOS
         if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
         run: brew install --cask opera
-
-      - name: Install Opera
-        if: matrix.browser == 'opera' && matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
-          $operaPath = "$env:LOCALAPPDATA\Programs\Opera\opera.exe"
-          if (Test-Path $operaPath) {
-            echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "Opera executable not found at $operaPath"
-          }
 
       - name: Set OPERA_BIN
         if: matrix.browser == 'opera'
@@ -198,7 +232,7 @@ jobs:
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            echo "OPERA_BIN=${LOCALAPPDATA//\\//}/Programs/Opera/opera.exe" >> $GITHUB_ENV
+            echo "OPERA_BIN=C:/Program Files/Opera/opera.exe" >> $GITHUB_ENV
           fi
 
       - name: Start services
@@ -234,10 +268,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.browser != 'safari'
         env:
           TEST_BROWSER: ${{ matrix.browser }}
-          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
-          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
-          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
-          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
+          CHROME_BIN: ${{ env.CHROME_BIN }}
+          FIREFOX_BIN: ${{ env.FIREFOX_BIN }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
+          OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
@@ -245,14 +279,15 @@ jobs:
         if: matrix.os != 'ubuntu-latest' && matrix.browser != 'safari'
         env:
           TEST_BROWSER: ${{ matrix.browser }}
-          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
-          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
-          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
-          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
+          CHROME_BIN: ${{ env.CHROME_BIN }}
+          FIREFOX_BIN: ${{ env.FIREFOX_BIN }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
+          OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
 
   test-release:
+    timeout-minutes: 10
     needs: [lint-and-test-types]
     strategy:
       fail-fast: false
@@ -310,33 +345,85 @@ jobs:
         run: |
           sudo apt update
           sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb
+          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb gnupg wget
 
       - name: Prepare test
         run: npm run prepare:all
 
-      - name: Setup Chrome
+      - name: Install Chocolatey
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+
+      - name: Install Browser
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $browser = "${{ matrix.browser }}"
+          if ($browser -eq "chrome") { choco install googlechrome -y }
+          elseif ($browser -eq "firefox") { choco install firefox -y }
+          elseif ($browser -eq "edge") { choco install microsoft-edge -y }
+          elseif ($browser -eq "opera") { choco install opera -y }
+
+      - name: Install Browser
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          browser="${{ matrix.browser }}"
+          if [ "$browser" = "chrome" ]; then
+            wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+            echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+            sudo apt update
+            sudo apt install google-chrome-stable -y
+          elif [ "$browser" = "firefox" ]; then
+            sudo apt install firefox -y
+          elif [ "$browser" = "edge" ]; then
+            curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
+            sudo install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
+            sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge-dev.list'
+            sudo rm microsoft.gpg
+            sudo apt update
+            sudo apt install microsoft-edge-stable -y
+          elif [ "$browser" = "opera" ]; then
+            curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
+            echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
+            sudo apt update
+            sudo apt install opera-stable -y
+          fi
+
+      - name: Install Chrome via brew on macOS
+        if: matrix.browser == 'chrome' && matrix.os == 'macos-latest'
+        run: brew install --cask google-chrome
+
+      - name: Set CHROME_BIN
         if: matrix.browser == 'chrome'
-        id: setup-chrome
-        uses: browser-actions/setup-chrome@v2
-        with:
-          chrome-version: stable
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "CHROME_BIN=C:/Program Files/Google/Chrome/Application/chrome.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "CHROME_BIN=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> $GITHUB_ENV
+          else
+            echo "CHROME_BIN=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
+          fi
 
-      - name: Setup Firefox
+      - name: Install Firefox via brew on macOS
+        if: matrix.browser == 'firefox' && matrix.os == 'macos-latest'
+        run: brew install --cask firefox
+
+      - name: Set FIREFOX_BIN
         if: matrix.browser == 'firefox'
-        id: setup-firefox
-        uses: browser-actions/setup-firefox@v1
-        with:
-          firefox-version: latest
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "FIREFOX_BIN=C:/Program Files/Mozilla Firefox/firefox.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "FIREFOX_BIN=/Applications/Firefox.app/Contents/MacOS/firefox" >> $GITHUB_ENV
+          else
+            echo "FIREFOX_BIN=/usr/bin/firefox" >> $GITHUB_ENV
+          fi
 
-      - name: Setup Edge
-        if: matrix.browser == 'edge' && matrix.os == 'ubuntu-latest'
-        id: setup-edge-ubuntu
-        uses: browser-actions/setup-edge@v1
-        with:
-          edge-version: stable
-
-      - name: Setup Edge
+      - name: Install Edge via brew on macOS
         if: matrix.browser == 'edge' && matrix.os == 'macos-latest'
         run: brew install --cask microsoft-edge
 
@@ -345,36 +432,16 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "EDGE_BIN=C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" >> $GITHUB_ENV
+            echo "EDGE_BIN=C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "EDGE_BIN=/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >> $GITHUB_ENV
           else
-            echo "EDGE_BIN=${{ steps.setup-edge-ubuntu.outputs.edge-path }}" >> $GITHUB_ENV
+            echo "EDGE_BIN=/usr/bin/microsoft-edge-stable" >> $GITHUB_ENV
           fi
 
-      - name: Install Opera
-        if: matrix.browser == 'opera' && matrix.os == 'ubuntu-latest'
-        run: |
-          curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
-          echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
-          sudo apt update
-          sudo apt install opera-stable -y
-
-      - name: Install Opera
+      - name: Install Opera via brew on macOS
         if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
         run: brew install --cask opera
-
-      - name: Install Opera
-        if: matrix.browser == 'opera' && matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          winget install --id Opera.Opera --exact --accept-package-agreements --accept-source-agreements
-          $operaPath = "$env:LOCALAPPDATA\Programs\Opera\opera.exe"
-          if (Test-Path $operaPath) {
-            echo "OPERA_BIN=$operaPath" >> $env:GITHUB_ENV
-          } else {
-            Write-Error "Opera executable not found at $operaPath"
-          }
 
       - name: Set OPERA_BIN
         if: matrix.browser == 'opera'
@@ -385,7 +452,7 @@ jobs:
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "Windows" ]; then
-            echo "OPERA_BIN=${LOCALAPPDATA//\\//}/Programs/Opera/opera.exe" >> $GITHUB_ENV
+            echo "OPERA_BIN=C:/Program Files/Opera/opera.exe" >> $GITHUB_ENV
           fi
 
       - name: Start services
@@ -433,10 +500,10 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.browser != 'safari'
         env:
           TEST_BROWSER: ${{ matrix.browser }}
-          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
-          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
-          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
-          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
+          CHROME_BIN: ${{ env.CHROME_BIN }}
+          FIREFOX_BIN: ${{ env.FIREFOX_BIN }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
+          OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
@@ -444,10 +511,10 @@ jobs:
         if: matrix.os != 'ubuntu-latest' && matrix.browser != 'safari'
         env:
           TEST_BROWSER: ${{ matrix.browser }}
-          CHROME_BIN: ${{ matrix.browser == 'chrome' && steps.setup-chrome.outputs.chrome-path || '' }}
-          FIREFOX_BIN: ${{ matrix.browser == 'firefox' && steps.setup-firefox.outputs.firefox-path || '' }}
-          EDGE_BIN: ${{ matrix.browser == 'edge' && env.EDGE_BIN || '' }}
-          OPERA_BIN: ${{ matrix.browser == 'opera' && env.OPERA_BIN || '' }}
+          CHROME_BIN: ${{ env.CHROME_BIN }}
+          FIREFOX_BIN: ${{ env.FIREFOX_BIN }}
+          EDGE_BIN: ${{ env.EDGE_BIN }}
+          OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
         run: node scripts/test-demo.js
 
@@ -463,6 +530,7 @@ jobs:
             scripts/postinstall.js
 
   release:
+    timeout-minutes: 10
     needs: [test-debug, test-release]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest

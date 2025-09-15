@@ -1,11 +1,14 @@
 import fs from 'fs';
 import http from 'http';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import puppeteer from 'puppeteer-core';
 
 (async () => {
   console.log('Starting sanity test...');
-  const demoDir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', 'resources', 'public', 'demo');
+  const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+  const baseDir = path.dirname(scriptDir);
+  const demoDir = path.join(baseDir, 'resources/public/demo');
   const port = 3002; // Arbitrary port
 
   // Simple HTTP server to serve the demo directory
