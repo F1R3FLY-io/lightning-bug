@@ -156,6 +156,17 @@ jobs:
             sudo apt update
             sudo apt install google-chrome-stable -y
           elif [ "$browser" = "firefox" ]; then
+            # Remove any existing Snap Firefox (if present)
+            sudo snap remove --purge firefox || true
+            # Add Mozilla PPA for deb Firefox
+            sudo add-apt-repository ppa:mozillateam/ppa -y
+            # Pin the deb package to avoid Snap reinstall
+            echo '
+            Package: *
+            Pin: release o=LP-PPA-mozillateam
+            Pin-Priority: 1001
+            ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
+            sudo apt update
             sudo apt install firefox -y
           elif [ "$browser" = "edge" ]; then
             curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
@@ -376,6 +387,17 @@ jobs:
             sudo apt update
             sudo apt install google-chrome-stable -y
           elif [ "$browser" = "firefox" ]; then
+            # Remove any existing Snap Firefox (if present)
+            sudo snap remove --purge firefox || true
+            # Add Mozilla PPA for deb Firefox
+            sudo add-apt-repository ppa:mozillateam/ppa -y
+            # Pin the deb package to avoid Snap reinstall
+            echo '
+            Package: *
+            Pin: release o=LP-PPA-mozillateam
+            Pin-Priority: 1001
+            ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
+            sudo apt update
             sudo apt install firefox -y
           elif [ "$browser" = "edge" ]; then
             curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
