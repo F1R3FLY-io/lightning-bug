@@ -211,7 +211,7 @@ jobs:
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "FIREFOX_BIN=/Applications/Firefox.app/Contents/MacOS/firefox" >> $GITHUB_ENV
           else
-            echo "FIREFOX_BIN=/usr/lib/firefox/firefox" >> $GITHUB_ENV
+            echo "FIREFOX_BIN=/usr/bin/firefox" >> $GITHUB_ENV
           fi
 
       - name: Install Edge via brew on macOS
@@ -442,7 +442,7 @@ jobs:
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "FIREFOX_BIN=/Applications/Firefox.app/Contents/MacOS/firefox" >> $GITHUB_ENV
           else
-            echo "FIREFOX_BIN=/usr/lib/firefox/firefox" >> $GITHUB_ENV
+            echo "FIREFOX_BIN=/usr/bin/firefox" >> $GITHUB_ENV
           fi
 
       - name: Install Edge via brew on macOS
