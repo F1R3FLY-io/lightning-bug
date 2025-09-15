@@ -1,7 +1,8 @@
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { runCmd } from './utils.js';
 
-const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const baseDir = path.dirname(scriptDir);
 const demoDir = path.join(baseDir, 'resources/public/demo');
 
