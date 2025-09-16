@@ -1,6 +1,5 @@
 import { runShellCmd } from './utils.js';
-
-const os = require('os');
+import os from 'os';
 
 const platform = os.platform();
 const browser = process.argv[2];
