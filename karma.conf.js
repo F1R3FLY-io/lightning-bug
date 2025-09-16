@@ -1,12 +1,12 @@
 export default async function (config) {
   const karmaFile = process.env.KARMA_FILE || 'target/karma-test.js';
-  const [karmaCljsTest, karmaChromeLauncher, karmaSpecReporter, karmaFirefoxLauncher, karmaOperaLauncher, karmaSafariLauncher] = await Promise.all([
+  await Promise.all([
     import('karma-cljs-test'),
     import('karma-chrome-launcher'),
     import('karma-spec-reporter'),
     import('karma-firefox-launcher'),
     import('karma-opera-launcher'),
-    import('karma-safari-launcher')
+    import('karma-webkit-launcher')
   ]);
 
   config.set({
@@ -50,14 +50,6 @@ export default async function (config) {
     mime: {
       'application/wasm': ['wasm']
     },
-    reporters: ['spec'],
-    plugins: [
-      karmaCljsTest.default,
-      karmaChromeLauncher.default,
-      karmaSpecReporter.default,
-      karmaFirefoxLauncher.default,
-      karmaOperaLauncher.default,
-      karmaSafariLauncher.default
-    ]
+    reporters: ['spec']
   });
 };

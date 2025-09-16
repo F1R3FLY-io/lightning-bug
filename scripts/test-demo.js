@@ -41,9 +41,9 @@ import puppeteer from 'puppeteer-core';
     { name: 'Chrome', browser: 'chrome', executablePath: process.env.CHROME_BIN || (isMacOS ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : isWindows ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : '/usr/bin/google-chrome-stable'), args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'] },
     { name: 'Firefox', browser: 'firefox', executablePath: process.env.FIREFOX_BIN || (isMacOS ? '/Applications/Firefox.app/Contents/MacOS/firefox' : isWindows ? 'C:\\Program Files\\Mozilla Firefox\\firefox.exe' : '/usr/bin/firefox'), args: ['--headless', '--remote-debugging-port=0', '--remote-allow-origins=*'] },
     { name: 'Edge', browser: 'chrome', executablePath: process.env.EDGE_BIN || (isMacOS ? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' : isWindows ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' : '/usr/bin/microsoft-edge-stable'), args: ['--no-sandbox', '--disable-setuid-sandbox', '--headless=new', '--disable-gpu'] },
-    { name: 'Opera', browser: 'chrome', executablePath: process.env.OPERA_BIN || (isMacOS ? '/Applications/Opera.app/Contents/MacOS/Opera' : isWindows ? 'C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\Opera\\opera.exe' : '/usr/bin/opera'), args: ['--no-sandbox', '--headless', '--disable-gpu'] }
+    { name: 'Opera', browser: 'chrome', executablePath: process.env.OPERA_BIN || (isMacOS ? '/Applications/Opera.app/Contents/MacOS/Opera' : isWindows ? 'C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\Opera\\opera.exe' : '/usr/bin/opera'), args: ['--no-sandbox', '--headless', '--disable-gpu'] },
+    { name: 'Safari', browser: 'webkit', executablePath: process.env.SAFARI_BIN || '/Applications/Safari.app/Contents/MacOS/Safari', args: [] }
   ];
-  // Safari is not supported by Puppeteer, so exclude it
 
   const testBrowser = process.env.TEST_BROWSER;
   let browsersToTest = browsers;
@@ -66,17 +66,32 @@ import puppeteer from 'puppeteer-core';
     console.log(`Testing with ${name}, executable: ${executablePath}`);
 
     try {
+      let playwright;
+      if (name === 'Safari') {
+        playwright = (await import('playwright')).default;
+      }
+
       console.log(`Launching ${name}...`);
-      const launchOptions = {
-        headless: true,
-        browser: browserType,
-        executablePath,
-        args,
-        dumpio: true, // Enable to debug stdout/stderr
-        protocolTimeout: 60000, // Increase protocol timeout to 60s
-        timeout: 0 // Disable launch timeout
-      };
-      const browser = await puppeteer.launch(launchOptions);
+      let browser;
+      if (name === 'Safari') {
+        browser = await playwright.webkit.launch({
+          headless: true,
+          dumpio: true, // Enable to debug stdout/stderr
+          protocolTimeout: 60000, // Increase protocol timeout to 60s
+          timeout: 0 // Disable launch timeout
+        });
+      } else {
+        const launchOptions = {
+          headless: true,
+          browser: browserType,
+          executablePath,
+          args,
+          dumpio: true,
+          protocolTimeout: 60000,
+          timeout: 0
+        };
+        browser = await puppeteer.launch(launchOptions);
+      }
       console.log(`${name} launched`);
       const page = await browser.newPage();
       console.log(`${name} new page created`);
