@@ -127,8 +127,9 @@ import puppeteer from 'puppeteer-core';
         }
       });
 
+      const waitUntil = name === 'Safari' ? 'networkidle' : 'networkidle2';
       console.log(`${name} navigating to http://localhost:${port}/index.html`);
-      await page.goto(`http://localhost:${port}/index.html`, { waitUntil: 'networkidle2' });
+      await page.goto(`http://localhost:${port}/index.html`, { waitUntil });
 
       try {
         console.log(`${name} waiting for ready and opened...`);
