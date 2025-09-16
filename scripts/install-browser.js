@@ -6,11 +6,11 @@ const browser = process.argv[2];
 
 function installOnWindows(browser) {
   runShellCmd('Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))');
-  if (browser === 'chrome') runShellCmd('choco install googlechrome -y');
-  else if (browser === 'firefox') runShellCmd('choco install firefox -y');
-  else if (browser === 'edge') runShellCmd('choco install microsoft-edge -y');
-  else if (browser === 'opera') runShellCmd('choco install opera -y');
-  else if (browser === 'brave') runShellCmd('choco install brave -y');
+  if (browser === 'chrome') runShellCmd('choco install googlechrome -y --ignore-checksums');
+  else if (browser === 'firefox') runShellCmd('choco install firefox -y --ignore-checksums');
+  else if (browser === 'edge') runShellCmd('choco install microsoft-edge -y --ignore-checksums');
+  else if (browser === 'opera') runShellCmd('choco install opera -y --ignore-checksums');
+  else if (browser === 'brave') runShellCmd('choco install brave -y --ignore-checksums');
 }
 
 function installOnUbuntu(browser) {
