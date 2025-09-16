@@ -189,7 +189,7 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "BRAVE_BIN=C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe" >> $GITHUB_ENV
+            echo "BRAVE_BIN=C:/Users/runneradmin/AppData/Local/BraveSoftware/Brave-Browser/Application/brave.exe" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "macOS" ]; then
             echo "BRAVE_BIN=/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" >> $GITHUB_ENV
           else

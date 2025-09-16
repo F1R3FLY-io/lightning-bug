@@ -3,55 +3,19 @@ import { Extension } from '@codemirror/state';
 import { Observable } from 'rxjs';
 import { Parser } from 'web-tree-sitter';
 
-type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'report';
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'report';
 
 /**
- * Configuration interface for a language extension.
- * Defines paths and settings for Tree-Sitter, LSP, and file handling.
+ * Represents a position in the document (1-based by default).
  */
-export interface LanguageConfig {
-  /** Path to the Tree-Sitter grammar WASM file for syntax parsing. */
-  grammarWasm?: string | (() => string);
-  /** Pre-instantiated Tree-Sitter Parser (or function returning one, sync or async) with language set. Prefer over grammarWasm. */
-  parser?: Parser | (() => Parser) | (() => Promise<Parser>);
-  /** Path to the SCM query file for syntax highlighting captures. */
-  highlightsQueryPath?: string | (() => string);
-  /** Path to the SCM query file for indentation rules. */
-  indentsQueryPath?: string | (() => string);
-  /** WebSocket URL for connecting to a Language Server Protocol (LSP) server (enables diagnostics/symbols). */
-  lspUrl?: string;
-  /** Array of file extensions associated with the language (required, e.g., [".rho"]). */
-  extensions: string[];
-  /** CSS class for the file icon in the UI (e.g., "fas fa-code"). */
-  fileIcon?: string;
-  /** Fallback highlighting mode if Tree-Sitter fails (e.g., "none"). */
-  fallbackHighlighter?: string;
-  /** Number of spaces per indent level (defaults to 2). */
-  indentSize?: number;
-}
-
-/**
- * Props interface for the Editor component.
- * Configures languages and additional CodeMirror extensions.
- */
-export interface EditorProps {
-  /** Map of language keys (strings) to their configurations. Merges with defaults like "text". */
-  languages?: Record<string, LanguageConfig>;
-  /** Array of additional CodeMirror extensions (e.g., keymaps, themes) to extend/override defaults. */
-  extraExtensions?: Extension[];
-  /** Optional callback for content changes, triggered after updates. */
-  onContentChange?: (content: string) => void;
-  /** Default protocol for file paths (e.g., "inmemory://"). Defaults to "inmemory://". */
-  defaultProtocol?: string;
-  /** URL to the `tree-sitter.wasm` */
-  treeSitterWasm?: string | (() => string);
-}
-
 export interface Position {
   line: number;
   column: number;
 }
 
+/**
+ * Represents a selection range with start/end positions and selected text.
+ */
 export interface Selection {
   from: Position;
   to: Position;
@@ -59,7 +23,7 @@ export interface Selection {
 }
 
 /**
- * Internal state of a document in the workspace.
+ * Represents an open document in the workspace.
  */
 export interface Document {
   /** URI to the document's location. */
@@ -76,6 +40,9 @@ export interface Document {
   opened: boolean;
 }
 
+/**
+ * Represents the editor workspace.
+ */
 export interface Workspace {
   /** Map of URIs to document states. */
   documents: Document[];
@@ -83,6 +50,9 @@ export interface Workspace {
   activeUri: string | null;
 }
 
+/**
+ * Represents a diagnostic entry from LSP.
+ */
 export interface Diagnostic {
   /** Document URI. */
   uri: string;
@@ -130,7 +100,7 @@ export interface Symbol {
 }
 
 /**
- * Full internal state of the editor, accessible via getState().
+ * Internal state of the editor, accessible via getState().
  */
 export interface EditorState {
   /** Workspace containing open documents and active URI. */
@@ -176,74 +146,279 @@ export type EditorEvent =
   | { type: 'search-term-change'; data: { term: string; uri: string } };
 
 /**
- * Ref interface for imperative methods on the Editor component.
- * All positions are 1-based (line/column starting at 1).
+ * Configuration for a language extension.
+ */
+export interface LanguageConfig {
+  /** Path or function returning path to Tree-Sitter grammar WASM. */
+  grammarWasm?: string | (() => string);
+  /** Custom parser function or instance (bypasses grammarWasm). */
+  parser?: Parser | (() => Parser) | (() => Promise<Parser>);
+  /** Path or function returning path to highlights query. */
+  highlightsQueryPath?: string | (() => string);
+  /** Raw highlights query string (alternative to path). */
+  highlightsQuery?: string;
+  /** Path or function returning path to indents query. */
+  indentsQueryPath?: string | (() => string);
+  /** Raw indents query string (alternative to path). */
+  indentsQuery?: string;
+  /** URL for LSP server. */
+  lspUrl?: string;
+  /** File extensions associated with this language. */
+  extensions: string[];
+  /** Icon for files of this language (CSS class, e.g. `"fas fa-code"`). */
+  fileIcon?: string;
+  /** Fallback highlighter if Tree-Sitter fails ('none' or 'regex'). */
+  fallbackHighlighter?: string;
+  /** Indentation size in spaces. */
+  indentSize?: number;
+}
+
+/**
+ * Properties for the Editor component.
+ */
+export interface EditorProps {
+  /** Path or function returning path to Tree-Sitter core WASM. */
+  treeSitterWasm?: string | (() => string);
+  /** Map of language configurations. */
+  languages?: Record<string, LanguageConfig>;
+  /** Additional CodeMirror extensions. */
+  extraExtensions?: Extension[];
+  /** Default protocol for URIs (e.g., 'inmemory://'). */
+  defaultProtocol?: string;
+  /** Callback for content changes. */
+  onContentChange?: (text: string) => void;
+}
+
+/**
+ * Interface for the Editor instance methods (accessed via ref).
  */
 export interface EditorRef {
-  /** Returns the full current state (workspace, diagnostics, symbols, etc.). */
+  /**
+   * Returns the full current state (workspace, diagnostics, symbols, etc.).
+   * @example editorRef.current.getState()
+   * @returns {State} The current editor state.
+   */
   getState(): EditorState;
-  /** Returns RxJS observable for subscribing to events. */
+
+  /**
+   * Returns RxJS observable for subscribing to events.
+   * @example editorRef.current.getEvents().subscribe(evt => console.log(evt.type, evt.data))
+   * @returns {Observable<EditorEvent>} The events subject.
+   */
   getEvents(): Observable<EditorEvent>;
-  /** Returns current cursor position (1-based) for active document. */
+
+  /**
+   * Returns current cursor position (1-based) for active document.
+   * @example editorRef.current.getCursor()
+   * @returns {Position} The cursor position.
+   */
   getCursor(): Position;
-  /** Sets cursor position for active document (triggers `selection-change` event). */
+
+  /**
+   * Sets cursor position for active document (triggers `selection-change` event).
+   * @example editorRef.current.setCursor({ line: 1, column: 3 })
+   * @param {Position} pos The new cursor position.
+   */
   setCursor(pos: Position): void;
-  /** Returns current selection range and text (or null if none). */
+
+  /**
+   * Returns current selection range and text for active document, or `null` if no selection.
+   * @example editorRef.current.getSelection()
+   * @returns {Selection | null} The selection.
+   */
   getSelection(): Selection | null;
-  /** Sets selection range for active document (triggers `selection-change` event). */
+
+  /**
+   * Sets selection range for active document (triggers `selection-change` event).
+   * @example editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 })
+   * @param {Position} from Start position.
+   * @param {Position} to End position.
+   */
   setSelection(from: Position, to: Position): void;
-  /** Opens or activates a document with file path or URI, optional content and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. */
-  openDocument(fileOrUri: string, text?: string, language?: string, makeActive?: boolean): void;
-  /** Closes the specified or active document (triggers `document-close`). Notifies LSP if open. */
+
+  /**
+   * Opens or activates a document with file path or URI, optional content and language (triggers `document-open`).
+   * Reuses if exists, updates if provided. Notifies LSP if connected. If fourth param makeActive is false,
+   * opens without activating.
+   * @example editorRef.current.openDocument("demo.rho", "new x in { x!(\"Hello\") | Nil }", "rholang")
+   * @example editorRef.current.openDocument("demo.rho") // activates existing
+   * @example editorRef.current.openDocument("demo.rho", undefined, undefined, false) // opens without activating
+   * @param {string} fileOrUri File path or URI.
+   * @param {string} [text] Initial text content.
+   * @param {string} [lang] Language key.
+   * @param {boolean} [makeActive=true] Whether to activate the document.
+   */
+  openDocument(fileOrUri: string, text?: string, lang?: string, makeActive?: boolean): void;
+
+  /**
+   * Closes the specified or active document (triggers `document-close`). Notifies LSP if open.
+   * @example editorRef.current.closeDocument()
+   * @example editorRef.current.closeDocument("specific-uri")
+   * @param {string} [fileOrUri] File path or URI to close (defaults to active).
+   */
   closeDocument(fileOrUri?: string): void;
-  /** Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP. */
+
+  /**
+   * Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP.
+   * @example editorRef.current.renameDocument("new-name.rho")
+   * @example editorRef.current.renameDocument("new-name.rho", "old-uri")
+   * @param {string} newFileOrUri New file path or URI.
+   * @param {string} [oldFileOrUri] Old file path or URI (defaults to active).
+   */
   renameDocument(newFileOrUri: string, oldFileOrUri?: string): void;
-  /** Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`. */
+
+  /**
+   * Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
+   * @example editorRef.current.saveDocument()
+   * @example editorRef.current.saveDocument("specific-uri")
+   * @param {string} [fileOrUri] File path or URI to save (defaults to active).
+   */
   saveDocument(fileOrUri?: string): void;
-  /** Returns `true` if editor is initialized and ready for methods. */
+
+  /**
+   * Returns `true` if editor is initialized and ready for methods.
+   * @example editorRef.current.isReady()
+   * @returns {boolean} Ready status.
+   */
   isReady(): boolean;
-  /** Highlights a range in active document (triggers `highlight-change` with range). */
+
+  /**
+   * Highlights a range in active document (triggers `highlight-change` with range).
+   * @example editorRef.current.highlightRange({ line: 1, column: 1 }, { line: 1, column: 5 })
+   * @param {Position} from Start position.
+   * @param {Position} to End position.
+   */
   highlightRange(from: Position, to: Position): void;
-  /** Clears highlight in active document (triggers `highlight-change` with `null`). */
+
+  /**
+   * Clears highlight in active document (triggers `highlight-change` with `null`).
+   * @example editorRef.current.clearHighlight()
+   */
   clearHighlight(): void;
-  /** Scrolls to center on a range in active document. */
+
+  /**
+   * Scrolls to center on a range in active document (triggers `scroll` event).
+   * @example editorRef.current.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 })
+   * @param {Position} from Start position.
+   * @param {Position} to End position.
+   */
   centerOnRange(from: Position, to: Position): void;
-  /** Returns text for specified or active document, or `null` if not found. */
+
+  /**
+   * Returns text for specified or active document, or `null` if not found.
+   * @example editorRef.current.getText()
+   * @example editorRef.current.getText("specific-uri")
+   * @param {string} [fileOrUri] File path or URI (defaults to active).
+   * @returns {string | null} The text content.
+   */
   getText(fileOrUri?: string): string | null;
-  /** Replaces entire text for specified or active document (triggers `content-change`). */
+
+  /**
+   * Replaces entire text for specified or active document (triggers `content-change`).
+   * @example editorRef.current.setText("new text")
+   * @example editorRef.current.setText("new text", "specific-uri")
+   * @param {string} text New text content.
+   * @param {string} [fileOrUri] File path or URI (defaults to active).
+   */
   setText(text: string, fileOrUri?: string): void;
-  /** Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none. */
+
+  /**
+   * Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none.
+   * @example editorRef.current.getFilePath()
+   * @example editorRef.current.getFilePath("specific-uri")
+   * @param {string} [fileOrUri] File path or URI (defaults to active).
+   * @returns {string | null} The file path.
+   */
   getFilePath(fileOrUri?: string): string | null;
-  /** Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none. */
+
+  /**
+   * Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none.
+   * @example editorRef.current.getFileUri()
+   * @example editorRef.current.getFileUri("specific-uri")
+   * @param {string} [fileOrUri] File path or URI (defaults to active).
+   * @returns {string | null} The URI.
+   */
   getFileUri(fileOrUri?: string): string | null;
-  /** Sets the active document if exists, loads content to view, opens in LSP if not. */
+
+  /**
+   * Sets the active document if exists, loads content to view, opens in LSP if not (triggers `document-open`).
+   * @example editorRef.current.activateDocument("demo.rho")
+   * @param {string} fileOrUri File path or URI.
+   */
   activateDocument(fileOrUri: string): void;
-  /** Queries the internal DataScript database with the given query and optional params. */
+
+  /**
+   * Queries the internal DataScript database with the given query and optional params.
+   * Returns the result as JS array.
+   * @example editorRef.current.query([:find ?uri :where [?e :document/uri ?uri]])
+   * @param {any} query The DataScript query.
+   * @param {any[]} [params] Optional parameters.
+   * @returns {any} Query results.
+   */
   query(query: any, params?: any[]): any;
-  /** Returns the DataScript connection object for direct access (advanced use). */
+
+  /**
+   * Returns the DataScript connection object for direct access (advanced use).
+   * @example editorRef.current.getDb()
+   * @returns {any} The DataScript connection.
+   */
   getDb(): any;
-  /** Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active). */
+
+  /**
+   * Retrieves LSP diagnostics for the target file (optional fileOrUri, defaults to active).
+   * @example editorRef.current.getDiagnostics()
+   * @example editorRef.current.getDiagnostics('inmemory://demo.rho')
+   * @param {string} [fileOrUri] File path or URI.
+   * @returns {Diagnostic[]} Array of diagnostics.
+   */
   getDiagnostics(fileOrUri?: string): Diagnostic[];
-  /** Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active). */
+
+  /**
+   * Retrieves LSP symbols for the target file (optional fileOrUri, defaults to active).
+   * @example editorRef.current.getSymbols()
+   * @example editorRef.current.getSymbols('inmemory://demo.rho')
+   * @param {string} [fileOrUri] File path or URI.
+   * @returns {Symbol[]} Array of symbols.
+   */
   getSymbols(fileOrUri?: string): Symbol[];
-  /** Returns the current search term. */
+
+  /**
+   * Returns the current search term.
+   * @example editorRef.current.getSearchTerm()
+   * @returns {string} The search term.
+   */
   getSearchTerm(): string;
-  /** Opens the search and replace panel */
+
+  /**
+   * Opens the search panel in the editor.
+   * @example editorRef.current.openSearchPanel()
+   */
   openSearchPanel(): void;
-  /** Returns the current log level as a string ('trace', 'debug', etc.). */
+
+  /**
+   * Returns the current log level from taoensso.timbre.
+   * @example editorRef.current.getLogLevel()
+   * @returns {LogLevel} The log level (e.g., 'info').
+   */
   getLogLevel(): LogLevel;
-  /** Sets the log level (accepts 'trace', 'debug', etc.). */
+
+  /**
+   * Sets the log level for taoensso.timbre (accepts 'trace', 'debug', 'info', 'warn', 'error', 'fatal', 'report').
+   * @example editorRef.current.setLogLevel("debug")
+   * @param {LogLevel} level The new log level.
+   */
   setLogLevel(level: LogLevel): void;
-  /** Shuts down LSP connections for all languages or a specific one. */
+
+  /**
+   * Shuts down LSP connections for all languages or a specific one.
+   * @example editorRef.current.shutdownLsp()
+   * @example editorRef.current.shutdownLsp("text")
+   * @param {string} [lang] Specific language to shutdown (all if omitted).
+   */
   shutdownLsp(lang?: string): void;
 }
 
 /**
- * The main Editor React component.
- * Embeds a CodeMirror-based text editor with pluggable language support.
- * @example
- * import { Editor } from '@f1r3fly-io/lightning-bug';
- * const editorRef = React.createRef<EditorRef>();
- * <Editor ref={editorRef} languages={{ text: { extensions: ['.txt'] } }} />;
+ * The Lightning Bug Editor component.
  */
 export const Editor: React.ForwardRefExoticComponent<EditorProps & React.RefAttributes<EditorRef>>;

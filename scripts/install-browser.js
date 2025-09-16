@@ -10,7 +10,7 @@ function installOnWindows(browser) {
   else if (browser === 'firefox') runShellCmd('choco install firefox -y');
   else if (browser === 'edge') runShellCmd('choco install microsoft-edge -y');
   else if (browser === 'opera') runShellCmd('choco install opera -y');
-  else if (browser === 'brave') runShellCmd('choco install brave --ia "--system-level" -y');
+  else if (browser === 'brave') runShellCmd('choco install brave -y');
 }
 
 function installOnUbuntu(browser) {
