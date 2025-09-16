@@ -218,7 +218,7 @@ jobs:
         run: node scripts/retry.js "npm run test:${{ matrix.mode }}"
 
       - name: Build demo
-        run: MODE=${{ matrix.mode }} npm run build:demo
+        run: npx cross-env MODE=${{ matrix.mode }} npm run build:demo
 
       - name: Run sanity test
         env:
