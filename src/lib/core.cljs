@@ -284,7 +284,7 @@
                 (let [state-atom (.-current state-ref)
                       view-ref (react/useRef nil)
                       [ready set-ready] (react/useState false)
-                      events (react/useMemo (fn [] (ReplaySubject. 1)) #js [])
+                      events (react/useMemo (fn [] (ReplaySubject.)) #js [])
                       on-content-change (:on-content-change props)
                       container-ref (react/useRef nil)]
                   (react/useImperativeHandle
