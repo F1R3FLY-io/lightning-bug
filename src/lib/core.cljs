@@ -830,7 +830,7 @@
                                              (log/error "Error in setLogLevel:" (.-message error)))))
                           ;; Shuts down LSP connections for all languages or a specific one.
                           ;; Example: (.shutdownLsp editor)
-                          ;; Example: (.shutdownLsp "text" editor)
+                          ;; Example: (.shutdownLsp editor "text")
                           :shutdownLsp (fn [lang]
                                          (try
                                            (if lang

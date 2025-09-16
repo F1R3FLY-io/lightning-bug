@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2025-09-16
+
+### Changed
+
+- Updates CI to test against `ubuntu-latest`, `macos-latest`, and `windows-latest`
+- Updates CI to test against `chrome`, `firefox`, `edge`, `opera`, `brave`, and `safari` (on `macos-latest`)
+- Consolidates and cleans up the CI logic a bit.
+
+### Fixed
+- Updates the core library to replay all events for new subscribers which fixes some browser/operating system integration issues.
+
 ## [0.7.3] - 2025-09-12
 
 ### Added
