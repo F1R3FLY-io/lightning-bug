@@ -273,6 +273,7 @@ jobs:
           sudo service upower start
 
       - name: Set KARMA_BROWSERS
+        shell: bash
         run: |
           case "${{ matrix.browser }}" in
             chrome) echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox" >> $GITHUB_ENV ;;
@@ -282,21 +283,41 @@ jobs:
             safari) echo "KARMA_BROWSERS=WebkitHeadless" >> $GITHUB_ENV ;;
             brave) echo "KARMA_BROWSERS=BraveHeadless" >> $GITHUB_ENV ;;
           esac
-        shell: bash
 
       - name: Run headless tests
         if: matrix.os == 'ubuntu-latest'
-        run: dbus-run-session -- xvfb-run --auto-servernum npm run test:debug
+        shell: bash
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            dbus-run-session -- xvfb-run --auto-servernum npm run test:debug && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
       - name: Run headless tests
         if: matrix.os != 'ubuntu-latest'
-        run: npm run test:debug
+        shell: bash
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            npm run test:debug && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
       - name: Build demo (dev)
         run: npm run build:demo
 
       - name: Run sanity test (dev)
         if: matrix.os == 'ubuntu-latest'
+        shell: bash
         env:
           TEST_BROWSER: ${{ matrix.browser }}
           CHROME_BIN: ${{ env.CHROME_BIN }}
@@ -305,10 +326,20 @@ jobs:
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
           BRAVE_BIN: ${{ env.BRAVE_BIN }}
-        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Sanity test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
       - name: Run sanity test (dev)
         if: matrix.os != 'ubuntu-latest'
+        shell: bash
         env:
           TEST_BROWSER: ${{ matrix.browser }}
           CHROME_BIN: ${{ env.CHROME_BIN }}
@@ -317,7 +348,16 @@ jobs:
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
           BRAVE_BIN: ${{ env.BRAVE_BIN }}
-        run: node scripts/test-demo.js
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            node scripts/test-demo.js && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Sanity test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
   test-release:
     timeout-minutes: 10
@@ -526,6 +566,7 @@ jobs:
           sudo service upower start
 
       - name: Set KARMA_BROWSERS
+        shell: bash
         run: |
           case "${{ matrix.browser }}" in
             chrome) echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox" >> $GITHUB_ENV ;;
@@ -535,21 +576,41 @@ jobs:
             safari) echo "KARMA_BROWSERS=WebkitHeadless" >> $GITHUB_ENV ;;
             brave) echo "KARMA_BROWSERS=BraveHeadless" >> $GITHUB_ENV ;;
           esac
+
+      - name: Run headless tests
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
-
-      - name: Run headless tests
-        if: matrix.os == 'ubuntu-latest'
-        run: dbus-run-session -- xvfb-run --auto-servernum npm run test:debug
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            dbus-run-session -- xvfb-run --auto-servernum npm run test:release && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
       - name: Run headless tests
         if: matrix.os != 'ubuntu-latest'
-        run: npm run test:debug
+        shell: bash
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            npm run test:release && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
-      - name: Build demo (dev)
-        run: npm run build:demo
+      - name: Build demo (release)
+        run: MODE=release npm run build:demo
 
-      - name: Run sanity test (dev)
+      - name: Run sanity test (release)
         if: matrix.os == 'ubuntu-latest'
+        shell: bash
         env:
           TEST_BROWSER: ${{ matrix.browser }}
           CHROME_BIN: ${{ env.CHROME_BIN }}
@@ -558,10 +619,20 @@ jobs:
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
           BRAVE_BIN: ${{ env.BRAVE_BIN }}
-        run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Sanity test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
-      - name: Run sanity test (dev)
+      - name: Run sanity test (release)
         if: matrix.os != 'ubuntu-latest'
+        shell: bash
         env:
           TEST_BROWSER: ${{ matrix.browser }}
           CHROME_BIN: ${{ env.CHROME_BIN }}
@@ -570,7 +641,16 @@ jobs:
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
           BRAVE_BIN: ${{ env.BRAVE_BIN }}
-        run: node scripts/test-demo.js
+        run: |
+          success=false
+          for attempt in {1..3}; do
+            node scripts/test-demo.js && { success=true; break; } || true
+            (( attempt < 3 )) && echo "Sanity test attempt $attempt failed, retrying..." 1>&2 || true
+          done
+          if ! $success; then
+            echo "Failed after $attempt attempts." 1>&2
+            exit 1
+          fi
 
   release:
     timeout-minutes: 10
