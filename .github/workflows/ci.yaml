@@ -66,7 +66,7 @@ jobs:
       - name: Run type tests
         run: npm run test:types
 
-  test-debug:
+  test:
     timeout-minutes: 10
     needs: [lint-and-test-types]
     strategy:
@@ -74,9 +74,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         browser: [chrome, firefox, edge, opera, brave]
+        mode: [debug, release]
         include:
           - os: macos-latest
             browser: safari
+            mode: debug
+          - os: macos-latest
+            browser: safari
+            mode: release
     runs-on: ${{ matrix.os }}
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -179,7 +184,7 @@ jobs:
             echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
             sudo apt update
             sudo apt install opera-stable -y
-          fi  elif [ "$browser" = "brave" ]; then
+          elif [ "$browser" = "brave" ]; then
             sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
             echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|sudo tee /etc/apt/sources.list.d/brave-browser-release.list > /dev/null
             sudo apt update
@@ -290,7 +295,7 @@ jobs:
         run: |
           success=false
           for attempt in {1..3}; do
-            dbus-run-session -- xvfb-run --auto-servernum npm run test:debug && { success=true; break; } || true
+            dbus-run-session -- xvfb-run --auto-servernum npm run test:${{ matrix.mode }} && { success=true; break; } || true
             (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
           done
           if ! $success; then
@@ -304,7 +309,7 @@ jobs:
         run: |
           success=false
           for attempt in {1..3}; do
-            npm run test:debug && { success=true; break; } || true
+            npm run test:${{ matrix.mode }} && { success=true; break; } || true
             (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
           done
           if ! $success; then
@@ -312,10 +317,10 @@ jobs:
             exit 1
           fi
 
-      - name: Build demo (dev)
-        run: npm run build:demo
+      - name: Build demo
+        run: MODE=${{ matrix.mode }} npm run build:demo
 
-      - name: Run sanity test (dev)
+      - name: Run sanity test
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         env:
@@ -337,300 +342,7 @@ jobs:
             exit 1
           fi
 
-      - name: Run sanity test (dev)
-        if: matrix.os != 'ubuntu-latest'
-        shell: bash
-        env:
-          TEST_BROWSER: ${{ matrix.browser }}
-          CHROME_BIN: ${{ env.CHROME_BIN }}
-          FIREFOX_BIN: ${{ env.FIREFOX_BIN }}
-          EDGE_BIN: ${{ env.EDGE_BIN }}
-          OPERA_BIN: ${{ env.OPERA_BIN }}
-          SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
-          BRAVE_BIN: ${{ env.BRAVE_BIN }}
-        run: |
-          success=false
-          for attempt in {1..3}; do
-            node scripts/test-demo.js && { success=true; break; } || true
-            (( attempt < 3 )) && echo "Sanity test attempt $attempt failed, retrying..." 1>&2 || true
-          done
-          if ! $success; then
-            echo "Failed after $attempt attempts." 1>&2
-            exit 1
-          fi
-
-  test-release:
-    timeout-minutes: 10
-    needs: [lint-and-test-types]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        browser: [chrome, firefox, edge, opera, brave]
-        include:
-          - os: macos-latest
-            browser: safari
-    runs-on: ${{ matrix.os }}
-    env:
-      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: latest
-          cache: npm
-          cache-dependency-path: package-lock.json
-          registry-url: 'https://npm.pkg.github.com'
-
-      - name: Set up Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '23'
-
-      - name: Set up Clojure
-        uses: DeLaGuardo/setup-clojure@13.4
-        with:
-          cli: latest
-
-      - name: Cache clojure dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.m2/repository
-            ~/.gitlibs
-            ~/.deps.clj
-            .cpcache
-          key: cljdeps-${{ hashFiles('deps.edn') }}
-          restore-keys: cljdeps-
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Install Playwright WebKit
-        if: matrix.browser == 'safari'
-        run: npx playwright install webkit
-
-      - name: Install system dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt update
-          sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb gnupg wget
-
-      - name: Prepare test
-        run: npm run prepare:all
-
-      - name: Install Chocolatey
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
-
-      - name: Install Browser
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $browser = "${{ matrix.browser }}"
-          if ($browser -eq "chrome") { choco install googlechrome -y }
-          elseif ($browser -eq "firefox") { choco install firefox -y }
-          elseif ($browser -eq "edge") { choco install microsoft-edge -y }
-          elseif ($browser -eq "opera") { choco install opera -y }
-          elseif ($browser -eq "brave") { choco install brave -y }
-
-      - name: Install Browser
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          browser="${{ matrix.browser }}"
-          if [ "$browser" = "chrome" ]; then
-            wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-            echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
-            sudo apt update
-            sudo apt install google-chrome-stable -y
-          elif [ "$browser" = "firefox" ]; then
-            sudo snap remove --purge firefox || true
-            sudo apt remove firefox -y || true
-            sudo add-apt-repository ppa:mozillateam/ppa -y
-            sudo apt update
-            sudo apt install -f -t "o=LP-PPA-mozillateam" firefox -y
-            sudo apt-mark hold firefox
-          elif [ "$browser" = "edge" ]; then
-            curl https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > microsoft.gpg
-            sudo install -o root -g root -m 644 microsoft.gpg /etc/apt/trusted.gpg.d/
-            sudo sh -c 'echo "deb [arch=amd64] https://packages.microsoft.com/repos/edge stable main" > /etc/apt/sources.list.d/microsoft-edge-dev.list'
-            sudo rm microsoft.gpg
-            sudo apt update
-            sudo apt install microsoft-edge-stable -y
-          elif [ "$browser" = "opera" ]; then
-            curl -fsSL https://deb.opera.com/archive.key | gpg --dearmor | sudo tee /usr/share/keyrings/opera.gpg > /dev/null
-            echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
-            sudo apt update
-            sudo apt install opera-stable -y
-          fi  elif [ "$browser" = "brave" ]; then
-            sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
-            echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|sudo tee /etc/apt/sources.list.d/brave-browser-release.list > /dev/null
-            sudo apt update
-            sudo apt install brave-browser -y
-          fi
-
-      - name: Install Chrome via brew on macOS
-        if: matrix.browser == 'chrome' && matrix.os == 'macos-latest'
-        run: brew install --cask google-chrome
-
-      - name: Set CHROME_BIN
-        if: matrix.browser == 'chrome'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "CHROME_BIN=C:/Program Files/Google/Chrome/Application/chrome.exe" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "CHROME_BIN=/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" >> $GITHUB_ENV
-          else
-            echo "CHROME_BIN=/usr/bin/google-chrome-stable" >> $GITHUB_ENV
-          fi
-
-      - name: Install Firefox via brew on macOS
-        if: matrix.browser == 'firefox' && matrix.os == 'macos-latest'
-        run: brew install --cask firefox
-
-      - name: Set FIREFOX_BIN
-        if: matrix.browser == 'firefox'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "FIREFOX_BIN=C:/Program Files/Mozilla Firefox/firefox.exe" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "FIREFOX_BIN=/Applications/Firefox.app/Contents/MacOS/firefox" >> $GITHUB_ENV
-          else
-            echo "FIREFOX_BIN=/usr/bin/firefox" >> $GITHUB_ENV
-          fi
-
-      - name: Install Edge via brew on macOS
-        if: matrix.browser == 'edge' && matrix.os == 'macos-latest'
-        run: brew install --cask microsoft-edge
-
-      - name: Set EDGE_BIN
-        if: matrix.browser == 'edge'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "EDGE_BIN=C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "EDGE_BIN=/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" >> $GITHUB_ENV
-          else
-            echo "EDGE_BIN=/usr/bin/microsoft-edge-stable" >> $GITHUB_ENV
-          fi
-
-      - name: Install Opera via brew on macOS
-        if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
-        run: brew install --cask opera
-
-      - name: Install Brave via brew on macOS
-        if: matrix.browser == 'brave' && matrix.os == 'macos-latest'
-        run: brew install --cask brave-browser
-
-      - name: Set OPERA_BIN
-        if: matrix.browser == 'opera'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Linux" ]; then
-            echo "OPERA_BIN=/usr/bin/opera" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "Windows" ]; then
-            echo "OPERA_BIN=C:/Program Files/Opera/opera.exe" >> $GITHUB_ENV
-          fi
-
-      - name: Set BRAVE_BIN
-        if: matrix.browser == 'brave'
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" == "Windows" ]; then
-            echo "BRAVE_BIN=C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe" >> $GITHUB_ENV
-          elif [ "$RUNNER_OS" == "macOS" ]; then
-            echo "BRAVE_BIN=/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" >> $GITHUB_ENV
-          else
-            echo "BRAVE_BIN=/usr/bin/brave-browser" >> $GITHUB_ENV
-          fi
-
-      - name: Start services
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo service dbus start
-          sudo service upower start
-
-      - name: Set KARMA_BROWSERS
-        shell: bash
-        run: |
-          case "${{ matrix.browser }}" in
-            chrome) echo "KARMA_BROWSERS=ChromeHeadlessNoSandbox" >> $GITHUB_ENV ;;
-            firefox) echo "KARMA_BROWSERS=FirefoxHeadless" >> $GITHUB_ENV ;;
-            edge) echo "KARMA_BROWSERS=EdgeHeadless" >> $GITHUB_ENV ;;
-            opera) echo "KARMA_BROWSERS=OperaHeadless" >> $GITHUB_ENV ;;
-            safari) echo "KARMA_BROWSERS=WebkitHeadless" >> $GITHUB_ENV ;;
-            brave) echo "KARMA_BROWSERS=BraveHeadless" >> $GITHUB_ENV ;;
-          esac
-
-      - name: Run headless tests
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        run: |
-          success=false
-          for attempt in {1..3}; do
-            dbus-run-session -- xvfb-run --auto-servernum npm run test:release && { success=true; break; } || true
-            (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
-          done
-          if ! $success; then
-            echo "Failed after $attempt attempts." 1>&2
-            exit 1
-          fi
-
-      - name: Run headless tests
-        if: matrix.os != 'ubuntu-latest'
-        shell: bash
-        run: |
-          success=false
-          for attempt in {1..3}; do
-            npm run test:release && { success=true; break; } || true
-            (( attempt < 3 )) && echo "Test attempt $attempt failed, retrying..." 1>&2 || true
-          done
-          if ! $success; then
-            echo "Failed after $attempt attempts." 1>&2
-            exit 1
-          fi
-
-      - name: Build demo (release)
-        run: MODE=release npm run build:demo
-
-      - name: Run sanity test (release)
-        if: matrix.os == 'ubuntu-latest'
-        shell: bash
-        env:
-          TEST_BROWSER: ${{ matrix.browser }}
-          CHROME_BIN: ${{ env.CHROME_BIN }}
-          FIREFOX_BIN: ${{ env.FIREFOX_BIN }}
-          EDGE_BIN: ${{ env.EDGE_BIN }}
-          OPERA_BIN: ${{ env.OPERA_BIN }}
-          SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
-          BRAVE_BIN: ${{ env.BRAVE_BIN }}
-        run: |
-          success=false
-          for attempt in {1..3}; do
-            dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js && { success=true; break; } || true
-            (( attempt < 3 )) && echo "Sanity test attempt $attempt failed, retrying..." 1>&2 || true
-          done
-          if ! $success; then
-            echo "Failed after $attempt attempts." 1>&2
-            exit 1
-          fi
-
-      - name: Run sanity test (release)
+      - name: Run sanity test
         if: matrix.os != 'ubuntu-latest'
         shell: bash
         env:
@@ -654,7 +366,7 @@ jobs:
 
   release:
     timeout-minutes: 10
-    needs: [test-debug, test-release]
+    needs: [lint-and-test-types, test]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     env:
