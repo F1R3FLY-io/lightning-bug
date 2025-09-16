@@ -129,17 +129,11 @@ jobs:
         if: matrix.browser == 'safari'
         run: npx playwright install webkit
 
-      - name: Install system dependencies
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt update
-          sudo apt upgrade -y
-          sudo apt install -y dirmngr ca-certificates software-properties-common apt-transport-https curl dbus dbus-x11 gsettings-desktop-schemas upower xvfb gnupg wget
-
       - name: Prepare test
         run: npm run prepare:all
 
       - name: Install Browser
+        if: matrix.browser != 'safari'
         run: node scripts/install-browser.js "${{ matrix.browser }}"
 
       - name: Set CHROME_BIN
