@@ -231,6 +231,17 @@ jobs:
           BRAVE_BIN: ${{ env.BRAVE_BIN }}
         run: node scripts/retry.js "node scripts/test-demo.js"
 
+      - name: Upload libs artifact
+        uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.browser == 'chrome' && matrix.mode == 'release'
+        with:
+          name: libs-artifact
+          path: |
+            dist/**
+            types/**
+            resources/public/extensions/**
+            scripts/postinstall.js
+
   release:
     timeout-minutes: 10
     needs: [lint-and-test-types, test]
