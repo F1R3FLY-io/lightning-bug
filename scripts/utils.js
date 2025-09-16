@@ -45,3 +45,21 @@ export function runCmd(command, cwd) {
     throw new Error(`Command "${command}" failed with exit code ${result.status}`);
   }
 }
+
+/**
+ * Runs a complex shell command (with pipes, redirects, etc.) synchronously using the shell.
+ * Uses 'pwsh' on Windows, default shell on others.
+ * @param {string} command - The full command string to run.
+ * @param {string} [cwd=__dirname] - The working directory.
+ */
+export function runShellCmd(command, cwd = __dirname) {
+  const shell = process.platform === 'win32' ? 'pwsh' : true;
+  const options = { cwd, stdio: 'inherit', shell };
+  const result = spawnSync(command, [], options);
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`Command "${command}" failed with exit code ${result.status}`);
+  }
+}
