@@ -324,19 +324,35 @@ Lightning Bug supports pluggable language extensions via the `languages` prop. T
 
 Each language configuration can include the following attributes. Note that some attributes (e.g., paths) support dynamic resolution via functions for lazy loading or computed values (e.g., data URLs for embedded resources).
 
-| Attribute              | Type                        | Required | Description                                                                 |
-|------------------------|-----------------------------|----------|-----------------------------------------------------------------------------|
-| `grammarWasm`          | `string \| () => string`    | No       | Path or function returning the path to the Tree-Sitter grammar WASM file for syntax parsing. Optional if `parser` is provided. |
-| `parser`               | `(() => Parser \| Promise<Parser>) \| Parser` | No       | Alternative to `grammarWasm`: a function returning a Tree-Sitter Parser instance (sync or async Promise) or the instance directly. Useful for custom or pre-loaded parsers. |
-| `highlightQueryPath`   | `string \| () => string`    | No       | Path or function returning the path to the SCM query file for syntax highlighting captures. Alternative: provide `highlightsQuery` directly. |
-| `highlightsQuery`      | `string`                    | No       | Direct SCM query string for syntax highlighting (alternative to `highlightQueryPath`). |
-| `indentsQueryPath`     | `string \| () => string`    | No       | Path or function returning the path to the SCM query file for indentation rules. Alternative: provide `indentsQuery` directly. |
-| `indentsQuery`         | `string`                    | No       | Direct SCM query string for indentation rules (alternative to `indentsQueryPath`). |
-| `lspUrl`               | `string`                    | No       | WebSocket URL for connecting to a Language Server Protocol (LSP) server (optional, enables advanced features like diagnostics and symbols). |
-| `extensions`           | `string[]`                  | Yes      | Array of strings representing file extensions associated with the language (required, e.g., `[".rho"]`). |
-| `fileIcon`             | `string`                    | No       | String CSS class for the file icon in the UI (optional, e.g., `"fas fa-code"`). |
-| `fallbackHighlighter`  | `string`                    | No       | String specifying the fallback highlighting mode if Tree-Sitter fails (optional, e.g., `"none"`). |
-| `indentSize`           | `integer`                   | No       | Integer specifying the number of spaces for indentation (optional, defaults to 2). |
+```typescript
+/**
+ * Configuration for a language extension.
+ */
+export interface LanguageConfig {
+  /** Path or function returning path to Tree-Sitter grammar WASM. */
+  grammarWasm?: string | (() => string);
+  /** Custom parser function or instance (bypasses grammarWasm). */
+  parser?: Parser | (() => Parser) | (() => Promise<Parser>);
+  /** Path or function returning path to highlights query. */
+  highlightsQueryPath?: string | (() => string);
+  /** Raw highlights query string (alternative to path). */
+  highlightsQuery?: string;
+  /** Path or function returning path to indents query. */
+  indentsQueryPath?: string | (() => string);
+  /** Raw indents query string (alternative to path). */
+  indentsQuery?: string;
+  /** URL for LSP server. */
+  lspUrl?: string;
+  /** File extensions associated with this language. */
+  extensions: string[];
+  /** Icon for files of this language (CSS class, e.g. `"fas fa-code"`). */
+  fileIcon?: string;
+  /** Fallback highlighter if Tree-Sitter fails ('none' or 'regex'). */
+  fallbackHighlighter?: string;
+  /** Indentation size in spaces. */
+  indentSize?: number;
+}
+```
 
 For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` during postinstall. Bundled extensions (e.g., Rholang) may use exported functions like `treeSitterRholangWasmUrl` for data URLs.
 
@@ -379,6 +395,106 @@ In TypeScript, use the provided types for validation.
 
 This configuration is normalized internally (camelCase to kebab-case). Invalid configs throw errors during validation.
 
+## Base Types
+
+```typescript
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'report';
+
+/**
+ * Represents a position in the document (1-based by default).
+ */
+export interface Position {
+  line: number;
+  column: number;
+}
+
+/**
+ * Represents a selection range with start/end positions and selected text.
+ */
+export interface Selection {
+  from: Position;
+  to: Position;
+  text: string;
+}
+
+/**
+ * Represents an open document in the workspace.
+ */
+export interface Document {
+  /** URI to the document's location. */
+  uri: string;
+  /** Current text content of the document. */
+  text: string;
+  /** Language key associated with the document (e.g., "rholang"). */
+  language: string;
+  /** Version number for LSP synchronization. */
+  version: number;
+  /** Flag indicating if the document has unsaved changes. */
+  dirty: boolean;
+  /** Flag indicating if the document is open in LSP. */
+  opened: boolean;
+}
+
+/**
+ * Represents the editor workspace.
+ */
+export interface Workspace {
+  /** Map of URIs to document states. */
+  documents: Document[];
+  /** Currently active document URI (or null). */
+  activeUri: string | null;
+}
+
+/**
+ * Represents a diagnostic entry from LSP.
+ */
+export interface Diagnostic {
+  /** Document URI. */
+  uri: string;
+  /** Document version at time of diagnostic. */
+  version?: number;
+  /** Diagnostic message. */
+  message: string;
+  /** Severity (1: Error, 2: Warning, 3: Info, 4: Hint). */
+  severity: number;
+  /** Start line (0-based). */
+  startLine: number;
+  /** Start character (0-based). */
+  startChar: number;
+  /** End line (0-based). */
+  endLine: number;
+  /** End character (0-based). */
+  endChar: number;
+}
+
+export interface Symbol {
+    /** Document URI. */
+    uri: string;
+    /** Symbol name. */
+    name: string;
+    /** Symbol kind (LSP standard). */
+    kind: number;
+    /** Start line (0-based). */
+    startLine: number;
+    /** Start character (0-based). */
+    startChar: number;
+    /** End line (0-based). */
+    endLine: number;
+    /** End character (0-based). */
+    endChar: number;
+    /** Selection start line (0-based). */
+    selectionStartLine: number;
+    /** Selection start character (0-based). */
+    selectionStartChar: number;
+    /** Selection end line (0-based). */
+    selectionEndLine: number;
+    /** Selection end character (0-based). */
+    selectionEndChar: number;
+    /** Parent symbol ID (or null). */
+    parent?: number;
+}
+```
+
 ## Public API
 
 The public API consists of the `Editor` React component's props, imperative methods accessible via a React ref, and RxJS events emitted for lifecycle and state changes. All types are defined in `types/lib.d.ts` for TypeScript users.
@@ -387,51 +503,29 @@ The public API consists of the `Editor` React component's props, imperative meth
 
 The `Editor` component accepts the following props for initialization and configuration.
 
-| Prop Name          | Type                                      | Required | Description                                                                                            |
-|--------------------|-------------------------------------------|----------|--------------------------------------------------------------------------------------------------------|
-| `languages`        | `Record<string, LanguageConfig>`          | No       | Map of language keys to their configurations. Merges with built-in defaults like `"text"`.             |
-| `extraExtensions`  | `Extension[]`                             | No       | Array of additional CodeMirror extensions (from `@codemirror/*` packages) to extend/override defaults. |
-| `defaultProtocol`  | `string`                                  | No       | Default protocol for file paths (e.g., "inmemory://"). Defaults to "inmemory://".                      |
-
-#### LanguageConfig Schema
-
 ```typescript
 /**
- * Configuration for a language extension.
+ * Properties for the Editor component.
  */
-export interface LanguageConfig {
-  /** Path or function returning path to Tree-Sitter grammar WASM. */
-  grammarWasm?: string | (() => string);
-  /** Custom parser function or instance (bypasses grammarWasm). */
-  parser?: Parser | (() => Parser) | (() => Promise<Parser>);
-  /** Path or function returning path to highlights query. */
-  highlightsQueryPath?: string | (() => string);
-  /** Raw highlights query string (alternative to path). */
-  highlightsQuery?: string;
-  /** Path or function returning path to indents query. */
-  indentsQueryPath?: string | (() => string);
-  /** Raw indents query string (alternative to path). */
-  indentsQuery?: string;
-  /** URL for LSP server. */
-  lspUrl?: string;
-  /** File extensions associated with this language. */
-  extensions: string[];
-  /** Icon for files of this language (CSS class, e.g. `"fas fa-code"`). */
-  fileIcon?: string;
-  /** Fallback highlighter if Tree-Sitter fails ('none' or 'regex'). */
-  fallbackHighlighter?: string;
-  /** Indentation size in spaces. */
-  indentSize?: number;
+export interface EditorProps {
+  /** Path or function returning path to Tree-Sitter core WASM. */
+  treeSitterWasm?: string | (() => string);
+  /** Map of language configurations. */
+  languages?: Record<string, LanguageConfig>;
+  /** Additional CodeMirror extensions. */
+  extraExtensions?: Extension[];
+  /** Default protocol for URIs (e.g., 'inmemory://'). */
+  defaultProtocol?: string;
+  /** Callback for content changes. */
+  onContentChange?: (text: string) => void;
 }
 ```
 
 ### Imperative Methods (via React Ref)
 
-Use a React ref to access these methods for runtime control. All positions are 1-based (line/column starting at 1).
+Use a React ref to access these methods for runtime control. All positions are 1-indexed (lines and columns start at index 1).
 
 ```typescript
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'report';
-
 /**
  * Interface for the Editor instance methods (accessed via ref).
  */
@@ -671,100 +765,6 @@ export const Editor: React.ForwardRefExoticComponent<EditorProps & React.RefAttr
 #### EditorState Schema (Return Value for getState)
 
 ```typescript
-/**
- * Represents a position in the document (1-based by default).
- */
-export interface Position {
-  line: number;
-  column: number;
-}
-
-/**
- * Represents a selection range with start/end positions and selected text.
- */
-export interface Selection {
-  from: Position;
-  to: Position;
-  text: string;
-}
-
-/**
- * Represents an open document in the workspace.
- */
-export interface Document {
-  /** URI to the document's location. */
-  uri: string;
-  /** Current text content of the document. */
-  text: string;
-  /** Language key associated with the document (e.g., "rholang"). */
-  language: string;
-  /** Version number for LSP synchronization. */
-  version: number;
-  /** Flag indicating if the document has unsaved changes. */
-  dirty: boolean;
-  /** Flag indicating if the document is open in LSP. */
-  opened: boolean;
-}
-
-/**
- * Represents the editor workspace.
- */
-export interface Workspace {
-  /** Map of URIs to document states. */
-  documents: Document[];
-  /** Currently active document URI (or null). */
-  activeUri: string | null;
-}
-
-/**
- * Represents a diagnostic entry from LSP.
- */
-export interface Diagnostic {
-  /** Document URI. */
-  uri: string;
-  /** Document version at time of diagnostic. */
-  version?: number;
-  /** Diagnostic message. */
-  message: string;
-  /** Severity (1: Error, 2: Warning, 3: Info, 4: Hint). */
-  severity: number;
-  /** Start line (0-based). */
-  startLine: number;
-  /** Start character (0-based). */
-  startChar: number;
-  /** End line (0-based). */
-  endLine: number;
-  /** End character (0-based). */
-  endChar: number;
-}
-
-export interface Symbol {
-    /** Document URI. */
-    uri: string;
-    /** Symbol name. */
-    name: string;
-    /** Symbol kind (LSP standard). */
-    kind: number;
-    /** Start line (0-based). */
-    startLine: number;
-    /** Start character (0-based). */
-    startChar: number;
-    /** End line (0-based). */
-    endLine: number;
-    /** End character (0-based). */
-    endChar: number;
-    /** Selection start line (0-based). */
-    selectionStartLine: number;
-    /** Selection start character (0-based). */
-    selectionStartChar: number;
-    /** Selection end line (0-based). */
-    selectionEndLine: number;
-    /** Selection end character (0-based). */
-    selectionEndChar: number;
-    /** Parent symbol ID (or null). */
-    parent?: number;
-}
-
 /**
  * Internal state of the editor, accessible via getState().
  */
