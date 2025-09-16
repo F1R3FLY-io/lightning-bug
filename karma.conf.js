@@ -38,8 +38,9 @@ export default async function (config) {
         env: { CHROME_BIN: process.env.EDGE_BIN }
       },
       OperaHeadless: {
-        base: 'Opera',
-        flags: ['--headless', '--disable-gpu', '--no-sandbox']
+        base: 'Chrome',
+        flags: ['--headless=new', '--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
+        env: { CHROME_BIN: process.env.OPERA_BIN }
       },
       BraveHeadless: {
         base: 'Chrome',

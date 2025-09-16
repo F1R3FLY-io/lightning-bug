@@ -63,20 +63,64 @@ Install the Clojure CLI tools. Install Node.js dependencies with `npm install`. 
 
 ### Compiling and Watching Targets
 
-| Target | Description | Compile Command | Watch Command | Release Command |
-|--------|-------------|-----------------|---------------|-----------------|
-| `:libs` | Core library and extensions | `npm run build:debug` | `npm run watch:libs` | `npm run build:release` |
-| `:app` | Full development app with Re-frame UI | `npx shadow-cljs compile app` | `npm run serve:app` | - |
-| `:demo` | Minimal standalone demo | `npm run build:demo` | `npm run serve:demo` | - |
-| `:test` | Browser tests | - | `npm run serve:test` | - |
-| `:karma-test` | Karma tests | `npm run test:debug` | - | - |
-| `:karma-test-advanced` | Karma tests against release-compiled library | `npm run test:release` | - | - |
+| Target                | Description                                      | Compile Command                  | Watch Command        | Release Command         |
+|-----------------------|--------------------------------------------------|----------------------------------|----------------------|-------------------------|
+| `:libs`               | Core library and extensions                      | `npm run build:debug`            | `npm run watch:libs` | `npm run build:release` |
+| `:app`                | Full development app with Re-frame UI            | `npx shadow-cljs compile app`    | `npm run serve:app`  | -                       |
+| `:demo`               | Minimal standalone demo                          | `npm run build:demo`             | `npm run serve:demo` | -                       |
+| `:test`               | Browser tests                                    | -                                | `npm run serve:test` | -                       |
+| `:karma-test-debug`   | Karma tests                                      | `npm run test:debug`             | -                    | -                       |
+| `:karma-test-release` | Karma tests against release-compiled library     | `npm run test:release`           | -                    | -                       |
 
 For multiple targets, run `npx shadow-cljs watch libs app test`.
 
 Access the full development app at `http://localhost:3000` during watch (requires watching `:app`).
 
 The `:libs` target compiles to ESM format for modern browser compatibility. Release builds are minified via advanced compilation. The outputs consist of multiple files due to Closure compilation and external dependencies (e.g., CodeMirror, RxJS). For single-file bundles, consider a post-build step with a tool like esbuild or Rollup (not included in this project).
+
+### NPM Scripts
+
+The `package.json` defines several NPM scripts for building, testing, linting, and serving the project. These can be run using `npm run <script-name>`.
+
+| Script Name       | Command                                                                 | Description                                                                 |
+|-------------------|-------------------------------------------------------------------------|-----------------------------------------------------------------------------|
+| `prepare:app`     | `node scripts/prepare-app.js`                                           | Copies Tree-Sitter WASM files to the app's public resources.                |
+| `prepare:test`    | `node scripts/prepare-test.js`                                          | Copies Tree-Sitter WASM files and extensions to the test resources.         |
+| `prepare:all`     | `npm run prepare:app && npm run prepare:test`                           | Runs both prepare:app and prepare:test.                                     |
+| `build:debug`     | `npx shadow-cljs compile libs`                                          | Compiles the core library and extensions in debug mode.                     |
+| `build:release`   | `npx shadow-cljs release libs && node scripts/strip-goog.js dist/libs/lib.core.js` | Compiles the library in release mode and strips unnecessary statements.     |
+| `build:demo`      | `node scripts/build-demo.js`                                            | Builds the demo app, compiling the library and installing dependencies.     |
+| `build`           | `npm run build:debug`                                                   | Alias for build:debug.                                                      |
+| `watch:libs`      | `npx shadow-cljs watch libs`                                            | Watches and recompiles the library on changes.                              |
+| `serve:app`       | `npx shadow-cljs watch app`                                             | Watches the development app.                                                |
+| `serve:test`      | `npx shadow-cljs watch test`                                            | Watches and serves browser tests at http://localhost:8021.                  |
+| `serve:demo`      | `npx shadow-cljs watch demo`                                            | Watches the standalone demo.                                                |
+| `serve`           | `npx shadow-cljs watch libs app test demo`                              | Watches all targets.                                                        |
+| `lint:clj-kondo`  | `clojure -M:dev:clj-kondo`                                              | Runs clj-kondo linter.                                                      |
+| `lint:eastwood`   | `clojure -M:dev:eastwood`                                               | Runs eastwood linter.                                                       |
+| `lint:splint`     | `clojure -M:dev:splint`                                                 | Runs splint linter.                                                         |
+| `lint:kibit`      | `clojure -X:dev:kibit`                                                  | Runs kibit linter.                                                          |
+| `lint`            | `npm run lint:clj-kondo && npm run lint:eastwood && npm run lint:splint && npm run lint:kibit` | Runs all linters.                                                           |
+| `test:types`      | `tsd`                                                                   | Validates TypeScript bindings.                                              |
+| `test:debug`      | `npx shadow-cljs compile karma-test-debug && cross-env KARMA_FILE=target/karma-test-debug.js npx karma start --single-run` | Runs headless Karma tests in debug mode.                                    |
+| `test:release`    | `npx shadow-cljs compile karma-test-release && cross-env KARMA_FILE=target/karma-test-release.js npx karma start --single-run` | Runs headless Karma tests in release mode.                                  |
+| `test:demo`       | `node scripts/test-demo.js`                                             | Runs demo sanity tests in browsers.                                         |
+| `test`            | `npm run test:types && npm run test:debug && npm run test:release && MODE=release npm run build:demo && npm run test:demo` | Runs all tests.                                                             |
+
+### Node.js Scripts
+
+The project includes Node.js scripts in the `scripts/` directory for tasks like building, preparing assets, and testing. These are invoked by some NPM scripts.
+
+| Script Name          | Description                                                                 |
+|----------------------|-----------------------------------------------------------------------------|
+| `build-demo.js`      | Builds the demo: installs deps, compiles library (debug/release via `MODE`), installs demo deps. |
+| `install-browser.js` | Installs a browser using Playwright for CI testing.                         |
+| `prepare-app.js`     | Copies Tree-Sitter WASM to app resources.                                   |
+| `prepare-test.js`    | Copies Tree-Sitter WASM and extensions to test resources.                   |
+| `retry.js`           | Retries a command (used in CI for flakiness).                               |
+| `strip-goog.js`      | Removes `goog=goog||{};` from compiled JS.                                  |
+| `test-demo.js`       | Runs demo sanity tests in browsers using Puppeteer/Playwright.              |
+| `utils.js`           | Shared utilities (e.g., runCmd, findPkgDir). Not directly invoked.          |
 
 ## TypeScript Bindings
 
@@ -373,34 +417,34 @@ Use a React ref to access these methods for runtime control. All positions are 1
 
 | Method Signature | Description | Examples |
 |------------------|-------------|----------|
-| `activateDocument(fileOrUri: string): void;` | Sets the active document if exists, loads text to view, opens in LSP if not. | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
-| `centerOnRange(from: Position, to: Position): void;` | Scrolls to center on a range in active document. | <table><tr><td>`editor.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
-| `clearHighlight(): void;` | Clears highlight in active document (triggers `highlight-change` with `null`). | <table><tr><td>`editor.clearHighlight();`</td></tr></table> |
-| `closeDocument(fileOrUri?: string): void;` | Closes the specified or active document (triggers `document-close`). Notifies LSP if open. | <table><tr><td>`editor.closeDocument();`</td></tr><tr><td>`editor.closeDocument("specific-uri");`</td></tr></table> |
-| `getCursor(): Position;` | Returns current cursor position (1-based) for active document. | <table><tr><td>`editor.getCursor();`</td></tr></table> |
-| `getDb(): any;` | Returns the DataScript connection object for direct access (advanced use). | <table><tr><td>`const db = editor.getDb();`</td></tr></table> |
-| `getDiagnostics(fileOrUri?: string): Diagnostic[];` | Retrieves the LSP diagnostics for the specified or active file. | <table><tr><td>`const diags = editorRef.current.getDiagnostics();`</td></tr><tr><td>`const diags = editorRef.current.getDiagnostics('inmemory://demo.rho');`</td></tr></table> |
-| `getEvents(): Observable<EditorEvent>;` | Returns RxJS observable for subscribing to events. | <table><tr><td>`editor.getEvents().subscribe(event => console.log(event.type, event.data));`</td></tr></table> |
-| `getFilePath(fileOrUri?: string): string | null;` | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none. | <table><tr><td>`editor.getFilePath();`</td></tr><tr><td>`editor.getFilePath("specific-uri");`</td></tr></table> |
-| `getFileUri(fileOrUri?: string): string | null;` | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none. | <table><tr><td>`editor.getFileUri();`</td></tr><tr><td>`editor.getFileUri("specific-uri");`</td></tr></table> |
-| `getLogLevel(): LogLevel;` | Returns the current log level as a string ('trace', 'debug', etc.). | <table><tr><td>`editor.getLogLevel();`</td></tr></table> |
-| `getSearchTerm(): string;` | Returns the current search term. | <table><tr><td>`editor.getSearchTerm();`</td></tr></table> |
-| `getSelection(): Selection | null;` | <table><tr><td>none</td></tr></table> | <table><tr><td>`{ from: { line: number; column: number }; to: { line: number; column: number }; text: string } \| null`</td></tr></table> | Returns current selection range and text for active document, or `null` if no selection. | <table><tr><td>`editor.getSelection();`</td></tr></table> |
-| `getState(): EditorState;` | Returns the full current state (workspace, diagnostics, symbols, etc.). | <table><tr><td>`editor.getState();`</td></tr></table> |
-| `getSymbols(fileOrUri?: string): Symbol[];` | Retrieves the LSP symbols for the specified or active file. | <table><tr><td>`const syms = editorRef.current.getSymbols();`</td></tr><tr><td>`const syms = editorRef.current.getSymbols('inmemory://demo.rho');`</td></tr></table> |
-| `getText(fileOrUri?: string): string | null;` | Returns text for specified or active document, or `null` if not found. | <table><tr><td>`editor.getText();`</td></tr><tr><td>`editor.getText("specific-uri");`</td></tr></table> |
-| `highlightRange(from: Position, to: Position): void;` | Highlights a range in active document (triggers `highlight-change` with range). | <table><tr><td>`editor.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
-| `isReady(): boolean;` | Returns `true` if editor is initialized and ready for methods. | <table><tr><td>`editor.isReady();`</td></tr></table> |
-| `openDocument(fileOrUri: string, text?: string, language?: string, makeActive?: boolean): void;` | Opens or activates a document with file path or URI, optional text and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. | <table><tr><td>`editor.openDocument("demo.rho", "text", "rholang");`</td></tr><tr><td>`editor.openDocument("demo.rho"); // activates existing`</td></tr><tr><td>`editor.openDocument("demo.rho", null, null, false); // opens without activating`</td></tr></table> |
-| `openSearchPanel(): void;` | Opens the search panel in the editor. | <table><tr><td>`editor.openSearchPanel();`</td></tr></table> |
-| `query(query: any, params?: any[]): any;` | Queries the internal DataScript database with the given query and optional params. | <table><tr><td>`editor.query('[:find ?uri :where [?e :document/uri ?uri]]');`</td></tr></table> |
-| `renameDocument(newFileOrUri: string, oldFileOrUri?: string): void;` | Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP. | <table><tr><td>`editor.renameDocument("new-name.rho");`</td></tr><tr><td>`editor.renameDocument("new-name.rho", "old-uri");`</td></tr></table> |
-| `saveDocument(fileOrUri?: string): void;` | Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`. | <table><tr><td>`editor.saveDocument();`</td></tr><tr><td>`editor.saveDocument("specific-uri");`</td></tr></table> |
-| `setCursor(pos: Position): void;` | Sets cursor position for active document (triggers `selection-change` event). | <table><tr><td>`editor.setCursor({ line: 1, column: 3 });`</td></tr></table> |
-| `setLogLevel(level: LogLevel): void;` | Sets the log level for taoensso.timbre (accepts 'trace', 'debug', 'info', 'warn', 'error', 'fatal', 'report'). | <table><tr><td>`editor.setLogLevel("debug");`</td></tr></table> |
-| `setSelection(from: Position, to: Position): void;` | Sets selection range for active document (triggers `selection-change` event). | <table><tr><td>`editor.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
-| `setText(text: string, fileOrUri?: string): void;` | Replaces entire text for specified or active document (triggers `content-change`). | <table><tr><td>`editor.setText("new text");`</td></tr><tr><td>`editor.setText("new text", "specific-uri");`</td></tr></table> |
-| `shutdownLsp(lang?: string): void;` | Shuts down LSP connections for all languages or a specific one. | <table><tr><td>`editor.shutdownLsp();`</td></tr><tr><td>`editor.shutdownLsp("text");`</td></tr></table> |
+| <table><tr><td>`activateDocument(fileOrUri: string): void;`</td></tr></table> | Sets the active document if exists, loads text to view, opens in LSP if not. | <table><tr><td>`editor.activateDocument("demo.rho");`</td></tr></table> |
+| <table><tr><td>`centerOnRange(from: Position, to: Position): void;`</td></tr></table> | Scrolls to center on a range in active document. | <table><tr><td>`editor.centerOnRange({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
+| <table><tr><td>`clearHighlight(): void;`</td></tr></table> | Clears highlight in active document (triggers `highlight-change` with `null`). | <table><tr><td>`editor.clearHighlight();`</td></tr></table> |
+| <table><tr><td>`closeDocument(fileOrUri?: string): void;`</td></tr></table> | Closes the specified or active document (triggers `document-close`). Notifies LSP if open. | <table><tr><td>`editor.closeDocument();`</td></tr><tr><td>`editor.closeDocument("specific-uri");`</td></tr></table> |
+| <table><tr><td>`getCursor(): Position;`</td></tr></table> | Returns current cursor position (1-based) for active document. | <table><tr><td>`editor.getCursor();`</td></tr></table> |
+| <table><tr><td>`getDb(): any;`</td></tr></table> | Returns the DataScript connection object for direct access (advanced use). | <table><tr><td>`const db = editor.getDb();`</td></tr></table> |
+| <table><tr><td>`getDiagnostics(fileOrUri?: string): Diagnostic[];`</td></tr></table> | Retrieves the LSP diagnostics for the specified or active file. | <table><tr><td>`const diags = editorRef.current.getDiagnostics();`</td></tr><tr><td>`const diags = editorRef.current.getDiagnostics('inmemory://demo.rho');`</td></tr></table> |
+| <table><tr><td>`getEvents(): Observable<EditorEvent>;`</td></tr></table> | Returns RxJS observable for subscribing to events. | <table><tr><td>`editor.getEvents().subscribe(event => console.log(event.type, event.data));`</td></tr></table> |
+| <table><tr><td>`getFilePath(fileOrUri?: string): string \| null;`</td></tr></table> | Returns file path (e.g., `"/demo.rho"`) for specified or active, or null if none. | <table><tr><td>`editor.getFilePath();`</td></tr><tr><td>`editor.getFilePath("specific-uri");`</td></tr></table> |
+| <table><tr><td>`getFileUri(fileOrUri?: string): string \| null;`</td></tr></table> | Returns full URI (e.g., `"inmemory:///demo.rho"`) for specified or active, or `null` if none. | <table><tr><td>`editor.getFileUri();`</td></tr><tr><td>`editor.getFileUri("specific-uri");`</td></tr></table> |
+| <table><tr><td>`getLogLevel(): LogLevel;`</td></tr></table> | Returns the current log level as a string ('trace', 'debug', etc.). | <table><tr><td>`editor.getLogLevel();`</td></tr></table> |
+| <table><tr><td>`getSearchTerm(): string;`</td></tr></table> | Returns the current search term. | <table><tr><td>`editor.getSearchTerm();`</td></tr></table> |
+| <table><tr><td>`getSelection(): Selection \| null;`</td></tr></table> | <table><tr><td>none</td></tr></table> | <table><tr><td>`{ from: { line: number; column: number }; to: { line: number; column: number }; text: string } \| null`</td></tr></table> | Returns current selection range and text for active document, or `null` if no selection. | <table><tr><td>`editor.getSelection();`</td></tr></table> |
+| <table><tr><td>`getState(): EditorState;`</td></tr></table> | Returns the full current state (workspace, diagnostics, symbols, etc.). | <table><tr><td>`editor.getState();`</td></tr></table> |
+| <table><tr><td>`getSymbols(fileOrUri?: string): Symbol[];`</td></tr></table> | Retrieves the LSP symbols for the specified or active file. | <table><tr><td>`const syms = editorRef.current.getSymbols();`</td></tr><tr><td>`const syms = editorRef.current.getSymbols('inmemory://demo.rho');`</td></tr></table> |
+| <table><tr><td>`getText(fileOrUri?: string): string \| null;`</td></tr></table> | Returns text for specified or active document, or `null` if not found. | <table><tr><td>`editor.getText();`</td></tr><tr><td>`editor.getText("specific-uri");`</td></tr></table> |
+| <table><tr><td>`highlightRange(from: Position, to: Position): void;`</td></tr></table> | Highlights a range in active document (triggers `highlight-change` with range). | <table><tr><td>`editor.highlightRange({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
+| <table><tr><td>`isReady(): boolean;`</td></tr></table> | Returns `true` if editor is initialized and ready for methods. | <table><tr><td>`editor.isReady();`</td></tr></table> |
+| <table><tr><td>`openDocument(fileOrUri: string, text?: string, language?: string, makeActive?: boolean): void;`</td></tr></table> | Opens or activates a document with file path or URI, optional text and language (triggers `document-open`). Reuses if exists, updates if provided. Notifies LSP if connected. If makeActive is false, opens without activating. | <table><tr><td>`editor.openDocument("demo.rho", "text", "rholang");`</td></tr><tr><td>`editor.openDocument("demo.rho"); // activates existing`</td></tr><tr><td>`editor.openDocument("demo.rho", null, null, false); // opens without activating`</td></tr></table> |
+| <table><tr><td>`openSearchPanel(): void;`</td></tr></table> | Opens the search panel in the editor. | <table><tr><td>`editor.openSearchPanel();`</td></tr></table> |
+| <table><tr><td>`query(query: any, params?: any[]): any;`</td></tr></table> | Queries the internal DataScript database with the given query and optional params. | <table><tr><td>`editor.query('[:find ?uri :where [?e :document/uri ?uri]]');`</td></tr></table> |
+| <table><tr><td>`renameDocument(newFileOrUri: string, oldFileOrUri?: string): void;`</td></tr></table> | Renames the specified or active document (updates URI, triggers `document-rename`). Notifies LSP. | <table><tr><td>`editor.renameDocument("new-name.rho");`</td></tr><tr><td>`editor.renameDocument("new-name.rho", "old-uri");`</td></tr></table> |
+| <table><tr><td>`saveDocument(fileOrUri?: string): void;`</td></tr></table> | Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`. | <table><tr><td>`editor.saveDocument();`</td></tr><tr><td>`editor.saveDocument("specific-uri");`</td></tr></table> |
+| <table><tr><td>`setCursor(pos: Position): void;`</td></tr></table> | Sets cursor position for active document (triggers `selection-change` event). | <table><tr><td>`editor.setCursor({ line: 1, column: 3 });`</td></tr></table> |
+| <table><tr><td>`setLogLevel(level: LogLevel): void;`</td></tr></table> | Sets the log level for taoensso.timbre (accepts 'trace', 'debug', 'info', 'warn', 'error', 'fatal', 'report'). | <table><tr><td>`editor.setLogLevel("debug");`</td></tr></table> |
+| <table><tr><td>`setSelection(from: Position, to: Position): void;`</td></tr></table> | Sets selection range for active document (triggers `selection-change` event). | <table><tr><td>`editor.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });`</td></tr></table> |
+| <table><tr><td>`setText(text: string, fileOrUri?: string): void;`</td></tr></table> | Replaces entire text for specified or active document (triggers `content-change`). | <table><tr><td>`editor.setText("new text");`</td></tr><tr><td>`editor.setText("new text", "specific-uri");`</td></tr></table> |
+| <table><tr><td>`shutdownLsp(lang?: string): void;`</td></tr></table> | Shuts down LSP connections for all languages or a specific one. | <table><tr><td>`editor.shutdownLsp();`</td></tr><tr><td>`editor.shutdownLsp("text");`</td></tr></table> |
 
 #### EditorState Schema (Return Value for getState)
 
@@ -522,113 +566,6 @@ Subscribe to events via `getEvents()` for reactive updates. Each event is an obj
 | `highlight-change`   | `{ from: { line: number; column: number }; to: { line: number; column: number } } | null` | Highlight range updated or cleared. |
 
 ## Customizing the Editor Component
-
-The `Editor` can be customized using props for initial setup and a React ref for imperative control. This allows dynamic interactions without modifying the Lightning Bug source code. Below are step-by-step guides for vanilla JavaScript and TypeScript.
-
-### Customizing
-
-Below demonstrates how to override default resource locations with their embedded representations:
-
-1. Import dependencies. Use an import map or script tags to load React, React DOM, RxJS, and Lightning Bug modules.
-
-   ```html
-   <script type="importmap">
-     {
-       "imports": {
-         "@f1r3fly-io/lightning-bug": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/lib.core.js",
-         "@f1r3fly-io/lightning-bug/extensions": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/ext.lang.rholang.js",
-         "@f1r3fly-io/lightning-bug/tree-sitter": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.tree-sitter.js",
-         "@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.rholang.js",
-         "@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries": "./node_modules/@f1r3fly-io/lightning-bug/dist/libs/embedded.rholang-queries.js",
-         "@f1r3fly-io/tree-sitter-rholang-js-with-comments": "./node_modules/@f1r3fly-io/tree-sitter-rholang-js-with-comments/dist/tree-sitter-rholang-js.es.js",
-         "react": "https://esm.sh/react@19.0.0-rc-f994737d14-20240522",
-         "react-dom": "https://esm.sh/react-dom@19.0.0-rc-f994737d14-20240522",
-         "react-dom/client": "https://esm.sh/react-dom@19.0.0-rc-f994737d14-20240522/client",
-         "rxjs": "https://esm.sh/rxjs@7.8.2",
-         "@codemirror/autocomplete": "./node_modules/@codemirror/autocomplete/dist/index.js",
-         "@codemirror/commands": "./node_modules/@codemirror/commands/dist/index.js",
-         "@codemirror/language": "./node_modules/@codemirror/language/dist/index.js",
-         "@codemirror/lint": "./node_modules/@codemirror/lint/dist/index.js",
-         "@codemirror/search": "./node_modules/@codemirror/search/dist/index.js",
-         "@codemirror/state": "./node_modules/@codemirror/state/dist/index.js",
-         "@codemirror/view": "./node_modules/@codemirror/view/dist/index.js",
-         "@lezer/common": "./node_modules/@lezer/common/dist/index.js",
-         "@lezer/highlight": "./node_modules/@lezer/highlight/dist/index.js",
-         "style-mod": "./node_modules/style-mod/src/style-mod.js",
-         "w3c-keyname": "./node_modules/w3c-keyname/index.js",
-         "crelt": "./node_modules/crelt/index.js",
-         "@marijn/find-cluster-break": "./node_modules/@marijn/find-cluster-break/src/index.js",
-         "web-tree-sitter": "./node_modules/web-tree-sitter/tree-sitter.js"
-       }
-     }
-   </script>
-   <script type="module">
-     import * as React from 'react';
-     import { createRoot } from 'react-dom/client';
-     import { Editor } from '@f1r3fly-io/lightning-bug';
-     import { RholangExtension } from '@f1r3fly-io/lightning-bug/extensions';
-     import { treeSitterWasmUrl } from '@f1r3fly-io/lightning-bug/tree-sitter';
-     import { highlightsQueryUrl, indentsQueryUrl } from '@f1r3fly-io/lightning-bug/extensions/lang/rholang/tree-sitter/queries';
-     import { wasm } from '@f1r3fly-io/tree-sitter-rholang-js-with-comments';
-   </script>
-   ```
-
-2. Render the editor. Create a root and render the `Editor` with props.
-
-   ```javascript
-   const root = createRoot(document.getElementById('app'));
-   const editorRef = React.createRef();
-   root.render(React.createElement(Editor, {
-     ref: editorRef,
-     treeSitterWasm: treeSitterWasmUrl,
-     languages: {"rholang": {
-       ...RholangExtension,
-       grammarWasm: wasm,
-       highlightsQueryPath: highlightsQueryUrl,
-       indentsQueryPath: indentsQueryUrl,
-     }}
-   }));
-   ```
-
-3. Await the ready state before proceeding.
-
-   ```javascript
-   const waitForReady = (ref) => new Promise(resolve => {
-     const check = () => {
-       console.log("Checking ready...");
-       if (ref.current && ref.current.isReady()) {
-         console.log("Is ready");
-         resolve();
-       } else {
-         setTimeout(check, 100);
-       }
-     };
-     check();
-   });
-   await waitForReady(editorRef);
-   ```
-
-4. Use ref methods. Access methods via the ref after the editor is ready.
-
-   ```javascript
-   console.log("Document opened and activated");
-   console.log('State:', editorRef.current.getState());
-   editorRef.current.setCursor({ line: 1, column: 3 });
-   console.log('Cursor:', editorRef.current.getCursor());
-   editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
-   console.log('Selection:', editorRef.current.getSelection());
-   console.log('Text:', editorRef.current.getText());
-   console.log('File Path:', editorRef.current.getFilePath());
-   console.log('File URI:', editorRef.current.getFileUri());
-   console.log('Diagnostics:', editorRef.current.getDiagnostics());
-   console.log('Symbols:', editorRef.current.getSymbols());
-   console.log('Search Term:', editorRef.current.getSearchTerm());
-   const subscription = editorRef.current.getEvents().subscribe(event => {
-     console.log('Event:', event.type, event.data);
-   });
-   ```
-
-## Styling the Editor
 
 The `Editor` can be styled using CSS classes and Bootstrap utilities without modifying the component. Apply styles via external CSS files or inline styles on the parent container. Below are all customizable CSS classes from the default theme (`main.css` or `demo.css`).
 
