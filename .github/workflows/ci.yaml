@@ -159,18 +159,7 @@ jobs:
             sudo snap remove --purge firefox || true
             sudo apt remove firefox -y || true
             sudo add-apt-repository ppa:mozillateam/ppa -y
-            echo '
-            Package: *
-            Pin: release o=LP-PPA-mozillateam-ppa
-            Pin-Priority: 1001
-            ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
-            echo '
-            Package: firefox*
-            Pin: release o=Ubuntu
-            Pin-Priority: -1
-            ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
-            apt-cache policy firefox
             sudo apt install -f -t "o=LP-PPA-mozillateam" firefox -y
             sudo apt-mark hold firefox
           elif [ "$browser" = "edge" ]; then
@@ -395,18 +384,7 @@ jobs:
             sudo snap remove --purge firefox || true
             sudo apt remove firefox -y || true
             sudo add-apt-repository ppa:mozillateam/ppa -y
-            echo '
-            Package: *
-            Pin: release o=LP-PPA-mozillateam-ppa
-            Pin-Priority: 1001
-            ' | sudo tee /etc/apt/preferences.d/mozilla-firefox
-            echo '
-            Package: firefox*
-            Pin: release o=Ubuntu
-            Pin-Priority: -1
-            ' | sudo tee /etc/apt/preferences.d/firefox-no-snap
             sudo apt update
-            apt-cache policy firefox
             sudo apt install -f -t "o=LP-PPA-mozillateam" firefox -y
             sudo apt-mark hold firefox
           elif [ "$browser" = "edge" ]; then
