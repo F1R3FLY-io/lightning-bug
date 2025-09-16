@@ -40,6 +40,11 @@ export default async function (config) {
       OperaHeadless: {
         base: 'Opera',
         flags: ['--headless', '--disable-gpu', '--no-sandbox']
+      },
+      BraveHeadless: {
+        base: 'Chrome',
+        flags: ['--headless=new', '--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu'],
+        env: { CHROME_BIN: process.env.BRAVE_BIN }
       }
     },
     autoWatch: false,

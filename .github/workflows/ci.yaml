@@ -73,7 +73,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        browser: [chrome, firefox, edge, opera]
+        browser: [chrome, firefox, edge, opera, brave]
         include:
           - os: macos-latest
             browser: safari
@@ -149,6 +149,7 @@ jobs:
           elseif ($browser -eq "firefox") { choco install firefox -y }
           elseif ($browser -eq "edge") { choco install microsoft-edge -y }
           elseif ($browser -eq "opera") { choco install opera -y }
+          elseif ($browser -eq "brave") { choco install brave -y }
 
       - name: Install Browser
         if: matrix.os == 'ubuntu-latest'
@@ -178,6 +179,11 @@ jobs:
             echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
             sudo apt update
             sudo apt install opera-stable -y
+          fi  elif [ "$browser" = "brave" ]; then
+            sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|sudo tee /etc/apt/sources.list.d/brave-browser-release.list > /dev/null
+            sudo apt update
+            sudo apt install brave-browser -y
           fi
 
       - name: Install Chrome via brew on macOS
@@ -232,6 +238,10 @@ jobs:
         if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
         run: brew install --cask opera
 
+      - name: Install Brave via brew on macOS
+        if: matrix.browser == 'brave' && matrix.os == 'macos-latest'
+        run: brew install --cask brave-browser
+
       - name: Set OPERA_BIN
         if: matrix.browser == 'opera'
         shell: bash
@@ -242,6 +252,18 @@ jobs:
             echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "Windows" ]; then
             echo "OPERA_BIN=C:/Program Files/Opera/opera.exe" >> $GITHUB_ENV
+          fi
+
+      - name: Set BRAVE_BIN
+        if: matrix.browser == 'brave'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "BRAVE_BIN=C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "BRAVE_BIN=/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" >> $GITHUB_ENV
+          else
+            echo "BRAVE_BIN=/usr/bin/brave-browser" >> $GITHUB_ENV
           fi
 
       - name: Start services
@@ -258,6 +280,7 @@ jobs:
             edge) echo "KARMA_BROWSERS=EdgeHeadless" >> $GITHUB_ENV ;;
             opera) echo "KARMA_BROWSERS=OperaHeadless" >> $GITHUB_ENV ;;
             safari) echo "KARMA_BROWSERS=WebkitHeadless" >> $GITHUB_ENV ;;
+            brave) echo "KARMA_BROWSERS=BraveHeadless" >> $GITHUB_ENV ;;
           esac
         shell: bash
 
@@ -281,6 +304,7 @@ jobs:
           EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
+          BRAVE_BIN: ${{ env.BRAVE_BIN }}
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
       - name: Run sanity test (dev)
@@ -292,6 +316,7 @@ jobs:
           EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
+          BRAVE_BIN: ${{ env.BRAVE_BIN }}
         run: node scripts/test-demo.js
 
   test-release:
@@ -301,7 +326,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        browser: [chrome, firefox, edge, opera]
+        browser: [chrome, firefox, edge, opera, brave]
         include:
           - os: macos-latest
             browser: safari
@@ -377,6 +402,7 @@ jobs:
           elseif ($browser -eq "firefox") { choco install firefox -y }
           elseif ($browser -eq "edge") { choco install microsoft-edge -y }
           elseif ($browser -eq "opera") { choco install opera -y }
+          elseif ($browser -eq "brave") { choco install brave -y }
 
       - name: Install Browser
         if: matrix.os == 'ubuntu-latest'
@@ -406,6 +432,11 @@ jobs:
             echo deb [arch=amd64 signed-by=/usr/share/keyrings/opera.gpg] https://deb.opera.com/opera-stable/ stable non-free | sudo tee /etc/apt/sources.list.d/opera.list
             sudo apt update
             sudo apt install opera-stable -y
+          fi  elif [ "$browser" = "brave" ]; then
+            sudo curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main"|sudo tee /etc/apt/sources.list.d/brave-browser-release.list > /dev/null
+            sudo apt update
+            sudo apt install brave-browser -y
           fi
 
       - name: Install Chrome via brew on macOS
@@ -460,6 +491,10 @@ jobs:
         if: matrix.browser == 'opera' && matrix.os == 'macos-latest'
         run: brew install --cask opera
 
+      - name: Install Brave via brew on macOS
+        if: matrix.browser == 'brave' && matrix.os == 'macos-latest'
+        run: brew install --cask brave-browser
+
       - name: Set OPERA_BIN
         if: matrix.browser == 'opera'
         shell: bash
@@ -470,6 +505,18 @@ jobs:
             echo "OPERA_BIN=/Applications/Opera.app/Contents/MacOS/Opera" >> $GITHUB_ENV
           elif [ "$RUNNER_OS" == "Windows" ]; then
             echo "OPERA_BIN=C:/Program Files/Opera/opera.exe" >> $GITHUB_ENV
+          fi
+
+      - name: Set BRAVE_BIN
+        if: matrix.browser == 'brave'
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            echo "BRAVE_BIN=C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe" >> $GITHUB_ENV
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            echo "BRAVE_BIN=/Applications/Brave Browser.app/Contents/MacOS/Brave Browser" >> $GITHUB_ENV
+          else
+            echo "BRAVE_BIN=/usr/bin/brave-browser" >> $GITHUB_ENV
           fi
 
       - name: Start services
@@ -486,6 +533,7 @@ jobs:
             edge) echo "KARMA_BROWSERS=EdgeHeadless" >> $GITHUB_ENV ;;
             opera) echo "KARMA_BROWSERS=OperaHeadless" >> $GITHUB_ENV ;;
             safari) echo "KARMA_BROWSERS=WebkitHeadless" >> $GITHUB_ENV ;;
+            brave) echo "KARMA_BROWSERS=BraveHeadless" >> $GITHUB_ENV ;;
           esac
         shell: bash
 
@@ -509,6 +557,7 @@ jobs:
           EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
+          BRAVE_BIN: ${{ env.BRAVE_BIN }}
         run: dbus-run-session -- xvfb-run --auto-servernum node scripts/test-demo.js
 
       - name: Run sanity test (dev)
@@ -520,6 +569,7 @@ jobs:
           EDGE_BIN: ${{ env.EDGE_BIN }}
           OPERA_BIN: ${{ env.OPERA_BIN }}
           SAFARI_BIN: /Applications/Safari.app/Contents/MacOS/Safari
+          BRAVE_BIN: ${{ env.BRAVE_BIN }}
         run: node scripts/test-demo.js
 
   release:

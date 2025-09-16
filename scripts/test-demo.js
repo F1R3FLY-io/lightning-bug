@@ -42,7 +42,8 @@ import puppeteer from 'puppeteer-core';
     { name: 'Firefox', browser: 'firefox', executablePath: process.env.FIREFOX_BIN || (isMacOS ? '/Applications/Firefox.app/Contents/MacOS/firefox' : isWindows ? 'C:\\Program Files\\Mozilla Firefox\\firefox.exe' : '/usr/bin/firefox'), args: ['--headless', '--remote-debugging-port=0', '--remote-allow-origins=*'] },
     { name: 'Edge', browser: 'chrome', executablePath: process.env.EDGE_BIN || (isMacOS ? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' : isWindows ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' : '/usr/bin/microsoft-edge-stable'), args: ['--no-sandbox', '--disable-setuid-sandbox', '--headless=new', '--disable-gpu'] },
     { name: 'Opera', browser: 'chrome', executablePath: process.env.OPERA_BIN || (isMacOS ? '/Applications/Opera.app/Contents/MacOS/Opera' : isWindows ? 'C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\Opera\\opera.exe' : '/usr/bin/opera'), args: ['--no-sandbox', '--headless', '--disable-gpu'] },
-    { name: 'Safari', browser: 'webkit', executablePath: process.env.SAFARI_BIN || '/Applications/Safari.app/Contents/MacOS/Safari', args: [] }
+    { name: 'Safari', browser: 'webkit', executablePath: process.env.SAFARI_BIN || '/Applications/Safari.app/Contents/MacOS/Safari', args: [] },
+    { name: 'Brave', browser: 'chrome', executablePath: process.env.BRAVE_BIN || (isMacOS ? '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser' : isWindows ? 'C:\\\\Program Files\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe' : '/usr/bin/brave-browser'), args: ['--headless=new', '--no-sandbox', '--disable-gpu'] },
   ];
 
   const testBrowser = process.env.TEST_BROWSER;
