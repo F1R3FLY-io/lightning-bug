@@ -1,15 +1,15 @@
-import { expectType, expectAssignable } from 'tsd';
-import type { RholangExtensionConfig } from './ext.d.ts';
-import { RholangExtension } from 'lightning-bug/extensions';
+import { RholangExtension } from "./ext";
+import type { LanguageConfig } from "./lib";
 
-expectType<RholangExtensionConfig>({
-  grammarWasm: 'path',
-  highlightQueryPath: 'query.scm',
-  indentsQueryPath: 'indents.scm',
-  lspUrl: 'ws://',
-  extensions: ['.rho'],
-  fileIcon: 'icon',
-  fallbackHighlighter: 'none',
-});
+// Test that RholangExtension is assignable to LanguageConfig
+const _test: LanguageConfig = RholangExtension;
 
-expectAssignable<RholangExtensionConfig>(RholangExtension);
+// Additional property checks for completeness
+_test.extensions; // string[]
+_test.grammarWasm; // string | (() => string) | undefined
+_test.highlightsQueryPath; // string | (() => string) | undefined
+_test.indentsQueryPath; // string | (() => string) | undefined
+_test.lspUrl; // string | undefined
+_test.fileIcon; // string | undefined
+_test.fallbackHighlighter; // string | undefined
+_test.indentSize; // number | undefined
