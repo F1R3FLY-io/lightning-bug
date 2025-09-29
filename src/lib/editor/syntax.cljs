@@ -339,9 +339,8 @@
                                            [:ok (js/Promise.
                                                  (fn [resolve reject]
                                                    (try
-                                                     (let [cached-parser (:parser cached)]
-                                                       (if cached-parser
-                                                         (resolve cached-parser)
+                                                     (if-let [cached-parser (:parser cached)]
+                                                       (resolve cached-parser)
                                                          (if parser-raw
                                                            (let [maybe-promise (if (fn? parser-raw) (parser-raw) parser-raw)]
                                                              (if (instance? js/Promise maybe-promise)
@@ -358,7 +357,7 @@
                                                                               (.setLanguage parser language)
                                                                               (resolve parser))))
                                                                    (.catch reject)))
-                                                             (reject (js/Error. "No parser or grammar-wasm provided for language"))))))
+                                                             (reject (js/Error. "No parser or grammar-wasm provided for language")))))
                                                      (catch js/Error e
                                                        (reject e)))))])
                                          #(instance? Parser %)

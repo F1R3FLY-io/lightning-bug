@@ -171,14 +171,12 @@
   "Loads a resource asynchronously if not present, using a supplier function that returns a value, [:ok value], promise, channel, or [:error error].
   Returns a channel that puts [:ok resource] or [:error error]."
   [type lang supplier]
-  (let [resource (get-resource type lang)]
-    (if resource
-      (let [ch (promise-chan)]
+  (if-let [resource (get-resource type lang)]
+    (let [ch (promise-chan)]
         (put! ch [:ok resource])
         ch)
-      (let [p (get-resource-promise type lang)]
-        (if p
-          (let [ch (chan)]
+      (if-let [p (get-resource-promise type lang)]
+        (let [ch (chan)]
             (go
               (let [res (<! p)]
                 (put! ch res)))
@@ -210,7 +208,7 @@
                   (put! p [:error e]))
                 (finally
                   (clear-resource-promise! type lang))))
-            p))))))
+            p))))
 
 (defn close-resource!
   "Closes a resource for a language and removes it from the atom."

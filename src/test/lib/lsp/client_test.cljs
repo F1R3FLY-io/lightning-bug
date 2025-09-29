@@ -15,7 +15,6 @@
    [lib.utils :as lib-utils]
    [test.lib.mock-lsp :refer [parse-message with-mock-lsp]]
    [test.lib.utils :refer [wait-for]]
-   [taoensso.timbre :as log]
    [lib.state :refer [set-resource!]]))
 
 (use-fixtures :each

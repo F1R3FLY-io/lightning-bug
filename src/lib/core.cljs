@@ -22,7 +22,7 @@
    [lib.editor.highlight :as highlight]
    [lib.editor.syntax :as syntax]
    [lib.lsp.client :as lsp]
-   [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config! load-resource]]
+   [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config!]]
    [lib.utils :refer [split-uri debounce offset->pos pos->offset log-error-with-cause]]
    [taoensso.timbre :as log]))
 
