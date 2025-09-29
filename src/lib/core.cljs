@@ -13,7 +13,7 @@
                                lineNumbers]]
    ["react" :as react]
    ["rxjs" :as rxjs :refer [ReplaySubject]]
-   [clojure.core.async :refer [go <! put! promise-chan]]
+   [clojure.core.async :refer [go <! alts! timeout]]
    [clojure.string :as str]
    [datascript.core :as d]
    [reagent.core :as r]
@@ -22,8 +22,8 @@
    [lib.editor.highlight :as highlight]
    [lib.editor.syntax :as syntax]
    [lib.lsp.client :as lsp]
-   [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config!]]
-   [lib.utils :as lib-utils :refer [split-uri debounce]]
+   [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config! load-resource]]
+   [lib.utils :refer [split-uri debounce offset->pos pos->offset log-error-with-cause]]
    [taoensso.timbre :as log]))
 
 ;; Hardcoded default languages for the library; uses string keys.
@@ -49,7 +49,10 @@
   "Returns the language key matching the given extension, or \"text\" if none.
   Logs warning if multiple matches."
   [languages ext]
+  (log/debug "Looking for language with extension:" ext)
+  (log/debug "Available languages:" (keys languages))
   (let [matches (filter (fn [[_ conf]] (some #(= ext %) (:extensions conf))) languages)]
+    (log/debug "Matching languages:" (keys matches))
     (when (> (count matches) 1)
       (log/warn (str "Multiple languages match extension " ext ": " (keys matches) " - using first")))
     (or (ffirst matches) "text")))
@@ -70,6 +73,7 @@
         extra-extensions (:extra-extensions props #js [])
         default-protocol (or (:default-protocol props) "inmemory://")
         tree-sitter-wasm (:tree-sitter-wasm props "js/tree-sitter.wasm")]
+    (log/info "Editor state initialized with languages:" (keys languages))
     (when-not (every? string? (keys languages))
       (log/warn "Non-string keys found in languages map:" (keys languages)))
     {:mounted? true
@@ -98,12 +102,12 @@
         anchor (.-anchor main-sel)
         head (.-head main-sel)
         ^js doc (.-doc cm-state)
-        cursor-pos (lib-utils/offset->pos doc head true)
+        cursor-pos (offset->pos doc head true)
         sel (when (not= anchor head)
               (let [from (min anchor head)
                     to (max anchor head)
-                    from-pos (lib-utils/offset->pos doc from true)
-                    to-pos (lib-utils/offset->pos doc to true)
+                    from-pos (offset->pos doc from true)
+                    to-pos (offset->pos doc to true)
                     text (.sliceString doc from to)]
                 {:from from-pos :to to-pos :text text}))
         uri (db/active-uri)
@@ -164,66 +168,107 @@
     (into-array
      (concat default-exts diagnostics/extensions extra-extensions))))
 
-(defn- promise->chan [p]
-  (let [ch (promise-chan)]
-    (-> p
-        (.then #(put! ch :ready))
-        (.catch #(put! ch :unreachable)))
-    ch))
-
-(defn- get-connect-promise [lang lsp-url state-atom events]
-  (or (get-in @state-atom [:lsp lang :connect-promise])
-      (let [p (js/Promise. (fn [res-fn rej-fn]
-                             (swap! state-atom assoc-in [:lsp lang :promise-res-fn] res-fn)
-                             (swap! state-atom assoc-in [:lsp lang :promise-rej-fn] rej-fn)
-                             (log/info (str "Initiating LSP connection for lang: " lang ", url: " lsp-url))
-                             (lsp/connect lang {:url lsp-url} state-atom events)))]
-        (swap! state-atom assoc-in [:lsp lang :connect-promise] p)
-        p)))
-
 (defn- ensure-lsp-document-opened
   "Ensures the document is opened in LSP if configured, connecting if necessary.
-  Sends didOpen and requests symbols on success, emitting events for LSP actions."
+  Sends didOpen and requests symbols on success, emitting events for LSP actions.
+  Waits for an ongoing connection if one is in progress."
   [lang uri state-atom events]
   (let [[text version] (db/doc-text-version-by-uri uri)]
     (when-let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
       (let [lsp-state (get-in @state-atom [:lsp lang])
-            connected? (:connected? lsp-state)
-            initialized? (:initialized? lsp-state)]
-        (log/debug (str "Ensuring LSP document opened for lang: " lang ", uri: " uri ", connected? " connected? ", initialized? " initialized?))
+            connected? (:connected? lsp-state false)
+            initialized? (:initialized? lsp-state false)
+            connecting? (:connecting? lsp-state false)]
+        (log/debug (str "Ensuring LSP document opened for lang: " lang
+                        ", uri: " uri
+                        ", connected? " connected?
+                        ", initialized? " initialized?
+                        ", connecting? " connecting?))
         (go
           (try
-            (when-not (and connected? initialized?)
-              (let [p (get-connect-promise lang lsp-url state-atom events)
-                    res (<! (promise->chan p))]
-                (when (and @state-atom
-                           (:mounted? @state-atom)
-                           (= res :unreachable))
-                  (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
-                                                  :lang lang})
-                  (log/error "Failed to connect and initialize LSP for lang:" lang))))
-            (when (and (get-in @state-atom [:lsp lang :connected?])
-                       (get-in @state-atom [:lsp lang :initialized?])
-                       (not (db/document-opened-by-uri? uri)))
-              (lsp/notify-did-open lang uri text version state-atom)
-              (emit-event events "lsp-message" {:method "textDocument/didOpen"
-                                                :lang lang
-                                                :params {:textDocument {:uri uri
-                                                                        :languageId lang
-                                                                        :version version
-                                                                        :text text}}})
-              (db/document-opened-by-uri! uri)
-              (emit-event events "document-open" {:uri uri
-                                                  :content text
-                                                  :language lang
-                                                  :opened true}))
+            (if (and connected? initialized?)
+              ;; Already connected and initialized, proceed with didOpen
+              (when-not (db/document-opened-by-uri? uri)
+                (lsp/notify-did-open lang uri text version state-atom)
+                (emit-event events "lsp-message" {:method "textDocument/didOpen"
+                                                  :lang lang
+                                                  :params {:textDocument {:languageId lang
+                                                                          :uri uri
+                                                                          :version version
+                                                                          :text text}}})
+                (db/document-opened-by-uri! uri)
+                (emit-event events "document-open" {:uri uri
+                                                    :content text
+                                                    :language lang
+                                                    :opened true}))
+              ;; Not connected or initialized; check if connecting
+              (let [existing-promise (lib.state/get-resource-promise :lsp lang)]
+                (if connecting?
+                  ;; Wait for existing connection promise
+                  (do
+                    (log/debug "Waiting for existing LSP connection for lang:" lang)
+                    (let [res (<! (lib.utils/promise->chan existing-promise))]
+                      (if (and (seqable? res) (= :error (first res)))
+                        (do
+                          (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
+                                                          :lang lang
+                                                          :cause (if (instance? js/Error (second res))
+                                                                   (.-message (second res))
+                                                                   (str (second res)))})
+                          (throw (js/Error. "Failed to connect and initialize LSP" #js {:cause (second res)})))
+                        (do
+                          (log/debug "Existing LSP connection resolved for lang:" lang)
+                          (when-not (db/document-opened-by-uri? uri)
+                            (lsp/notify-did-open lang uri text version state-atom)
+                            (emit-event events "lsp-message" {:method "textDocument/didOpen"
+                                                              :lang lang
+                                                              :params {:textDocument {:languageId lang
+                                                                                      :uri uri
+                                                                                      :version version
+                                                                                      :text text}}})
+                            (db/document-opened-by-uri! uri)
+                            (emit-event events "document-open" {:uri uri
+                                                                :content text
+                                                                :language lang
+                                                                :opened true}))))))
+                  ;; Start new connection
+                  (let [supplier #(lsp/connect lang {:url lsp-url} state-atom events)
+                        ch (lib.state/load-resource :lsp lang supplier)
+                        res (<! ch)]
+                    (if (and (seqable? res) (= :error (first res)))
+                      (do
+                        (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
+                                                        :lang lang
+                                                        :cause (if (instance? js/Error (second res))
+                                                                 (.-message (second res))
+                                                                 (str (second res)))})
+                        (throw (js/Error. "Failed to connect and initialize LSP" #js {:cause (second res)})))
+                      (do
+                        (log/debug "LSP connected and initialized for lang:" lang)
+                        (when-not (db/document-opened-by-uri? uri)
+                          (lsp/notify-did-open lang uri text version state-atom)
+                          (emit-event events "lsp-message" {:method "textDocument/didOpen"
+                                                            :lang lang
+                                                            :params {:textDocument {:languageId lang
+                                                                                    :uri uri
+                                                                                    :version version
+                                                                                    :text text}}})
+                          (db/document-opened-by-uri! uri)
+                          (emit-event events "document-open" {:uri uri
+                                                              :content text
+                                                              :language lang
+                                                              :opened true}))))))))
             [:ok nil]
-            (catch :default e
+            (catch js/Error error
               (when (and @state-atom (:mounted? @state-atom))
-                (emit-event events "error" {:message (str "ensure-lsp-document-opened failed: " (.-message e))
-                                            :lang lang
-                                            :uri uri}))
-              [:error (js/Error. (str "(ensure-lsp-document-opened " lang " " uri " state-atom events) failed") #js {:cause e})])))))))
+                (emit-event events "error" {:message (.-message error)
+                                            :uri uri
+                                            :operation "ensure-lsp-document-opened"
+                                            :cause (if (.-cause error)
+                                                     (.-message (.-cause error))
+                                                     (str (.-cause error)))}))
+              (log/error (str "Failed to ensure LSP document opened " uri ": " (.-message error)))
+              [:error (js/Error. (str "(ensure-lsp-document-opened " lang " " uri " state-atom events) failed") #js {:cause error})])))))))
 
 (defn- activate-document
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
@@ -231,31 +276,49 @@
   [uri state-atom view-ref events]
   (go
     (try
-      (log/info "Activating document:" uri)
+      (log/trace "Activating document:" uri)
       (let [old-lang (db/active-lang)]
-        (db/update-active-uri! uri)
+        (when (not= uri (db/active-uri))
+          (log/debug "Updating active URI for document with old-lang:" old-lang)
+          (db/update-active-uri! uri))
         (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
+          (log/debug "New language for activation:" new-lang)
           (when-let [view (.-current view-ref)]
             (let [current-doc (.-doc (.-state view))
                   current-length (.-length current-doc)]
               (.dispatch view #js {:changes #js {:from 0
                                                  :to current-length
                                                  :insert text}})))
-          (when (not= old-lang new-lang)
-            (if-let [res (<! (syntax/init-syntax (.-current view-ref) state-atom))]
-              (if (= :ok (first res))
-                (emit-event events "language-change" {:uri uri :language new-lang})
-                (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second res)})))
-              (throw (js/Error. (str "(syntax/init-syntax (.-current view-ref) state-atom) returned nothing in call to (activate-document " uri " state-atom view-ref events)")))))
-          (if (get-in @state-atom [:languages new-lang :lsp-url])
-            (let [res (<! (ensure-lsp-document-opened new-lang uri state-atom events))]
-              (when (= :error (first res))
-                (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second res)}))))
-            (db/document-opened-by-uri! uri))
-          (emit-event events "document-open" {:uri uri
-                                              :content text
-                                              :language new-lang
-                                              :activated true})))
+          (let [lsp-ch (go
+                         (try
+                           (if (get-in @state-atom [:languages new-lang :lsp-url])
+                             (<! (ensure-lsp-document-opened new-lang uri state-atom events))
+                             (do
+                               (db/document-opened-by-uri! uri)
+                               [:ok nil]))
+                           (catch :default e
+                             [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
+                syntax-ch (when (not= old-lang new-lang)
+                            (go
+                              (try
+                                (<! (syntax/init-syntax (.-current view-ref) state-atom))
+                                (catch :default e
+                                  [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})]))))
+                [lsp-val lsp-ch'] (alts! [lsp-ch (timeout 5000)])
+                lsp-res (if (identical? lsp-ch lsp-ch') lsp-val [:error (js/Error. "LSP init timeout")])
+                [syntax-val syntax-ch'] (when syntax-ch (alts! [syntax-ch (timeout 5000)]))
+                syntax-res (when syntax-ch
+                             (if (identical? syntax-ch syntax-ch') syntax-val [:error (js/Error. "Syntax init timeout")]))]
+            (when (= :error (first lsp-res))
+              (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second lsp-res)})))
+            (when (and syntax-ch (= :error (first syntax-res)))
+              (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second syntax-res)})))
+            (when (and syntax-ch (= :ok (first syntax-res)))
+              (emit-event events "language-change" {:uri uri :language new-lang}))
+            (emit-event events "document-open" {:uri uri
+                                                :content text
+                                                :language new-lang
+                                                :activated true}))))
       [:ok nil]
       (catch js/Error error
         (when (and @state-atom (:mounted? @state-atom))
@@ -330,7 +393,7 @@
                                            (if-let [^js editor-view (.-current view-ref)]
                                              (let [^js editor-state (.-state editor-view)
                                                    ^js doc (.-doc editor-state)
-                                                   offset (lib-utils/pos->offset doc pos true)]
+                                                   offset (pos->offset doc pos true)]
                                                (if offset
                                                  (do
                                                    (.dispatch editor-view #js {:selection (EditorSelection.cursor offset)})
@@ -371,8 +434,8 @@
                                               (if-let [^js editor-view (.-current view-ref)]
                                                 (let [^js editor-state (.-state editor-view)
                                                       ^js doc (.-doc editor-state)
-                                                      from-offset (lib-utils/pos->offset doc from true)
-                                                      to-offset (lib-utils/pos->offset doc to true)]
+                                                      from-offset (pos->offset doc from true)
+                                                      to-offset (pos->offset doc to true)]
                                                   (if (and from-offset to-offset (<= from-offset to-offset))
                                                     (do
                                                       (.dispatch editor-view #js {:selection (EditorSelection.range from-offset to-offset)})
@@ -404,7 +467,9 @@
                           :openDocument (fn [file-or-uri-js text-js lang-js & [make-active-js]]
                                           (if-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
                                             (try
-                                              (log/info "Opening document:" uri)
+                                              (if-not (db/document-id-by-uri uri)
+                                                (log/info "Opening document:" uri)
+                                                (log/info "Re-opening document:" uri))
                                               (let [text (js->clj text-js :keywordize-keys true)
                                                     lang (js->clj lang-js :keywordize-keys true)
                                                     make-active (if (nil? make-active-js) true (boolean make-active-js))
@@ -418,6 +483,7 @@
                                                                        "text")
                                                     effective-text (or text current-text "")
                                                     changed? (not= current-text effective-text)]
+                                                (log/debug (str "Document path=" path ", ext=" ext ", effective-lang=" effective-lang))
                                                 (if id
                                                   (do
                                                     (db/update-document-text-language-by-id! id effective-text effective-lang)
@@ -527,7 +593,7 @@
                                                                                 :old-uri old-file-or-uri-js
                                                                                 :new-uri new-file-or-uri-js}))
                                                   (let [error-with-cause (js/Error. (str "(.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause error})]
-                                                    (lib-utils/log-error-with-cause error-with-cause)
+                                                    (log-error-with-cause error-with-cause)
                                                     [:error error-with-cause])))))
                           ;; Saves the specified or active document (triggers `document-save`). Notifies LSP via `didSave`.
                           ;; Example: (.saveDocument editor)
@@ -565,8 +631,8 @@
                                                 (if-let [^js editor-view (.-current view-ref)]
                                                   (let [^js editor-state (.-state editor-view)
                                                         ^js doc (.-doc editor-state)
-                                                        from-offset (lib-utils/pos->offset doc from true)
-                                                        to-offset (lib-utils/pos->offset doc to true)]
+                                                        from-offset (pos->offset doc from true)
+                                                        to-offset (pos->offset doc to true)]
                                                     (if (and from-offset to-offset (<= from-offset to-offset))
                                                       (do
                                                         (.dispatch editor-view
@@ -611,9 +677,10 @@
                                                    to (js->clj to-js :keywordize-keys true)]
                                                (log/trace (str "Centering on range from: " from ", to: " to))
                                                (if-let [^js editor-view (.-current view-ref)]
-                                                 (let [^js doc (.-doc ^js (.-state editor-view))
-                                                       from-offset (lib-utils/pos->offset doc from true)
-                                                       to-offset (lib-utils/pos->offset doc to true)]
+                                                 (let [^js editor-state (.-state editor-view)
+                                                       ^js doc (.-doc editor-state)
+                                                       from-offset (pos->offset doc from true)
+                                                       to-offset (pos->offset doc to true)]
                                                    (if (and from-offset to-offset)
                                                      (do
                                                        (.dispatch editor-view #js {:effects (EditorView.scrollIntoView
@@ -898,7 +965,6 @@
                             (emit-event events "ready" {})
                             (set-ready true))
                           0)
-                         (syntax/init-syntax editor-view state-atom)
                          (update-editor-state editor-state state-atom events)
                          (fn []
                            (log/info "Editor: Destroying EditorView")
@@ -913,9 +979,9 @@
                        (catch js/Error error
                          (emit-event events "error" {:message (.-message error)
                                                      :operation "initEditorView"})
-                         (lib-utils/log-error-with-cause "Error initializing EditorView" error)
+                         (log-error-with-cause "Error initializing EditorView" error)
                          (fn []))))
-                   #js [(db/active-lang) (:extra-extensions @state-atom) container-ref])
+                   #js [(:extra-extensions @state-atom) container-ref])
                   (react/createElement "div" #js {:ref container-ref
                                                   :className "code-editor flex-grow-1"}))))]
   (def editor-comp (react/forwardRef inner))

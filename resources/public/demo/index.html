@@ -79,8 +79,11 @@
         });
         console.log("Await waitForReady");
         await waitForReady(editorRef);
+        const editor = editorRef.current;
+        window.editor = editor; // Expose for testing
         console.log("Editor ready");
-        const events = editorRef.current.getEvents();
+        editor.setLogLevel("trace");
+        const events = editor.getEvents();
         const waitForEvent = (events, type, matcher = () => true) => new Promise(resolve => {
           const sub = events.subscribe(event => {
             console.log('Event received:', event.type);
@@ -90,28 +93,28 @@
             }
           });
         });
-        editorRef.current.openDocument(
+        editor.openDocument(
           "demo.rho",
           "new x in { x!(\"Hello\") | Nil }",
           "rholang"
         );
         await waitForEvent(events, "document-open", data => data.uri === "demo.rho" && data.activated);
         console.log("Document opened and activated");
-        console.log('State:', editorRef.current.getState());
-        editorRef.current.setCursor({ line: 1, column: 3 });
-        console.log('Cursor:', editorRef.current.getCursor());
-        editorRef.current.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
-        console.log('Selection:', editorRef.current.getSelection());
-        console.log('Text:', editorRef.current.getText());
-        console.log('File Path:', editorRef.current.getFilePath());
-        console.log('File URI:', editorRef.current.getFileUri());
-        console.log('Diagnostics:', editorRef.current.getDiagnostics());
-        console.log('Symbols:', editorRef.current.getSymbols());
-        console.log('Search Term:', editorRef.current.getSearchTerm());
-        console.log('Log Level:', editorRef.current.getLogLevel());
-        editorRef.current.setLogLevel('debug');
-        console.log('New Log Level:', editorRef.current.getLogLevel());
-        const subscription = editorRef.current.getEvents().subscribe(event => {
+        console.log('State:', editor.getState());
+        editor.setCursor({ line: 1, column: 3 });
+        console.log('Cursor:', editor.getCursor());
+        editor.setSelection({ line: 1, column: 1 }, { line: 1, column: 6 });
+        console.log('Selection:', editor.getSelection());
+        console.log('Text:', editor.getText());
+        console.log('File Path:', editor.getFilePath());
+        console.log('File URI:', editor.getFileUri());
+        console.log('Diagnostics:', editor.getDiagnostics());
+        console.log('Symbols:', editor.getSymbols());
+        console.log('Search Term:', editor.getSearchTerm());
+        console.log('Log Level:', editor.getLogLevel());
+        editor.setLogLevel('debug');
+        console.log('New Log Level:', editor.getLogLevel());
+        const subscription = editor.getEvents().subscribe(event => {
           console.log('Event:', event.type, event.data);
         });
       } catch (e) {

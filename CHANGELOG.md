@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2025-09-30
+
+### Changed
+
+- Waits for a document to be opened before initializing the respective syntax (it no longer initializes `text` on initialization).
+- Ensures only one instance of each resource type is loaded at a time.
+- Improves parallelism of loading resources.
+
 ## [0.7.4] - 2025-09-16
 
 ### Changed

@@ -18,9 +18,18 @@
    [ext.lang.rholang :refer [language-config]]
    [lib.db :as db]
    [lib.editor.syntax :as syntax]
-   [lib.state :refer [normalize-editor-config]]
+   [lib.state :refer [normalize-editor-config resources]]
    [lib.utils :as lib-utils]
    [test.lib.mock-lsp :refer [parse-message with-mock-lsp]]
+   [test.lib.utils :refer [wait-for wait-for-ready wait-for-event wait-for-uri wait-for-opened-uri
+                           ref->editor editor->close-document! editor->save-document!
+                           editor->rename-document! editor->open-document! editor->cursor
+                           editor->set-cursor! editor->clear-highlight! editor->highlight-range!
+                           editor->activate-document! editor->set-selection! editor->set-text!
+                           editor->center-on-range! editor->text editor->events editor->state
+                           editor->file-path editor->file-uri editor->diagnostics editor->symbols
+                           editor->db editor->search-term editor->log-level editor->set-log-level!
+                           editor->query]]
    [taoensso.timbre :as log]))
 
 (use-fixtures :once
@@ -31,161 +40,10 @@
 
 (use-fixtures :each
   {:before (fn []
+             (reset! resources {:lsp {} :tree-sitter {}})
              @syntax/ts-init-promise
              (reset! syntax/languages {})
              (d/reset-conn! db/conn (d/empty-db db/schema)))})
-
-(defn ref->editor
-  ([^js ref]
-   (.-current ref)))
-
-(defn editor->close-document!
-  ([^js editor]
-   (.closeDocument editor))
-  ([^js editor uri]
-   (.closeDocument editor uri)))
-
-(defn editor->save-document!
-  ([^js editor]
-   (.saveDocument editor))
-  ([^js editor uri]
-   (.saveDocument editor uri)))
-
-(defn editor->rename-document!
-  ([^js editor new-file-or-uri]
-   (.renameDocument editor new-file-or-uri))
-  ([^js editor new-file-or-uri old-file-or-uri]
-   (.renameDocument editor new-file-or-uri old-file-or-uri)))
-
-(defn editor->open-document!
-  ([^js editor uri text lang]
-   (.openDocument editor uri text lang))
-  ([^js editor uri text lang make-active?]
-   (.openDocument editor uri text lang make-active?)))
-
-(defn editor->cursor
-  ([^js editor]
-   (.getCursor editor)))
-
-(defn editor->set-cursor!
-  ([^js editor loc]
-   (.setCursor editor loc)))
-
-(defn editor->clear-highlight!
-  ([^js editor]
-   (.clearHighlight editor)))
-
-(defn editor->highlight-range!
-  ([^js editor ^js from-js ^js to-js]
-   (.highlightRange editor from-js to-js)))
-
-(defn editor->activate-document!
-  ([^js editor uri]
-   (.activateDocument editor uri)))
-
-(defn editor->set-selection!
-  ([^js editor ^js from-js ^js to-js]
-   (.setSelection editor from-js to-js)))
-
-(defn editor->set-text!
-  ([^js editor text]
-   (.setText editor text))
-  ([^js editor text uri]
-   (.setText editor text uri)))
-
-(defn editor->center-on-range!
-  ([^js editor ^js from-js ^js to-js]
-   (.centerOnRange editor from-js to-js)))
-
-(defn editor->text
-  ([^js editor]
-   (.getText editor))
-  ([^js editor uri]
-   (.getText editor uri)))
-
-(defn editor->events [^js editor]
-  (.getEvents editor))
-
-(defn editor->state [^js editor]
-  (.getState editor))
-
-(defn editor->file-path
-  ([^js editor]
-   (.getFilePath editor))
-  ([^js editor uri]
-   (.getFilePath editor uri)))
-
-(defn editor->file-uri
-  ([^js editor]
-   (.getFileUri editor))
-  ([^js editor uri]
-   (.getFileUri editor uri)))
-
-(defn editor->diagnostics
-  ([^js editor]
-   (.getDiagnostics editor))
-  ([^js editor uri]
-   (.getDiagnostics editor uri)))
-
-(defn editor->symbols
-  ([^js editor]
-   (.getSymbols editor))
-  ([^js editor uri]
-   (.getSymbols editor uri)))
-
-(defn editor->db [^js editor]
-  (.getDb editor))
-
-(defn editor->search-term [^js editor]
-  (.getSearchTerm editor))
-
-(defn editor->log-level [^js editor]
-  (.getLogLevel editor))
-
-(defn editor->set-log-level! [^js editor level]
-  (.setLogLevel editor level))
-
-(defn editor-query
-  ([^js editor query]
-   (.query editor query))
-  ([^js editor query params]
-   (.query editor query params)))
-
-(defn wait-for
-  [pred timeout-ms]
-  (go
-    (try
-      (let [start (js/Date.now)]
-        (loop []
-          (if (pred)
-            [:ok true]
-            (if (> (- (js/Date.now) start) timeout-ms)
-              [:ok false]
-              (do
-                (<! (timeout 10))
-                (recur))))))
-      (catch :default e
-        [:error (js/Error. (str "(wait-for pred " timeout-ms ") failed") #js {:cause e})]))))
-
-(defn wait-for-ready [editor-ref timeout-ms]
-  (wait-for #(some-> (ref->editor editor-ref) .isReady) timeout-ms))
-
-(defn wait-for-uri [uri timeout-ms]
-  (wait-for #(db/document-id-by-uri uri) timeout-ms))
-
-(defn wait-for-event [events-atom event-type timeout-ms]
-  (go
-    (try
-      (let [start (js/Date.now)]
-        (loop []
-          (cond
-            (some #(= event-type (:type %)) @events-atom) [:ok true]
-            (> (- (js/Date.now) start) timeout-ms) [:ok false]
-            :else (do
-                    (<! (timeout 10))
-                    (recur)))))
-      (catch :default e
-        [:error (js/Error. (str "(wait-for-event events-atom " event-type " " timeout-ms ") failed") #js {:cause e})]))))
 
 (defn flush-render []
   (r/flush))
@@ -201,7 +59,8 @@
   (flush-render))
 
 (defn cleanup-container [^js/HTMLDivElement container]
-  (when #_{:splint/disable [style/prefer-clj-string]} (.contains js/document.body container)
+  (when #_{:splint/disable [style/prefer-clj-string]}
+        (.contains js/document.body container)
         (js/document.body.removeChild container)))
 
 (deftest editor-renders
@@ -303,6 +162,7 @@
                            (try
                              (let [^js/HTMLDivElement container (js/document.createElement "div")
                                    ^js/React.RefObject ref (react/createRef)
+                                   events-atom (atom [])
                                    mock-lsp-url "ws://mock"
                                    mock-config (assoc language-config :lsp-url mock-lsp-url)
                                    root (mount-component container {:languages {"rholang" mock-config}
@@ -311,42 +171,134 @@
                                  (if (= :error (first ready-res))
                                    (throw (second ready-res))
                                    (is (second ready-res) "Editor ready within timeout")))
-                               (let [editor (ref->editor ref)
-                                     mock-res (<! (with-mock-lsp
-                                                    (fn [mock]
-                                                      (go
-                                                        (try
-                                                          (wrap-flush #(editor->open-document! editor "inmemory://test.rho" "content" "rholang"))
-                                                          (<! (timeout 100))
-                                                          (let [sock (:sock mock)
-                                                                wait-res (<! (wait-for #(some? (.-onopen sock)) 1000))]
-                                                            (if (= :error (first wait-res))
-                                                              (throw (second wait-res))
-                                                              (is (second wait-res) "onopen handler set")))
-                                                          (let [sent @(:sent mock)]
-                                                            (is (empty? sent) "No messages sent before open"))
-                                                          ((:trigger-open mock))
-                                                          (<! (timeout 100))
-                                                          (let [sent @(:sent mock)]
-                                                            (is (= 3 (count sent)) "One message after open: initialize")
-                                                            (let [messages (->> sent (map parse-message) (mapv second))]
-                                                              (is (= "initialize" (:method (first messages))))
-                                                              (is (= "initialized" (:method (second messages))))
-                                                              (is (= "textDocument/didOpen" (:method (nth messages 2))))
-                                                              (is (= "inmemory://test.rho"
-                                                                     (get-in (nth messages 2) [:params :textDocument :uri])))))
-                                                          (.unmount root)
-                                                          (<! (timeout 100)) ;; Delay to allow React cleanup.
-                                                          (cleanup-container container)
-                                                          [:ok nil]
-                                                          (catch :default e
-                                                            [:error (js/Error. "open-before-connect-sends-after-initialized failed"
-                                                                               #js {:cause e})]))))))]
-                                 (if (= :error (first mock-res))
-                                   (throw (second mock-res))
-                                   [:ok nil])))
+                               (let [editor (ref->editor ref)]
+                                 (.subscribe (editor->events editor) #(swap! events-atom conj (js->clj % :keywordize-keys true)))
+                                 (let [mock-res (<! (with-mock-lsp
+                                                      (fn [mock]
+                                                        (go
+                                                          (try
+                                                            ;; Open document before triggering connection
+                                                            (wrap-flush #(editor->open-document! editor "inmemory://test.rho" "content" "rholang"))
+                                                            (<! (timeout 100))
+                                                            (let [sock (:sock mock)
+                                                                  wait-res (<! (wait-for #(some? (.-onopen sock)) 3000))]
+                                                              (if (= :error (first wait-res))
+                                                                (throw (second wait-res))
+                                                                (is (second wait-res) "onopen handler set")))
+                                                            (let [sent @(:sent mock)]
+                                                              (is (empty? sent) "No messages sent before open"))
+                                                            ((:trigger-open mock))
+                                                            (let [init-res (<! (wait-for-event events-atom "lsp-initialized" 3000))]
+                                                              (if (= :error (first init-res))
+                                                                (throw (second init-res))
+                                                                (is (second init-res) "lsp-initialized emitted")))
+                                                            (<! (timeout 100))
+                                                            (let [sent @(:sent mock)]
+                                                              (is (= 3 (count sent)) "Sent initialize, initialized, didOpen")
+                                                              (let [messages (->> sent (map parse-message) (mapv second))]
+                                                                (is (= "initialize" (:method (first messages))) "First message is initialize")
+                                                                (is (= "initialized" (:method (second messages))) "Second message is initialized")
+                                                                (is (= "textDocument/didOpen" (:method (nth messages 2))) "Third message is didOpen")
+                                                                (is (= "inmemory://test.rho" (get-in (nth messages 2) [:params :textDocument :uri])) "didOpen with correct URI")
+                                                                (is (= "content" (get-in (nth messages 2) [:params :textDocument :text])) "didOpen with correct content")))
+                                                            (let [error-events (filter #(= "lsp-error" (:type %)) @events-atom)]
+                                                              (is (empty? error-events) "No lsp-error events emitted"))
+                                                            (let [wait-res (<! (wait-for-opened-uri "inmemory://test.rho" 1000))]
+                                                              (if (= :error (first wait-res))
+                                                                (throw (second wait-res))
+                                                                (is (second wait-res) "Document opened in LSP")))
+                                                            (.unmount root)
+                                                            (<! (timeout 100))
+                                                            (cleanup-container container)
+                                                            [:ok nil]
+                                                            (catch :default e
+                                                              [:error (js/Error. "open-before-connect-sends-after-initialized failed" #js {:cause e})]))))))]
+                                   (if (= :error (first mock-res))
+                                     (throw (second mock-res))
+                                     [:ok nil]))))
                              (catch :default e
                                [:error (js/Error. "open-before-connect-sends-after-initialized failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest open-after-connect-sends-didopen
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)
+                                   events-atom (atom [])
+                                   mock-lsp-url "ws://mock"
+                                   mock-config (assoc language-config :lsp-url mock-lsp-url)
+                                   root (mount-component container {:languages {"rholang" mock-config}
+                                                                    :ref ref})]
+                               (let [ready-res (<! (wait-for-ready ref 1000))]
+                                 (if (= :error (first ready-res))
+                                   (throw (second ready-res))
+                                   (is (second ready-res) "Editor ready within timeout")))
+                               (let [editor (ref->editor ref)]
+                                 (.subscribe (editor->events editor) #(swap! events-atom conj (js->clj % :keywordize-keys true)))
+                                 (let [mock-res (<! (with-mock-lsp
+                                                      (fn [mock]
+                                                        (go
+                                                          (try
+                                                            (wrap-flush #(editor->open-document! editor "inmemory://dummy.rho" "dummy" "rholang"))
+                                                            (<! (timeout 100))
+                                                            (let [sock (:sock mock)
+                                                                  wait-res (<! (wait-for #(some? (.-onopen sock)) 3000))]
+                                                              (if (= :error (first wait-res))
+                                                                (throw (second wait-res))
+                                                                (is (second wait-res) "onopen handler set")))
+                                                            ((:trigger-open mock))
+                                                            (let [init-res (<! (wait-for-event events-atom "lsp-initialized" 3000))]
+                                                              (if (= :error (first init-res))
+                                                                (throw (second init-res))
+                                                                (is (second init-res) "lsp-initialized emitted")))
+                                                            (<! (timeout 100))
+                                                            (let [sent @(:sent mock)]
+                                                              (js/console.log "Sent messages for dummy:" (clj->js sent))
+                                                              (is (= 3 (count sent)) "Sent initialize, initialized, didOpen for dummy")
+                                                              (let [messages (->> sent (map parse-message) (mapv second))]
+                                                                (js/console.log "Parsed messages for dummy:" (clj->js messages))
+                                                                (is (= "initialize" (:method (first messages))) "First message is initialize")
+                                                                (is (= "initialized" (:method (second messages))) "Second message is initialized")
+                                                                (is (= "textDocument/didOpen" (:method (nth messages 2))) "Third message is didOpen for dummy")
+                                                                (is (= "inmemory://dummy.rho" (get-in (nth messages 2) [:params :textDocument :uri])) "didOpen for dummy")))
+                                                            (reset! (:sent mock) [])
+                                                            (wrap-flush #(editor->close-document! editor "inmemory://dummy.rho"))
+                                                            (<! (timeout 100))
+                                                            (let [sent @(:sent mock)]
+                                                              (is (= 1 (count sent)) "Sent didClose for dummy")
+                                                              (let [messages (->> sent (map parse-message) (mapv second))]
+                                                                (is (= "textDocument/didClose" (:method (first messages))) "Sent didClose for dummy")))
+                                                            (reset! (:sent mock) [])
+                                                            (wrap-flush #(editor->open-document! editor "inmemory://test.rho" "content" "rholang"))
+                                                            (<! (timeout 100))
+                                                            (let [wait-res (<! (wait-for-opened-uri "inmemory://test.rho" 1000))]
+                                                              (if (= :error (first wait-res))
+                                                                (throw (second wait-res))
+                                                                (is (second wait-res) "Document opened")))
+                                                            (let [sent @(:sent mock)]
+                                                              (is (= 1 (count sent)) "Sent didOpen after open")
+                                                              (let [messages (->> sent (map parse-message) (mapv second))]
+                                                                (is (= "textDocument/didOpen" (:method (first messages))) "Sent didOpen")
+                                                                (is (= "inmemory://test.rho" (get-in (first messages) [:params :textDocument :uri])) "didOpen with correct URI")))
+                                                            (.unmount root)
+                                                            (<! (timeout 100))
+                                                            (cleanup-container container)
+                                                            [:ok nil]
+                                                            (catch :default e
+                                                              [:error (js/Error. "open-after-connect-sends-didopen failed" #js {:cause e})]))))))]
+                                   (if (= :error (first mock-res))
+                                     (throw (second mock-res))
+                                   [:ok nil]))))
+                             (catch :default e
+                               [:error (js/Error. "open-after-connect-sends-didopen failed" #js {:cause e})]))))]
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
@@ -923,7 +875,7 @@
                                    (let [db (editor->db editor)]
                                      (is (some? db) "getDb returns connection"))
                                    (let [q '[:find ?uri . :where [?e :workspace/active-uri ?uri]]
-                                         result (editor-query editor q)]
+                                         result (editor->query editor q)]
                                      (is (= "inmemory://test.txt" result) "query returns active URI")))
                                  (.unmount root)
                                  (<! (timeout 100))) ;; Delay to allow React cleanup.
@@ -1299,36 +1251,33 @@
 
 (deftest query-complex
   (async done
-         (go (let [res (<! (go
-                             (try
-                               (let [^js/HTMLDivElement container (js/document.createElement "div")
-                                     ^js/React.RefObject ref (react/createRef)]
-                                 (js/document.body.appendChild container)
-                                 (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
-                                                                        :ref ref})]
-                                   (let [ready? (<! (wait-for-ready ref 1000))]
-                                     (is ready? "Editor ready within timeout"))
-                                   (let [editor (ref->editor ref)]
-                                     (wrap-flush #(editor->open-document! editor "inmemory://one.txt" "one" "text"))
-                                     (<! (timeout 100))
-                                     (wrap-flush #(editor->open-document! editor "inmemory://two.txt" "two" "text"))
-                                     (<! (timeout 100))
-                                     (<! (wait-for-uri "inmemory://one.txt" 1000))
-                                     (<! (wait-for-uri "inmemory://two.txt" 1000))
-                                     (let [q '[:find (count ?e) :where [?e :type :document] [?e :document/opened true]]
-                                           result (js->clj (editor-query editor q))]
-                                       (is (= [[2]] result) "Counts open documents")))
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [^js/HTMLDivElement container (js/document.createElement "div")
+                                   ^js/React.RefObject ref (react/createRef)]
+                               (js/document.body.appendChild container)
+                               (let [root (mount-component container {:languages {"text" {:extensions [".txt"]}}
+                                                                      :ref ref})]
+                                 (let [ready? (<! (wait-for-ready ref 1000))]
+                                   (is ready? "Editor ready within timeout"))
+                                 (let [editor (ref->editor ref)]
+                                   (wrap-flush #(editor->open-document! editor "inmemory://one.txt" "one" "text"))
+                                   (<! (wait-for-opened-uri "inmemory://one.txt" 1000))
+                                   (wrap-flush #(editor->open-document! editor "inmemory://two.txt" "two" "text"))
+                                   (<! (wait-for-opened-uri "inmemory://two.txt" 1000))
+                                   (let [q '[:find (count ?e) :where [?e :type :document] [?e :document/opened true]]
+                                         result (js->clj (editor->query editor q))]
+                                     (is (= [[2]] result) "Counts open documents"))
                                    (.unmount root)
                                    (<! (timeout 100))) ;; Delay to allow React cleanup.
-                                 (cleanup-container container)
-                                 [:ok nil])
-                               (catch :default e
-                                 [:error (js/Error. "query-complex failed" #js {:cause e})]))))]
-               (if (= :error (first res))
-                 (do
-                   (is false (str "Test failed with error: " (pr-str (second res))))
-                   (done))
-                 (done))))))
+                                 (cleanup-container container)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "query-complex failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (is false (str "Test failed with error: " (pr-str (second res)))))
+             (done)))))
 
 (let [gen-line gen/small-integer
       gen-column gen/small-integer
@@ -1676,7 +1625,7 @@
                                    (<! (timeout 100))
                                    (let [q '[:find ?text . :in $ ?uri :where [?e :document/uri ?uri] [?e :document/text ?text]]
                                          params ["inmemory://test.txt"]
-                                         result (editor-query editor q (clj->js params))]
+                                         result (editor->query editor q (clj->js params))]
                                      (is (= "test" result) "Query with param returns text")))
                                  (.unmount root)
                                  (<! (timeout 100))) ;; Delay to allow React cleanup.

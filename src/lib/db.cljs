@@ -129,6 +129,7 @@
       (doseq [entity tx]
         (when-not (valid-log? entity)
           (log/warn "Invalid log entity:" (s/explain-str ::log entity)))))
+    (log/trace "Executing transaction:" tx)
     (d/transact! conn tx)))
 
 (defn document-id-lang-opened-by-uri
@@ -427,6 +428,7 @@
       (when DEBUG
         (when-not (s/valid? :document/version new-version)
           (log/warn "Invalid new-version for uri" uri ":" (s/explain-str :document/version new-version))))
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx)
       new-version)))
 
@@ -442,6 +444,7 @@
         (when DEBUG
           (when-not (s/valid? :document/version new-version)
             (log/warn "Invalid new-version for id" id ":" (s/explain-str :document/version new-version))))
+        (log/trace "Executing transaction:" tx)
         (d/transact! conn tx)
         new-version))))
 
@@ -454,6 +457,7 @@
       (log/warn (s/explain-str ::dirty dirty?))))
   (if (d/entity @conn id)
     (let [tx [[:db/add id :document/dirty dirty?]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))
     (log/error "No entity exists with id" id)))
 
@@ -467,6 +471,7 @@
   (if (d/entity @conn id)
     (let [tx [[:db/add id :document/text text]
               [:db/add id :document/dirty true]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))
     (log/error "No entity exists with id" id)))
 
@@ -480,6 +485,7 @@
   (when-let [id (document-id-by-uri uri)]
     (let [tx [[:db/add id :document/text text]
               [:db/add id :document/dirty true]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn update-document-uri-language-by-id!
@@ -494,6 +500,7 @@
   (if (d/entity @conn id)
     (let [tx [[:db/add id :document/uri uri]
               [:db/add id :document/language lang]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))
     (log/error "No entity exists with id" id)))
 
@@ -506,6 +513,7 @@
       (log/warn (s/explain-str :document/uri uri))))
   (if (d/entity @conn id)
     (let [tx [[:db/add id :document/uri uri]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))
     (log/error "No entity exists with id" id)))
 
@@ -523,6 +531,7 @@
                text (conj [:db/add id :document/text text]
                           [:db/add id :document/dirty true])
                lang (conj [:db/add id :document/language lang]))]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))
     (log/error "No entity exists with id" id)))
 
@@ -533,6 +542,7 @@
       (log/warn (s/explain-str :document/uri uri))))
   (when-let [id (document-id-by-uri uri)]
     (let [tx [[:db/add id :document/opened true]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn document-closed-by-uri!
@@ -542,6 +552,7 @@
       (log/warn (s/explain-str :document/uri uri))))
   (when-let [id (document-id-by-uri uri)]
     (let [tx [[:db/add id :document/opened false]]]
+      (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn opened-uris-by-lang
@@ -574,6 +585,7 @@
       (doseq [entity (filter map? tx)]
         (when-not (valid-active-uri? entity)
           (log/warn "Invalid active-uri entity:" (s/explain-str ::active-uri entity)))))
+    (log/trace "Executing transaction:" tx)
     (d/transact! conn tx)))
 
 (defn create-documents!
@@ -590,6 +602,7 @@
       (doseq [entity tx]
         (when-not (valid-document? entity)
           (log/warn "Invalid document entity:" (s/explain-str ::document entity)))))
+    (log/trace "Executing transaction:" tx)
     (d/transact! conn tx)))
 
 (defn delete-document-by-id!
@@ -598,6 +611,7 @@
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id))))
   (let [tx [[:db/retractEntity id]]]
+    (log/trace "Executing transaction:" tx)
     (d/transact! conn tx)))
 
 (defn first-document-uri
@@ -627,6 +641,7 @@
       (when DEBUG
         (when-not (valid-document? entity)
           (log/warn "Invalid document entity in ensure-document-eid:" (s/explain-str ::document entity))))
+      (log/trace "Executing transaction:" tx)
       (let [tx-report (d/transact! conn tx)]
         (get (:tempids tx-report) temp-id)))))
 
@@ -681,9 +696,13 @@
                        @conn uri)
           deletions (for [item old-ids] [:db/retractEntity item])]
       (if (empty? diags)
-        (when (seq deletions) (d/transact! conn deletions))
-        (let [creations (create-diagnostics diags doc-eid version)]
-          (d/transact! conn (concat deletions creations)))))))
+        (do
+          (log/trace "Executing transaction:" deletions)
+          (when (seq deletions) (d/transact! conn deletions)))
+        (let [creations (create-diagnostics diags doc-eid version)
+              tx (concat deletions creations)]
+          (log/trace "Executing transaction:" tx)
+          (d/transact! conn tx))))))
 
 (defn flatten-symbols
   "Flattens hierarchical LSP symbols into a list for datascript transaction, assigning negative db/ids to avoid conflicts."
@@ -754,9 +773,13 @@
                        @conn doc-eid)
           deletions (for [item old-ids] [:db/retractEntity item])]
       (if (empty? symbols)
-        (when (seq deletions) (d/transact! conn deletions))
-        (let [creations (create-symbols doc-eid uri symbols)]
-          (d/transact! conn (concat deletions creations)))))))
+        (when (seq deletions)
+          (log/trace "Executing transaction:" deletions)
+          (d/transact! conn deletions))
+        (let [creations (create-symbols doc-eid uri symbols)
+              tx (concat deletions creations)]
+          (log/trace "Executing transaction:" tx)
+          (d/transact! conn tx))))))
 
 (defn diagnostics-by-uri [uri]
   (when DEBUG

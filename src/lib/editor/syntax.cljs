@@ -1,6 +1,6 @@
 (ns lib.editor.syntax
   (:require
-   [clojure.core.async :as async :refer [go <! timeout]]
+   [clojure.core.async :as async :refer [go <! timeout promise-chan put!]]
    [clojure.string :as str]
    [taoensso.timbre :as log]
    ["@codemirror/state" :refer [Compartment RangeSetBuilder StateField Text]]
@@ -8,8 +8,8 @@
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
    [lib.db :as db]
-   [lib.state :refer [normalize-languages]]
-   [lib.utils :as lib-utils]))
+   [lib.state :refer [normalize-languages load-resource]]
+   [lib.utils :refer [log-error-with-cause promise->chan]]))
 
 ;; Compartment for dynamic reconfiguration of the syntax highlighting extension.
 (def syntax-compartment (Compartment.))
@@ -17,6 +17,7 @@
 ;; Deferred promise for initializing Tree-Sitter (loaded once).
 (defonce ts-init-promise
   (delay
+    (log/trace "Initializing Tree-Sitter with wasm path: js/tree-sitter.wasm")
     (Parser.init #js {:locateFile (fn [_ _] "js/tree-sitter.wasm")})))
 
 ;; Cache for loaded languages to avoid redundant loads (keyed by language string).
@@ -42,15 +43,6 @@
    "punctuation.delimiter" "cm-punctuation"
    "punctuation.bracket" "cm-punctuation cm-bracket"})
 
-(defn promise->chan
-  "Converts a JS promise to an async channel, putting [:ok val] on resolve or [:error err] on reject."
-  [p]
-  (let [ch (async/chan)]
-    (-> p
-        (.then #(async/put! ch [:ok %]))
-        (.catch (fn [e] (async/put! ch [:error (js/Error. "Promise rejected" #js {:cause e})]))))
-    ch))
-
 (defn index->point
   "Converts a character offset to a Tree-Sitter point (row, column)."
   [^Text doc ^number index]
@@ -73,14 +65,10 @@
             (recur (inc i) (+ indent tab-size (- (mod indent tab-size))))
             (= code 32) ; Space
             (recur (inc i) (inc indent))
-            :else indent))))))  ; Stop at first non-whitespace
+            :else indent))))))  ;; Stop at first non-whitespace
 
 (defn calculate-indent
-  "Calculates the indentation level for a given position in the document.
-   Returns the number of spaces to indent based on the indent-size and Tree-Sitter query.
-   Handles @indent and @branch captures:
-   - For @indent: base indent of the line at the capture start + indent-size.
-   - For @branch: base indent of the line at the parent node start + 0 (aligns to the start of the construct, e.g., first process in par)."
+  "Calculates the indentation level for a given position in the document."
   [ctx position indents-query indent-size language-state-field]
   (let [^js state (.-state ctx)
         position (or position (some-> state .-selection .-main .-head) 0)]
@@ -121,8 +109,6 @@
                       (let [{:keys [type node captures]} found
                             cap (first (filter #(= type (.-name %)) captures))
                             ^js captured-node (.-node cap)
-                            ;; For branch, use start of the node (e.g., par start) to align to the construct's beginning.
-                            ;; For indent, use start of captured-node (usually the node itself).
                             start (if (= type "branch")
                                     (.-startIndex ^js node)
                                     (.-startIndex ^js captured-node))
@@ -132,8 +118,7 @@
                         (+ base add)))))))))))))
 
 (defn make-language-state
-  "Creates a CodeMirror StateField for managing the Tree-Sitter parse tree.
-   Updates incrementally on document changes."
+  "Creates a CodeMirror StateField for managing the Tree-Sitter parse tree."
   [parser]
   (.define StateField #js {:create (fn [^js state]
                                      (let [tree (.parse parser (str (.-doc state)))]
@@ -166,8 +151,7 @@
                                                #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
 
 (defn make-highlighter-plugin
-  "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries.
-   Builds decorations only for the visible viewport to optimize performance."
+  "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries."
   [language-state-field highlights-query]
   (let [style-js (clj->js style-map)
         build-decorations (fn [view-or-update]
@@ -194,7 +178,7 @@
                     :update (fn [^js update]
                               (when (or (.-docChanged update) (.-viewportChanged update)
                                         (not= (.field (.-startState update) language-state-field)
-                                              (.field (.-state update) language-state-field)))  ;; rebuilding?
+                                              (.field (.-state update) language-state-field)))
                                 (this-as ^js self
                                          (set! (.-decorations self) (build-decorations update)))))})
              #js {:decorations (fn [^js value] (.-decorations value))})))
@@ -206,160 +190,338 @@
                        (calculate-indent ctx nil indents-query indent-size language-state-field))))
 
 (defn fallback-extension
-  "Returns a fallback extension when Tree-Sitter is unavailable (e.g., basic indentation)."
+  "Returns a fallback extension when Tree-Sitter is unavailable."
   [_lang-config]
-  ;; (if (= (:fallback-highlighter lang-config) "regex")
-  ;;   #js [] ;; Placeholder for regex-based fallback if implemented.
-  ;;   #js [])
   #js [])
+
+(defn load-resource-with-validator
+  "Loads a resource and validates it with the provided predicate, logging errors if invalid."
+  [type lang-key resource-key supplier pred error-msg]
+  (go
+    (try
+      (let [[status result] (<! (load-resource type resource-key supplier))]
+        (log/trace "Loaded resource" resource-key "for" lang-key "with status" status "and type" (type result))
+        (if (= :error status)
+          (do
+            (log/error error-msg lang-key (.-message result))
+            [:error result])
+          (if (pred result)
+            [:ok result]
+            (let [err (js/Error. (str error-msg lang-key ": failed validation, got " (type result)))]
+              (log/error error-msg lang-key (.-message err))
+              [:error err]))))
+      (catch js/Error e
+        (log/error error-msg lang-key (.-message e))
+        [:error e]))))
 
 (defn init-syntax
   "Initializes syntax highlighting and indentation for the editor view asynchronously.
-   Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment.
-   Falls back to basic mode on failure."
+   Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment."
   [^js view state-atom]
   (go
     (try
-      (let [lang-key (or (db/active-lang) "text")]
-        ;; Normalize languages if any keyword keys present
-        (let [langs (:languages @state-atom)]
-          (when (some keyword? (keys langs))
-            (log/debug "Normalizing language keys in state-atom")
-            (swap! state-atom assoc :languages (normalize-languages langs))))
-        (let [lang-config (get-in @state-atom [:languages lang-key])]
-          (if-not lang-config
-            (do
-              (log/warn "No configuration found for" lang-key "- falling back to basic mode")
-              (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))})
-              [:ok :no-config])
-            (let [ts-wasm-path (let [p (:tree-sitter-wasm @state-atom)]
-                                 (cond (string? p) p
-                                       (fn? p) (p)
-                                       (nil? p) "js/tree-sitter.wasm"
-                                       :else (throw (js/Error. "Invalid :tree-sitter-wasm: must be string or function"))))
-                  parser-raw (:parser lang-config)
-                  lang-wasm-path (when-not parser-raw
-                                   (let [p (:grammar-wasm lang-config)]
-                                     (cond (nil? p) nil
-                                           (string? p) p
-                                           (fn? p) (p)
-                                           :else (throw (js/Error. "Invalid :grammar-wasm: must be string or function")))))]
-              ;; Skip core Tree-Sitter init if no grammar-wasm or tree-sitter-wasm (e.g., for "text" fallback).
-              (when (or lang-wasm-path ts-wasm-path)
-                (let [ts-init-promise (delay
-                                        (Parser.init #js {:locateFile (fn [_ _] ts-wasm-path)}))]
-                  (<! (promise->chan @ts-init-promise))
-                  (<! (timeout 100))))
-              (let [indent-size (or (:indent-size lang-config) 2)
-                    indent-unit-str (str/join (repeat indent-size " "))
-                    indent-unit-ext (.of indentUnit indent-unit-str)
-                    cached (get @languages lang-key)
-                    highlights-query-str (or (:highlights-query lang-config)
-                                             (when-let [p (:highlights-query-path lang-config)]
-                                               (let [effective-p (cond (string? p) p
-                                                                       (fn? p) (p)
-                                                                       :else (throw (js/Error. "Invalid :highlights-query-path: must be string or function")))
-                                                     [resp-tag resp] (<! (promise->chan (js/fetch effective-p)))]
-                                                 (if (and (= resp-tag :ok) (.-ok resp))
-                                                   (let [[text-tag text] (<! (promise->chan (.text resp)))]
-                                                     (if (= text-tag :ok)
-                                                       (do
-                                                         (swap! state-atom assoc-in [:languages lang-key :highlights-query] text)
-                                                         text)
-                                                       (do
-                                                         (log/error (str "Failed to read query text for " lang-key ": " (.-message text)))
-                                                         nil)))
-                                                   (do
-                                                     (log/error (str "Failed to fetch query for " lang-key ": HTTP " (.-status resp) " - " (.-statusText resp)))
-                                                     nil)))))
-                    indents-query-str (or (:indents-query lang-config)
-                                          (when-let [p (:indents-query-path lang-config)]
-                                            (let [effective-p (cond (string? p) p
-                                                                    (fn? p) (p)
-                                                                    :else (throw (js/Error. "Invalid :indents-query-path: must be string or function")))
-                                                  [resp-tag resp] (<! (promise->chan (js/fetch effective-p)))]
-                                              (if (and (= resp-tag :ok) (.-ok resp))
-                                                (let [[text-tag text] (<! (promise->chan (.text resp)))]
-                                                  (if (= text-tag :ok)
-                                                    (do
-                                                      (swap! state-atom assoc-in [:languages lang-key :indents-query] text)
-                                                      text)
-                                                    (do
-                                                      (log/error (str "Failed to read indents query text for " lang-key ": " (.-message text)))
-                                                      nil)))
-                                                (do
-                                                  (log/error (str "Failed to fetch indents query for " lang-key ": HTTP " (.-status resp) " - " (.-statusText resp)))
-                                                  nil)))))
-                    parser (or (:parser cached)
-                               (if parser-raw
-                                 (let [maybe-promise (if (fn? parser-raw) (parser-raw) parser-raw)]
-                                   (if (instance? js/Promise maybe-promise)
-                                     (let [[tag val] (<! (promise->chan maybe-promise))]
-                                       (if (= tag :ok)
-                                         val
-                                         (do
-                                           (log/error (str "Failed to load parser from function for " lang-key ": " (.-message val)))
-                                           nil)))
-                                     maybe-promise))
-                                 (when lang-wasm-path
-                                   (let [^js language (let [[tag val] (<! (promise->chan (.load Language lang-wasm-path)))]
-                                                        (if (= tag :ok)
-                                                          val
-                                                          (do
-                                                            (log/error (str "Failed to load language WASM for " lang-key ": " (.-message val)))
-                                                            nil)))
-                                         ^js parser (Parser.)]
-                                     (.setLanguage parser language)
-                                     parser))))
-                    lang (or (:lang cached)
-                             (when parser (.-language parser)))
-                    highlights-query (when (and lang highlights-query-str)
-                                       (try
-                                         (Query. lang highlights-query-str)
-                                         (catch js/Error e
-                                           (log/error (str "Failed to create highlight query for " lang-key ": " (.-message e)))
-                                           nil)))
-                    indents-query (when (and lang indents-query-str)
-                                    (try
-                                      (Query. lang indents-query-str)
-                                      (catch js/Error e
-                                        (log/error (str "Failed to create indents query for " lang-key ": " (.-message e)))
-                                        nil)))
-                    language-state-field (when parser (make-language-state parser))
-                    highlight-plugin (when highlights-query (make-highlighter-plugin language-state-field highlights-query))
-                    indent-ext (when indents-query (make-indent-ext indents-query indent-size language-state-field))
-                    extensions (cond-> []
-                                 language-state-field (conj language-state-field)
-                                 highlight-plugin (conj highlight-plugin)
-                                 indent-ext (conj indent-ext)
-                                 true (conj indent-unit-ext))]
-                (when-not lang-wasm-path
-                  (log/debug "No grammar-wasm path provided for" lang-key))
-                (when-not ts-wasm-path
-                  (log/debug "No tree-sitter-wasm path provided for" lang-key))
-                (when-not highlights-query-str
-                  (log/debug "No valid highlight query string for" lang-key))
-                (when-not indents-query-str
-                  (log/debug (str "No indents query for " lang-key "; default indentation behavior will apply")))
-                (when-not lang
-                  (log/debug "No language loaded for" lang-key))
-                (when-not parser
-                  (log/debug "No parser created for" lang-key))
-                (if (and lang parser highlights-query)
+      (if-let [lang-key (db/active-lang)]
+        (do
+          (log/info "Initializing syntax for language:" lang-key)
+          (let [langs (:languages @state-atom)]
+            (when (some keyword? (keys langs))
+              (log/debug "Normalizing language keys in state-atom")
+              (swap! state-atom assoc :languages (normalize-languages langs))))
+          (let [lang-config (get-in @state-atom [:languages lang-key])]
+            (log/debug "Language config:" lang-config)
+            (if-not lang-config
+              (do
+                (log/warn "No configuration found for" lang-key "- falling back to basic mode")
+                (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))})
+                [:ok :no-config])
+              (let [ts-wasm-path (let [p (:tree-sitter-wasm @state-atom)]
+                                   (cond (string? p) p
+                                         (fn? p) (p)
+                                         (nil? p) "js/tree-sitter.wasm"
+                                         :else (throw (js/Error. "Invalid :tree-sitter-wasm: must be string or function"))))
+                    parser-raw (:parser lang-config)
+                    lang-wasm-path (when-not parser-raw
+                                     (let [p (:grammar-wasm lang-config)]
+                                       (cond (nil? p) nil
+                                             (string? p) p
+                                             (fn? p) (p)
+                                             :else (throw (js/Error. "Invalid :grammar-wasm: must be string or function")))))]
+                (log/trace "Loading syntax for" lang-key "with ts-wasm-path:" ts-wasm-path "lang-wasm-path:" lang-wasm-path)
+                (if (and (nil? parser-raw) (nil? lang-wasm-path))
                   (do
-                    (when-not cached
-                      (swap! languages assoc lang-key {:lang lang :parser parser}))
-                    (.dispatch view #js {:effects (.reconfigure syntax-compartment (clj->js extensions))})
-                    [:ok :success])
-                  (do
-                    (log/debug (str "Missing required components for " lang-key
-                                    ": lang=" (boolean lang)
-                                    ", parser=" (boolean parser)
-                                    ", highlights-query=" (boolean highlights-query)
-                                    "; falling back to basic mode"))
+                    (log/debug (str "No parser or grammar-wasm for " lang-key "; using fallback mode"))
                     (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension lang-config))})
-                    [:ok :missing-components])))))))
+                    [:ok :no-tree-sitter])
+                  (let [cached (get @languages lang-key)]
+                    (if-let [extensions (:extensions cached)]
+                      (do
+                        (log/debug "Using cached syntax extensions for" lang-key)
+                        (.dispatch view #js {:effects (.reconfigure syntax-compartment extensions)})
+                        [:ok :from-cache])
+                      (do
+                        ;; Initialize Tree-Sitter
+                        (let [ts-init-promise (delay
+                                                (Parser.init #js {:locateFile (fn [_ _] ts-wasm-path)}))
+                              ts-init-res (<! (promise->chan @ts-init-promise))]
+                          (if (= :error (first ts-init-res))
+                            (do
+                              (log/error "Failed to initialize Tree-Sitter for" lang-key ":" (.-message (second ts-init-res)))
+                              (throw (js/Error. "Failed to initialize Tree-Sitter" #js {:cause (second ts-init-res)})))
+                            (log/debug "Tree-Sitter initialized for" lang-key)))
+                        (<! (timeout 100))
+                        ;; Load queries and parser in parallel
+                        (let [indent-size (or (:indent-size lang-config) 2)
+                              indent-unit-str (str/join (repeat indent-size " "))
+                              indent-unit-ext (.of indentUnit indent-unit-str)
+                              hq-str-ch (load-resource-with-validator
+                                         :tree-sitter
+                                         lang-key
+                                         (keyword lang-key "highlights-query-str")
+                                         (fn []
+                                           [:ok (js/Promise.
+                                                 (fn [resolve reject]
+                                                   (let [query (:highlights-query lang-config)
+                                                         query-path (:highlights-query-path lang-config)]
+                                                     (cond
+                                                       (:highlights-query cached) (resolve (:highlights-query cached))
+                                                       query (resolve query)
+                                                       query-path
+                                                       (let [effective-p (cond (string? query-path) query-path
+                                                                               (fn? query-path) (query-path)
+                                                                               :else (do
+                                                                                       (reject (js/Error. "Invalid :highlights-query-path: must be string or function"))
+                                                                                       nil))]
+                                                         (log/trace "Fetching highlights query for" lang-key "from" effective-p)
+                                                         (-> (js/fetch effective-p)
+                                                             (.then (fn [resp]
+                                                                      (if (.-ok resp)
+                                                                        (.text resp)
+                                                                        (reject (js/Error. (str "Failed to fetch query for " lang-key ": HTTP " (.-status resp) " - " (.-statusText resp)))))))
+                                                             (.then resolve)
+                                                             (.catch reject)))
+                                                       :else (resolve nil)))))])
+                                         string?
+                                         "Failed to load highlights-query-str for ")
+                              iq-str-ch (load-resource-with-validator
+                                         :tree-sitter
+                                         lang-key
+                                         (keyword lang-key "indents-query-str")
+                                         (fn []
+                                           [:ok (js/Promise.
+                                                 (fn [resolve reject]
+                                                   (let [query (:indents-query lang-config)
+                                                         query-path (:indents-query-path lang-config)]
+                                                     (cond
+                                                       (:indents-query cached) (resolve (:indents-query cached))
+                                                       query (resolve query)
+                                                       query-path
+                                                       (let [effective-p (cond (string? query-path) query-path
+                                                                               (fn? query-path) (query-path)
+                                                                               :else (do
+                                                                                       (reject (js/Error. "Invalid :indents-query-path: must be string or function"))
+                                                                                       nil))]
+                                                         (log/trace "Fetching indents query for" lang-key "from" effective-p)
+                                                         (-> (js/fetch effective-p)
+                                                             (.then (fn [resp]
+                                                                      (if (.-ok resp)
+                                                                        (.text resp)
+                                                                        (reject (js/Error. (str "Failed to fetch indents query for " lang-key ": HTTP " (.-status resp) " - " (.-statusText resp)))))))
+                                                             (.then resolve)
+                                                             (.catch reject)))
+                                                       :else (resolve nil)))))])
+                                         string?
+                                         "Failed to load indents-query-str for ")
+                              parser-ch (load-resource-with-validator
+                                         :tree-sitter
+                                         lang-key
+                                         (keyword lang-key "parser")
+                                         (fn []
+                                           [:ok (js/Promise.
+                                                 (fn [resolve reject]
+                                                   (try
+                                                     (let [cached-parser (:parser cached)]
+                                                       (if cached-parser
+                                                         (resolve cached-parser)
+                                                         (if parser-raw
+                                                           (let [maybe-promise (if (fn? parser-raw) (parser-raw) parser-raw)]
+                                                             (if (instance? js/Promise maybe-promise)
+                                                               (-> maybe-promise
+                                                                   (.then resolve)
+                                                                   (.catch reject))
+                                                               (resolve maybe-promise)))
+                                                           (if lang-wasm-path
+                                                             (do
+                                                               (log/trace "Loading Tree-Sitter grammar for" lang-key "from" lang-wasm-path)
+                                                               (-> (Language.load lang-wasm-path)
+                                                                   (.then (fn [language]
+                                                                            (let [parser (Parser.)]
+                                                                              (.setLanguage parser language)
+                                                                              (resolve parser))))
+                                                                   (.catch reject)))
+                                                             (reject (js/Error. "No parser or grammar-wasm provided for language"))))))
+                                                     (catch js/Error e
+                                                       (reject e)))))])
+                                         #(instance? Parser %)
+                                         "Failed to load parser for ")
+                              [hq-status highlights-query-str] (<! hq-str-ch)
+                              [parser-status parser] (<! parser-ch)
+                              [lang-status lang] (if (= :error parser-status)
+                                                   [:ok nil]
+                                                   [:ok (.-language parser)])
+                              hq-query-ch (if (or (= :error hq-status) (nil? highlights-query-str) (= :error lang-status))
+                                            (doto (promise-chan) (put! [:ok nil]))
+                                            (load-resource-with-validator
+                                             :tree-sitter
+                                             lang-key
+                                             (keyword lang-key "highlights-query")
+                                             (fn []
+                                               [:ok (js/Promise.
+                                                     (fn [resolve reject]
+                                                       (if-let [cached-query (:highlights-query cached)]
+                                                         (resolve cached-query)
+                                                         (if (and lang highlights-query-str)
+                                                           (try
+                                                             (resolve (Query. lang highlights-query-str))
+                                                             (catch js/Error e
+                                                               (log/error (str "Failed to create highlight query for " lang-key ": " (.-message e)))
+                                                               (reject e)))
+                                                           (resolve nil)))))])
+                                             #(instance? Query %)
+                                             "Failed to load highlights-query for "))
+                              [iq-status indents-query-str] (<! iq-str-ch)
+                              iq-query-ch (if (or (= :error iq-status) (nil? indents-query-str) (= :error lang-status))
+                                            (doto (promise-chan) (put! [:ok nil]))
+                                            (load-resource-with-validator
+                                             :tree-sitter
+                                             lang-key
+                                             (keyword lang-key "indents-query")
+                                             (fn []
+                                               [:ok (js/Promise.
+                                                     (fn [resolve reject]
+                                                       (if-let [cached-query (:indents-query cached)]
+                                                         (resolve cached-query)
+                                                         (if (and lang indents-query-str)
+                                                           (try
+                                                             (resolve (Query. lang indents-query-str))
+                                                             (catch js/Error e
+                                                               (log/error (str "Failed to create indents query for " lang-key ": " (.-message e)))
+                                                               (reject e)))
+                                                           (resolve nil)))))])
+                                             #(instance? Query %)
+                                             "Failed to load indents-query for "))
+                              lsf-ch (if (= :error parser-status)
+                                       (doto (promise-chan) (put! [:ok nil]))
+                                       (load-resource-with-validator
+                                        :tree-sitter
+                                        lang-key
+                                        (keyword lang-key "language-state-field")
+                                        (fn []
+                                          [:ok (js/Promise.
+                                                (fn [resolve reject]
+                                                  (if-let [cached-field (:language-state-field cached)]
+                                                    (resolve cached-field)
+                                                    (if parser
+                                                      (resolve (make-language-state parser))
+                                                      (reject (js/Error. "No parser available for language-state-field"))))))])
+                                        #(instance? StateField %)
+                                        "Failed to load language-state-field for "))
+                              [lsf-status language-state-field] (<! lsf-ch)
+                              [hq-query-status highlights-query] (<! hq-query-ch)
+                              hp-ch (if (or (= :error lsf-status) (= :error hq-query-status) (nil? highlights-query))
+                                      (doto (promise-chan) (put! [:ok nil]))
+                                      (load-resource-with-validator
+                                       :tree-sitter
+                                       lang-key
+                                       (keyword lang-key "highlight-plugin")
+                                       (fn []
+                                         [:ok (js/Promise.
+                                               (fn [resolve _]
+                                                 (if-let [cached-plugin (:highlight-plugin cached)]
+                                                   (resolve cached-plugin)
+                                                   (if highlights-query
+                                                     (resolve (make-highlighter-plugin language-state-field highlights-query))
+                                                     (resolve nil)))))])
+                                       #(instance? ViewPlugin %)
+                                       "Failed to load highlight-plugin for "))
+                              [iq-query-status indents-query] (<! iq-query-ch)
+                              ie-ch (if (or (= :error lsf-status) (= :error iq-query-status) (nil? indents-query))
+                                      (doto (promise-chan) (put! [:ok nil]))
+                                      (load-resource-with-validator
+                                       :tree-sitter
+                                       lang-key
+                                       (keyword lang-key "indent-ext")
+                                       (fn []
+                                         [:ok (js/Promise.
+                                               (fn [resolve _]
+                                                 (if-let [cached-ext (:indent-ext cached)]
+                                                   (resolve cached-ext)
+                                                   (if indents-query
+                                                     (resolve (make-indent-ext indents-query indent-size language-state-field))
+                                                     (resolve nil)))))])
+                                       (constantly true)
+                                       "Failed to load indent-ext for "))
+                              [hp-status highlight-plugin] (<! hp-ch)
+                              [ie-status indent-ext] (<! ie-ch)
+                              extensions (cond-> []
+                                           language-state-field (conj language-state-field)
+                                           highlight-plugin (conj highlight-plugin)
+                                           indent-ext (conj indent-ext)
+                                           true (conj indent-unit-ext))
+                              artifacts {:parser parser
+                                         :lang lang
+                                         :highlights-query highlights-query
+                                         :indents-query indents-query
+                                         :language-state-field language-state-field
+                                         :highlight-plugin highlight-plugin
+                                         :indent-ext indent-ext
+                                         :extensions (clj->js extensions)}]
+                          (when (= :error hq-status)
+                            (log/debug "No valid highlights query string for" lang-key))
+                          (when (= :error iq-status)
+                            (log/debug "No indents query for" lang-key "; default indentation behavior will apply"))
+                          (when (= :error parser-status)
+                            (log/error "Parser loading failed for" lang-key ":" (.-message parser)))
+                          (when (= :error lang-status)
+                            (log/debug "No language loaded for" lang-key))
+                          (when (= :error hq-query-status)
+                            (log/debug "No highlights query loaded for" lang-key))
+                          (when (= :error iq-query-status)
+                            (log/debug "No indents query loaded for" lang-key))
+                          (when (= :error lsf-status)
+                            (log/debug "No language state field loaded for" lang-key))
+                          (when (= :error hp-status)
+                            (log/debug "No highlight plugin loaded for" lang-key))
+                          (when (= :error ie-status)
+                            (log/debug "No indent extension loaded for" lang-key))
+                          (log/debug "Syntax initialization complete for" lang-key
+                                     ": parser=" (boolean parser)
+                                     ", lang=" (boolean lang)
+                                     ", highlights-query=" (boolean highlights-query)
+                                     ", indents-query=" (boolean indents-query)
+                                     ", language-state-field=" (boolean language-state-field)
+                                     ", highlight-plugin=" (boolean highlight-plugin)
+                                     ", indent-ext=" (boolean indent-ext))
+                          (if (and lang parser highlights-query language-state-field highlight-plugin indent-ext)
+                            (do
+                              (swap! languages assoc lang-key artifacts)
+                              (.dispatch view #js {:effects (.reconfigure syntax-compartment (clj->js extensions))})
+                              [:ok :success])
+                            (do
+                              (log/debug (str "Missing required components for " lang-key
+                                              ": lang=" (boolean lang)
+                                              ", parser=" (boolean parser)
+                                              ", highlights-query=" (boolean highlights-query)
+                                              ", language-state-field=" (boolean language-state-field)
+                                              ", highlight-plugin=" (boolean highlight-plugin)
+                                              ", indent-ext=" (boolean indent-ext)
+                                              "; falling back to basic mode"))
+                              (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension lang-config))})
+                              [:ok :missing-components])))))))))))
+        (do
+          (log/debug "No active language.")
+          [:ok :no-active-lang]))
       (catch js/Error error
         (let [error-with-cause (js/Error. "Syntax initialization failed" #js {:cause error})]
-          (lib-utils/log-error-with-cause error-with-cause)
+          (log-error-with-cause error-with-cause)
+          (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))})
           [:error error-with-cause])))))

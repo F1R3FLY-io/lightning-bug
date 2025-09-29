@@ -12,20 +12,60 @@
    ["rxjs" :as rxjs]
    [lib.db :as db :refer [flatten-symbols create-documents! replace-symbols!]]
    [lib.lsp.client :as lsp]
-   [lib.utils :as lib-utils]))
+   [lib.utils :as lib-utils]
+   [test.lib.mock-lsp :refer [parse-message with-mock-lsp]]
+   [test.lib.utils :refer [wait-for]]
+   [taoensso.timbre :as log]
+   [lib.state :refer [set-resource!]]))
 
 (use-fixtures :each
   {:before #(d/reset-conn! db/conn (d/empty-db db/schema))})
 
 (deftest connect-mock-websocket
-  (let [state (r/atom {:lsp {:pending {}}})
-        events (rxjs/Subject.)
-        sock (js/Object.)]
-    (set! (.-close sock) (fn [] ((.-onclose sock))))
-    (set! (.-send sock) (fn [_data]))
-    (with-redefs [js/WebSocket (fn [_] sock)]
-      (lsp/connect "test" {:url "ws://test"} state events)
-      (is (some? (get-in @state [:lsp "test" :ws]))))))
+  (async done
+         (go
+           (let [state (r/atom {})
+                 events (rxjs/Subject.)
+                 mock-res (<! (with-mock-lsp
+                                (fn [mock]
+                                  (go
+                                    (try
+                                      (let [connect-ch (lsp/connect "test" {:url "ws://test"} state events)]
+                                        (let [wait-res (<! (wait-for #(some? (.-onopen (:sock mock))) 1000))]
+                                          (if (= :error (first wait-res))
+                                            (throw (second wait-res))
+                                            (is (second wait-res) "onopen handler set")))
+                                        ((:trigger-open mock))
+                                        (let [wait-res (<! (wait-for #(pos? (count @(:sent mock))) 1000))]
+                                          (if (= :error (first wait-res))
+                                            (throw (second wait-res))
+                                            (is (second wait-res) "Message sent after open")))
+                                        (let [init-msg (first @(:sent mock))
+                                              [_ body] (parse-message init-msg)
+                                              id (:id body)
+                                              response-js #js {:jsonrpc "2.0"
+                                                               :id id
+                                                               :result #js {:capabilities #js {}}}
+                                              response (js/JSON.stringify response-js)
+                                              full (str "Content-Length: " (.-length response) "\r\n\r\n" response)]
+                                          ((:trigger-message mock) full))
+                                        (<! (timeout 10))
+                                        (let [status-val (<! connect-ch)]
+                                          (if (= :error (first status-val))
+                                            (throw (js/Error. "connect failed" #js {:cause (second status-val)}))
+                                            (do
+                                              (is (true? (get-in @state [:lsp "test" :connected?])) "connected?")
+                                              (is (true? (get-in @state [:lsp "test" :initialized?])) "initialized?")
+                                              (is (some? (get-in @state [:lsp "test" :ws])) "ws set"))))
+                                        [:ok nil])
+                                      (catch :default e
+                                        [:error (js/Error. "connect-mock-websocket body failed" #js {:cause e})]))))))]
+             (if (= :error (first mock-res))
+               (let [err (second mock-res)]
+                 (lib-utils/log-error-with-cause err)
+                 (is false (str "Mock body failed: " (.-message err))))
+               (is true "Connect succeeded")))
+           (done))))
 
 (deftest flatten-symbols-basic
   (let [syms [{:name "root"
@@ -83,17 +123,20 @@
     (is (nil? (:symbol/parent (first flat))) "No parent for top-level")))
 
 (deftest send-mock-websocket
-  (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
+  (let [ws-mock (js/Object.)
+        state (r/atom {:lsp {"test" {:ws ws-mock
                                      :pending {}
                                      :connected? true
-                                     :reachable true}}})
-        msg {:method "test"}
+                                     :reachable? true
+                                     :warned-unreachable? false}}})
+        msg {:method "initialized" :params {}}
         sent (atom nil)]
-    (set! (.-send (get-in @state [:lsp "test" :ws])) (fn [data] (reset! sent data)))
+    (set! (.-send ws-mock) (fn [data] (reset! sent data)))
+    (set-resource! :lsp "test" ws-mock)
     (lsp/send "test" msg state)
     (is (some? @sent) "Message sent over WebSocket")
     (is (str/includes? @sent "Content-Length:") "Includes Content-Length header")
-    (is (str/includes? @sent "\"method\":\"test\"") "JSON contains method")))
+    (is (str/includes? @sent "\"method\":\"initialized\"") "JSON contains method")))
 
 (deftest flatten-nested-with-multiple-children
   (let [syms [{:name "root"
@@ -350,7 +393,7 @@
   (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
                                      :pending {}
                                      :connected? true
-                                     :reachable true}}})
+                                     :reachable? true}}})
         sent (atom [])]
     (with-redefs [lsp/send-raw (fn [_lang full _state] (swap! sent conj full))]
       (lsp/request-shutdown "test" state))
@@ -362,7 +405,7 @@
   (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
                                      :pending {}
                                      :connected? true
-                                     :reachable true}}})
+                                     :reachable? true}}})
         sent (atom [])]
     (with-redefs [lsp/send-raw (fn [_lang full _state] (swap! sent conj full))]
       (lsp/notify-exit "test" state))
@@ -375,8 +418,7 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [state (r/atom {:lsp {"test-lang" {:ws (js/Object.)
-                                                                     :pending {1 :shutdown}}}})
+                             (let [state (r/atom {:lsp {"test-lang" {:pending {1 :shutdown}}}})
                                    events (rxjs/Subject.)
                                    response-js #js {:jsonrpc "2.0"
                                                     :id 1
@@ -384,8 +426,11 @@
                                    response (js/JSON.stringify response-js)
                                    full (str "Content-Length: " (.-length response) "\r\n\r\n" response)
                                    sent (atom [])
-                                   closed (atom false)]
-                               (set! (.-close (get-in @state [:lsp "test-lang" :ws])) (fn [] (reset! closed true)))
+                                   closed (atom false)
+                                   ws (js/Object.)]
+                               (swap! state assoc-in [:lsp "test-lang" :ws] ws)
+                               (set-resource! :lsp "test-lang" ws)
+                               (set! (.-close ws) (fn [] (reset! closed true)))
                                (with-redefs [lsp/send (fn [_lang msg _state-atom]
                                                         (swap! sent conj msg))]
                                  (lsp/handle-message "test-lang" full state events))

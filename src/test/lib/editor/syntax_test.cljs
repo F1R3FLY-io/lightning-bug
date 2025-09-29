@@ -5,8 +5,9 @@
    [datascript.core :as d]
    [taoensso.timbre :as log :include-macros true]
    [lib.db :as db]
-   [lib.editor.syntax :as syntax :refer [promise->chan]]
-   [lib.utils :as lib-utils]
+   [lib.editor.syntax :as syntax]
+   [lib.state :as state]
+   [lib.utils :as lib-utils :refer [promise->chan]]
    ["@codemirror/state" :refer [ChangeSet EditorState]]
    ["@codemirror/view" :refer [EditorView]]
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
@@ -17,6 +18,7 @@
 (use-fixtures :each
   {:before (fn []
              (reset! syntax/languages {})
+             (reset! state/resources {:lsp {} :tree-sitter {}})
              (d/reset-conn! db/conn (d/empty-db db/schema)))})
 
 (defn slurp
@@ -190,11 +192,13 @@
                            (try
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
-                                   state-atom (atom {:language "rholang" :languages {"rholang" {:grammar-wasm wasm-path
-                                                                                                :highlights-query query-str
-                                                                                                :extensions [".rho"]}}})]
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
+                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
+                                                                            :highlights-query query-str
+                                                                            :indents-query indents-str
+                                                                            :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "test.rho" :text "" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/create-documents! [{:uri "test.rho" :text "content" :language "rholang" :version 1 :dirty true :opened false}])
                                (db/update-active-uri! "test.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
@@ -223,12 +227,14 @@
                            (try
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    state-atom (atom {:languages {:rholang {:grammar-wasm wasm-path
                                                                            :highlights-query query-str
+                                                                           :indents-query indents-str
                                                                            :extensions [".rho"]}}})]
-                               ;; Setup mock active document to ensure db/active-lang returns "test"
-                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.rho")
+                               ;; Setup mock active document to ensure db/active-lang returns "rholang"
+                               (db/create-documents! [{:uri "demo.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "demo.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom))]
@@ -354,7 +360,7 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-                                   [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
                                    parser (doto (Parser.) (.setLanguage lang))
                                    indents-query (Query. lang indents-str)
                                    doc "{ Nil }"
@@ -383,7 +389,7 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-                                   [_ lang] (<! (syntax/promise->chan (Language.load wasm-path)))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
                                    parser (doto (Parser.) (.setLanguage lang))
                                    indents-query (Query. lang indents-str)
                                    doc "new x in {}"
@@ -502,10 +508,12 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
                                    parser (doto (Parser.) (.setLanguage lang))
                                    state-atom (atom {:languages {"test" {:parser parser
                                                                          :highlights-query query-str
+                                                                         :indents-query indents-str
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
@@ -536,10 +544,12 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    [_ lang] (<! (promise->chan (Language.load wasm-path)))
                                    load-parser (fn [] (doto (Parser.) (.setLanguage lang)))
                                    state-atom (atom {:languages {"test" {:parser load-parser
                                                                          :highlights-query query-str
+                                                                         :indents-query indents-str
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
@@ -570,11 +580,13 @@
                              (<! (timeout 100))
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
                                    load-parser (fn [] (.then (Language.load wasm-path)
                                                              (fn [lang]
                                                                (doto (Parser.) (.setLanguage lang)))))
                                    state-atom (atom {:languages {"test" {:parser load-parser
                                                                          :highlights-query query-str
+                                                                         :indents-query indents-str
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
@@ -601,11 +613,9 @@
          (go
            (let [res (<! (go
                            (try
-                             (let [query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
-                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
-                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm
-                                                                            :highlights-query query-str
-                                                                            :indents-query indents-str
+                             (let [state-atom (atom {:languages {"rholang" {:grammar-wasm wasm
+                                                                            :highlights-query-path highlightsQueryUrl
+                                                                            :indents-query-path indentsQueryUrl
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
@@ -619,7 +629,7 @@
                                  (.destroy view)))
                              [:ok nil]
                              (catch :default e
-                               [:error (js/Error. "base64-wasm-from-package failed" #js {:cause e})]))))]
+                               [:error (js/Error. "data-uri-wasm-from-package failed" #js {:cause e})]))))]
              (when (= :error (first res))
                (let [err (second res)
                      err-msg (str "Test failed with error: " (pr-str err))]
@@ -634,6 +644,7 @@
                            (try
                              (let [state-atom (atom {:languages {"test" {:grammar-wasm (fn [] "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm")
                                                                          :highlights-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
+                                                                         :indents-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/indents.scm")
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
@@ -663,6 +674,7 @@
                              (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
                                    state-atom (atom {:languages {"test" {:grammar-wasm wasm-path
                                                                          :highlights-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/highlights.scm")
+                                                                         :indents-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/indents.scm")
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])

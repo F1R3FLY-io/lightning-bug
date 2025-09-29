@@ -3,7 +3,9 @@
             [clojure.string :as str]
             [taoensso.timbre :as log]))
 
-(defn parse-headers [headers-str]
+(defn parse-headers
+  "Parses HTTP headers from a string into a map."
+  [headers-str]
   (->> (str/split-lines headers-str)
        (map str/trim)
        (filter (complement str/blank?))
@@ -14,18 +16,37 @@
                (str/trim value)]))
        (into {})))
 
-(defn parse-body [body-str]
+(defn parse-body
+  "Parses a JSON body string into a Clojure map."
+  [body-str]
   (as-> body-str body
     (.parse js/JSON body)
     (js->clj body :keywordize-keys true)))
 
-(defn parse-message [message]
-  (let [[headers-str body-str] (str/split message #"\r\n\r\n" 2)
-        headers (parse-headers headers-str)
-        body (parse-body body-str)]
-    [headers body]))
+(defn parse-message
+  "Parses an LSP message into headers and body."
+  [message]
+  (let [header-end (.indexOf message "\r\n\r\n")]
+    (if (= -1 header-end)
+      (do
+        (log/error "No header found in message:" message)
+        [{} {}])
+      (let [headers-str (.substring message 0 header-end)
+            match (.match headers-str #"Content-Length: (\d+)")
+            length (when match (js/parseInt (aget match 1)))
+            body-start (+ header-end 4)
+            body (.substring message body-start (+ body-start length))
+            headers (parse-headers headers-str)]
+        (try
+          [headers (parse-body body)]
+          (catch :default e
+            (log/error "Failed to parse body:" e "body:" body)
+            [headers {}]))))))
 
-(defn create-mock-socket [handle-fn]
+(defn create-mock-socket
+  "Creates a mock WebSocket object with controlled event triggers.
+   The `handle-fn` processes sent messages."
+  [handle-fn]
   (let [sock (js/Object.)
         sent (atom [])
         mock {:sock sock
@@ -51,26 +72,35 @@
               :trigger-error (fn [err]
                                (if (.-onerror sock)
                                  (do
-                                   (log/trace "Mock: triggering onerror")
+                                   (log/trace "Mock: triggering onerror with error:" err)
                                    ((.-onerror sock) err))
                                  (log/warn "Mock: onerror not set")))}]
     (set! (.-binaryType sock) "arraybuffer")
+    (set! (.-readyState sock) js/WebSocket.CONNECTING) ; Mimic real WebSocket behavior
     (set! (.-send sock) (fn [message]
                           (swap! sent conj message)
                           (let [[headers body] (parse-message message)]
                             (log/trace "Handling message with headers:" headers "body:" body)
                             (handle-fn mock headers body))))
-    (set! (.-close sock) (fn [] (when (.-onclose sock) ((.-onclose sock)))))
+    (set! (.-close sock) (fn []
+                           (when (.-onclose sock)
+                             (log/trace "Mock: closing socket")
+                             (set! (.-readyState sock) js/WebSocket.CLOSED)
+                             ((.-onclose sock)))))
     mock))
 
-(defn respond! [mock request-id result-body]
+(defn respond!
+  "Sends a response message through the mock socket."
+  [mock request-id result-body]
   (let [message {:jsonrpc "2.0" :id request-id :result result-body}
         json (js/JSON.stringify (clj->js message))
         header (str "Content-Length: " (.-length json) "\r\n\r\n")
         full (str header json)]
     ((:trigger-message mock) full)))
 
-(defn error! [mock error-body]
+(defn error!
+  "Sends an error message through the mock socket."
+  [mock error-body]
   (let [message {:jsonrpc "2.0" :id nil :error error-body}
         json (js/JSON.stringify (clj->js message))
         header (str "Content-Length: " (.-length json) "\r\n\r\n")
@@ -78,6 +108,7 @@
     ((:trigger-message mock) full)))
 
 (defn default-handler-fn
+  "Default handler for mock LSP messages."
   [mock _headers body]
   (condp = (:method body)
     "initialize" (respond! mock (:id body) {:capabilities {}})
@@ -91,6 +122,7 @@
     "exit" nil))
 
 (defn with-mock-lsp
+  "Temporarily overrides js/WebSocket with a mock socket for testing."
   ([body-fn]
    (with-mock-lsp default-handler-fn body-fn))
   ([handle-fn body-fn]
