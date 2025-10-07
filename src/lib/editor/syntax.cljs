@@ -221,7 +221,7 @@
 (defn init-syntax
   "Initializes syntax highlighting and indentation for the editor view asynchronously.
    Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment."
-  [^js view-ref state-atom]
+  [^js view state-atom]
   (go
     (try
       (if-let [lang-key (db/active-lang)]
@@ -236,7 +236,7 @@
             (if-not lang-config
               (do
                 (log/warn "No configuration found for" lang-key "- falling back to basic mode")
-                (when-let [view (.-current view-ref)]
+                (when view
                   (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))}))
                 [:ok :no-config])
               (let [ts-wasm-path (let [p (:tree-sitter-wasm @state-atom)]
@@ -255,14 +255,14 @@
                 (if (and (nil? parser-raw) (nil? lang-wasm-path))
                   (do
                     (log/debug (str "No parser or grammar-wasm for " lang-key "; using fallback mode"))
-                    (when-let [view (.-current view-ref)]
+                    (when view
                       (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension lang-config))}))
                     [:ok :no-tree-sitter])
                   (let [cached (get @languages lang-key)]
                     (if-let [extensions (:extensions cached)]
                       (do
                         (log/debug "Using cached syntax extensions for" lang-key)
-                        (when-let [view (.-current view-ref)]
+                        (when view
                           (.dispatch view #js {:effects (.reconfigure syntax-compartment extensions)}))
                         [:ok :from-cache])
                       (do
@@ -519,7 +519,7 @@
                           (if (and lang parser highlights-query language-state-field highlight-plugin indent-ext)
                             (do
                               (swap! languages assoc lang-key artifacts)
-                              (when-let [view (.-current view-ref)]
+                              (when view
                                 (.dispatch view #js {:effects (.reconfigure syntax-compartment (clj->js extensions))}))
                               [:ok :success])
                             (do
@@ -531,7 +531,7 @@
                                               ", highlight-plugin=" (boolean highlight-plugin)
                                               ", indent-ext=" (boolean indent-ext)
                                               "; falling back to basic mode"))
-                              (when-let [view (.-current view-ref)]
+                              (when view
                                 (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension lang-config))}))
                               [:ok :missing-components])))))))))))
         (do
@@ -540,6 +540,6 @@
       (catch js/Error error
         (let [error-with-cause (js/Error. "Syntax initialization failed" #js {:cause error})]
           (log-error-with-cause error-with-cause)
-          (when-let [view (.-current view-ref)]
+          (when view
             (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))}))
           [:error error-with-cause])))))
