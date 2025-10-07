@@ -9,7 +9,8 @@
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
    [lib.db :as db]
    [lib.state :refer [normalize-languages load-resource]]
-   [lib.utils :refer [log-error-with-cause promise->chan]]))
+   [lib.utils :refer [log-error-with-cause promise->chan]]
+   [lib.editor.annotations :refer [external-set-annotation]]))
 
 ;; Compartment for dynamic reconfiguration of the syntax highlighting extension.
 (def syntax-compartment (Compartment.))
@@ -126,29 +127,32 @@
                            :update (fn [value ^js tr]
                                      (if-not (.-docChanged tr)
                                        value
-                                       (let [old-tree (.-tree ^js value)
-                                             edited-tree (.copy ^js old-tree)
-                                             old-doc (.-doc (.-startState tr))
-                                             new-doc (.-doc (.-state tr))
-                                             changes (.-changes tr)]
-                                         (if (.-isEmpty changes)
-                                           (let [new-tree (.parse (.-parser ^js value) (str new-doc))]
-                                             #js {:tree new-tree :parser (.-parser ^js value)})
-                                           (do
-                                             (.iterChanges changes
-                                                           (fn [fromA toA _fromB toB _]
-                                                             (let [start (index->point old-doc fromA)
-                                                                   old-end (index->point old-doc toA)
-                                                                   new-end (index->point new-doc toB)]
-                                                               (.edit ^js edited-tree #js {:startIndex fromA
-                                                                                           :oldEndIndex toA
-                                                                                           :newEndIndex toB
-                                                                                           :startPosition start
-                                                                                           :oldEndPosition old-end
-                                                                                           :newEndPosition new-end})))
-                                                           false)
-                                             (let [new-tree (.parse (.-parser ^js value) (str new-doc) edited-tree)]
-                                               #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
+                                       (if (some #(.annotation % external-set-annotation) (.-transactions tr))
+                                         (let [new-tree (.parse (.-parser ^js value) (str (.-doc (.-state tr))))]
+                                           #js {:tree new-tree :parser (.-parser ^js value)})
+                                         (let [old-tree (.-tree ^js value)
+                                               edited-tree (.copy ^js old-tree)
+                                               old-doc (.-doc (.-startState tr))
+                                               new-doc (.-doc (.-state tr))
+                                               changes (.-changes tr)]
+                                           (if (.-isEmpty changes)
+                                             (let [new-tree (.parse (.-parser ^js value) (str new-doc))]
+                                               #js {:tree new-tree :parser (.-parser ^js value)})
+                                             (do
+                                               (.iterChanges changes
+                                                             (fn [fromA toA _fromB toB _]
+                                                               (let [start (index->point old-doc fromA)
+                                                                     old-end (index->point old-doc toA)
+                                                                     new-end (index->point new-doc toB)]
+                                                                 (.edit ^js edited-tree #js {:startIndex fromA
+                                                                                             :oldEndIndex toA
+                                                                                             :newEndIndex toB
+                                                                                             :startPosition start
+                                                                                             :oldEndPosition old-end
+                                                                                             :newEndPosition new-end})))
+                                                             false)
+                                               (let [new-tree (.parse (.-parser ^js value) (str new-doc) edited-tree)]
+                                                 #js {:tree new-tree :parser (.-parser ^js value)})))))))}))
 
 (defn make-highlighter-plugin
   "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries."
@@ -341,23 +345,23 @@
                                                    (try
                                                      (if-let [cached-parser (:parser cached)]
                                                        (resolve cached-parser)
-                                                         (if parser-raw
-                                                           (let [maybe-promise (if (fn? parser-raw) (parser-raw) parser-raw)]
-                                                             (if (instance? js/Promise maybe-promise)
-                                                               (-> maybe-promise
-                                                                   (.then resolve)
-                                                                   (.catch reject))
-                                                               (resolve maybe-promise)))
-                                                           (if lang-wasm-path
-                                                             (do
-                                                               (log/trace "Loading Tree-Sitter grammar for" lang-key "from" lang-wasm-path)
-                                                               (-> (Language.load lang-wasm-path)
-                                                                   (.then (fn [language]
-                                                                            (let [parser (Parser.)]
-                                                                              (.setLanguage parser language)
-                                                                              (resolve parser))))
-                                                                   (.catch reject)))
-                                                             (reject (js/Error. "No parser or grammar-wasm provided for language")))))
+                                                       (if parser-raw
+                                                         (let [maybe-promise (if (fn? parser-raw) (parser-raw) parser-raw)]
+                                                           (if (instance? js/Promise maybe-promise)
+                                                             (-> maybe-promise
+                                                                 (.then resolve)
+                                                                 (.catch reject))
+                                                             (resolve maybe-promise)))
+                                                         (if lang-wasm-path
+                                                           (do
+                                                             (log/trace "Loading Tree-Sitter grammar for" lang-key "from" lang-wasm-path)
+                                                             (-> (Language.load lang-wasm-path)
+                                                                 (.then (fn [language]
+                                                                          (let [parser (Parser.)]
+                                                                            (.setLanguage parser language)
+                                                                            (resolve parser))))
+                                                                 (.catch reject)))
+                                                           (reject (js/Error. "No parser or grammar-wasm provided for language")))))
                                                      (catch js/Error e
                                                        (reject e)))))])
                                          #(instance? Parser %)
@@ -474,24 +478,33 @@
                                          :highlight-plugin highlight-plugin
                                          :indent-ext indent-ext
                                          :extensions (clj->js extensions)}]
-                          (when (= :error hq-status)
-                            (log/debug "No valid highlights query string for" lang-key))
-                          (when (= :error iq-status)
-                            (log/debug "No indents query for" lang-key "; default indentation behavior will apply"))
-                          (when (= :error parser-status)
+                          (if (= :ok hq-status)
+                            (log/debug "Loaded highlights-query string for" lang-key)
+                            (log/error "No valid highlights-query string for" lang-key))
+                          (if (= :ok iq-status)
+                            (log/debug "Loaded indents-query for" lang-key)
+                            (log/error "No indents query for" lang-key "; default indentation behavior will apply"))
+                          (if (= :ok parser-status)
+                            (log/debug "Loaded parser for" lang-key)
                             (log/error "Parser loading failed for" lang-key ":" (.-message parser)))
-                          (when (= :error lang-status)
-                            (log/debug "No language loaded for" lang-key))
-                          (when (= :error hq-query-status)
-                            (log/debug "No highlights query loaded for" lang-key))
-                          (when (= :error iq-query-status)
-                            (log/debug "No indents query loaded for" lang-key))
-                          (when (= :error lsf-status)
-                            (log/debug "No language state field loaded for" lang-key))
-                          (when (= :error hp-status)
-                            (log/debug "No highlight plugin loaded for" lang-key))
-                          (when (= :error ie-status)
-                            (log/debug "No indent extension loaded for" lang-key))
+                          (if (= :ok lang-status)
+                            (log/debug "Loaded language for" lang-key)
+                            (log/error "No language loaded for" lang-key))
+                          (if (= :ok hq-query-status)
+                            (log/debug "Loaded highlights-query for" lang-key)
+                            (log/error "No highlights query loaded for" lang-key))
+                          (if (= :ok iq-query-status)
+                            (log/debug "Loaded indents-query for" lang-key)
+                            (log/error "No indents query loaded for" lang-key))
+                          (if (= :ok lsf-status)
+                            (log/debug "Loaded language state field for" lang-key)
+                            (log/error "No language state field loaded for" lang-key))
+                          (if (= :ok hp-status)
+                            (log/debug "Loaded highlight plugin for" lang-key)
+                            (log/error "No highlight plugin loaded for" lang-key))
+                          (if (= :ok ie-status)
+                            (log/debug "Loaded indent extension for" lang-key)
+                            (log/error "No indent extension loaded for" lang-key))
                           (log/debug "Syntax initialization complete for" lang-key
                                      ": parser=" (boolean parser)
                                      ", lang=" (boolean lang)

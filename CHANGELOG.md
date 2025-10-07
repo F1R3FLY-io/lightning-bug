@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2025-10-06
+
+### Changed
+
+- Debounces several more event types to avoid issues with rapid reloading during development of Vite/React apps.
+
+### Fixed
+
+- Correctly reloads Tree-Sitter queries on HMR and related reloads in React-based Vite applications.
+
 ## [0.7.5] - 2025-09-30
 
 ### Changed

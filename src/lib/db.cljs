@@ -852,3 +852,13 @@
                           (and [(missing? $ ?e :symbol/parent)]
                               [(ground 0) ?parent]))]
        @conn uri))
+
+(defn reset-active-uri!
+  []
+  (let [prev-eids (d/q '[:find [?e ...]
+                         :where [?e :workspace/active-uri _]]
+                       @conn)]
+    (when (seq prev-eids)
+      (let [tx (mapv :db/retractEntity prev-eids)]
+        (log/trace "Retracting active-uri on destroy:" tx)
+        (d/transact! conn tx)))))

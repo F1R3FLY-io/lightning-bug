@@ -20,6 +20,7 @@
    [lib.db :as db :refer [conn]]
    [lib.editor.diagnostics :as diagnostics :refer [set-diagnostic-effect]]
    [lib.editor.highlight :as highlight]
+   [lib.editor.annotations :refer [external-set-annotation]]
    [lib.editor.syntax :as syntax]
    [lib.lsp.client :as lsp]
    [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config!]]
@@ -32,9 +33,6 @@
 
 ;; Annotation to mark transactions that update diagnostics in the StateField.
 (def diagnostic-annotation (.define Annotation))
-
-;; Annotation to mark external full-text set transactions (skips debounced LSP in update listener)
-(def external-set-annotation (.define Annotation))
 
 ;; StateField to hold the current list of LSP diagnostics.
 (def diagnostic-field
@@ -72,6 +70,7 @@
   (let [languages (normalize-languages (merge default-languages (:languages props)))
         extra-extensions (:extra-extensions props #js [])
         default-protocol (or (:default-protocol props) "inmemory://")
+        lsp-init-timeout-ms (or (:lsp-init-timeout-ms props) 5000)
         tree-sitter-wasm (:tree-sitter-wasm props "js/tree-sitter.wasm")]
     (log/info "Editor state initialized with languages:" (keys languages))
     (when-not (every? string? (keys languages))
@@ -84,15 +83,24 @@
      :languages languages
      :tree-sitter-wasm tree-sitter-wasm
      :extra-extensions extra-extensions
+     :lsp-init-timeout-ms lsp-init-timeout-ms
      :default-protocol default-protocol
      :debounce-timer nil}))
+
+(defonce emit-timers (atom {}))
 
 (defn emit-event
   "Emits an event to the RxJS ReplaySubject with debouncing for frequent updates.
   Ensures consistent event emission for all state changes."
   [events type data]
   (log/trace "Emitting event:" type data)
-  (.next events (clj->js {:type type :data data})))
+  (let [key {:type type :data data}
+        ms 50]
+    (when-let [timer (get @emit-timers key)]
+      (js/clearTimeout timer))
+    (swap! emit-timers assoc key (js/setTimeout (fn []
+                                                   (swap! emit-timers dissoc key)
+                                                   (.next events (clj->js {:type type :data data}))) ms))))
 
 (defn- update-editor-state
   "Updates the internal state-atom with cursor and selection info from CodeMirror state.
@@ -202,12 +210,12 @@
                                                     :language lang
                                                     :opened true}))
               ;; Not connected or initialized; check if connecting
-              (let [existing-promise (lib.state/get-resource-promise :lsp lang)]
+              (let [existing (lib.state/get-resource-promise :lsp lang)]
                 (if connecting?
-                  ;; Wait for existing connection promise
+                  ;; Wait for existing connection channel
                   (do
                     (log/debug "Waiting for existing LSP connection for lang:" lang)
-                    (let [res (<! (lib.utils/promise->chan existing-promise))]
+                    (let [res (<! existing)]
                       (if (and (seqable? res) (= :error (first res)))
                         (do
                           (emit-event events "lsp-error" {:message "Failed to connect and initialize LSP"
@@ -272,59 +280,66 @@
 
 (defn- activate-document
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
-  Emits events for document activation and LSP open if necessary."
+  Emits events for document activation and LSP open if necessary.
+  Debounced to handle rapid calls during initialization/reloads."
   [uri state-atom view-ref events]
-  (go
-    (try
-      (log/trace "Activating document:" uri)
-      (let [old-lang (db/active-lang)]
-        (when (not= uri (db/active-uri))
-          (log/debug "Updating active URI for document with old-lang:" old-lang)
-          (db/update-active-uri! uri))
-        (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
-          (log/debug "New language for activation:" new-lang)
-          (when-let [view (.-current view-ref)]
-            (let [current-doc (.-doc (.-state view))
-                  current-length (.-length current-doc)]
-              (.dispatch view #js {:changes #js {:from 0
-                                                 :to current-length
-                                                 :insert text}})))
-          (let [lsp-ch (go
-                         (try
-                           (if (get-in @state-atom [:languages new-lang :lsp-url])
-                             (<! (ensure-lsp-document-opened new-lang uri state-atom events))
-                             (do
-                               (db/document-opened-by-uri! uri)
-                               [:ok nil]))
-                           (catch :default e
-                             [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
-                syntax-ch (when (not= old-lang new-lang)
-                            (go
-                              (try
-                                (<! (syntax/init-syntax (.-current view-ref) state-atom))
-                                (catch :default e
-                                  [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})]))))
-                [lsp-val lsp-ch'] (alts! [lsp-ch (timeout 5000)])
-                lsp-res (if (identical? lsp-ch lsp-ch') lsp-val [:error (js/Error. "LSP init timeout")])
-                [syntax-val syntax-ch'] (when syntax-ch (alts! [syntax-ch (timeout 5000)]))
-                syntax-res (when syntax-ch
-                             (if (identical? syntax-ch syntax-ch') syntax-val [:error (js/Error. "Syntax init timeout")]))]
-            (when (= :error (first lsp-res))
-              (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second lsp-res)})))
-            (when (and syntax-ch (= :error (first syntax-res)))
-              (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second syntax-res)})))
-            (when (and syntax-ch (= :ok (first syntax-res)))
-              (emit-event events "language-change" {:uri uri :language new-lang}))
-            (emit-event events "document-open" {:uri uri
-                                                :content text
-                                                :language new-lang
-                                                :activated true}))))
-      [:ok nil]
-      (catch js/Error error
-        (when (and @state-atom (:mounted? @state-atom))
-          (emit-event events "error" {:message (.-message error) :uri uri}))
-        (log/error (str "Failed to activate document " uri ": " (.-message error)))
-        [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
+  (when-let [timer (:debounce-timer @state-atom)]
+    (js/clearTimeout timer))
+  (swap! state-atom assoc :debounce-timer
+         (js/setTimeout
+          (fn []
+            (swap! state-atom dissoc :debounce-timer)
+            (go
+              (try
+                (log/trace "Activating document:" uri)
+                (let [old-lang (db/active-lang)]
+                  (when (not= uri (db/active-uri))
+                    (log/debug "Updating active URI for document with old-lang:" old-lang)
+                    (db/update-active-uri! uri))
+                  (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
+                    (log/debug "New language for activation:" new-lang)
+                    (when-let [view (.-current view-ref)]
+                      (let [current-doc (.-doc (.-state view))
+                            current-length (.-length current-doc)]
+                        (.dispatch view #js {:changes #js {:from 0
+                                                           :to current-length
+                                                           :insert text}
+                                             :annotations (.of external-set-annotation true)})))
+                    (let [lsp-ch (go
+                                   (try
+                                     (if (get-in @state-atom [:languages new-lang :lsp-url])
+                                       (<! (ensure-lsp-document-opened new-lang uri state-atom events))
+                                       (do
+                                         (db/document-opened-by-uri! uri)
+                                         [:ok nil]))
+                                     (catch :default e
+                                       [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
+                          syntax-ch (go
+                                      (try
+                                        (<! (syntax/init-syntax (.-current view-ref) state-atom))
+                                        (catch :default e
+                                          [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})])))
+                          lsp-timeout-ms (:lsp-init-timeout-ms @state-atom 5000)
+                          [lsp-val lsp-ch'] (alts! [lsp-ch (timeout lsp-timeout-ms)])
+                          lsp-res (if (identical? lsp-ch lsp-ch') lsp-val [:error (js/Error. "LSP init timeout")])
+                          [syntax-val syntax-ch'] (alts! [syntax-ch (timeout 5000)])
+                          syntax-res (if (identical? syntax-ch syntax-ch') syntax-val [:error (js/Error. "Syntax init timeout")])]
+                      (when (and (:mounted? @state-atom) (= :error (first lsp-res)))
+                        (log/warn "LSP init timeout or failed for lang" new-lang ", continuing without LSP:" (.-message (second lsp-res))))
+                      (if (= :error (first syntax-res))
+                        (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second syntax-res)}))
+                        (emit-event events "language-change" {:uri uri :language new-lang}))
+                      (emit-event events "document-open" {:uri uri
+                                                          :content text
+                                                          :language new-lang
+                                                          :activated true}))))
+                [:ok nil]
+                (catch js/Error error
+                  (when (and @state-atom (:mounted? @state-atom))
+                    (emit-event events "error" {:message (.-message error) :uri uri}))
+                  (log/error (str "Failed to activate document " uri ": " (.-message error)))
+                  [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
+          50)))
 
 (defn- normalize-uri [file-or-uri-js default-protocol]
   (if (and file-or-uri-js (pos? (count file-or-uri-js)))
@@ -761,7 +776,7 @@
                           :getFilePath (fn [file-or-uri-js]
                                          (try
                                            (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
-                                                 [_ path] (split-uri uri)]
+                                             [_ path] (split-uri uri)]
                                              (log/trace "Fetching file path for uri:" uri)
                                              (or path nil))
                                            (catch js/Error error
@@ -975,7 +990,8 @@
                            (set! (.-current view-ref) nil)
                            (.unsubscribe sub)
                            (emit-event events "destroy" {})
-                           (set-ready false)))
+                           (set-ready false)
+                           (db/reset-active-uri!)))
                        (catch js/Error error
                          (emit-event events "error" {:message (.-message error)
                                                      :operation "initEditorView"})
