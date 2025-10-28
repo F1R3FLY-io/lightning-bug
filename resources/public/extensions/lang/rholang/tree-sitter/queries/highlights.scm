@@ -13,7 +13,7 @@
   "select"
   "new"
   "let"
-  "bundle"
+  ; "bundle"  ; Not a keyword in grammar 1.1.9
 ] @keyword
 
 ; Bundle keywords
