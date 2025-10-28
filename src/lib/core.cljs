@@ -936,7 +936,7 @@
                          (when (not= active-text current-doc)
                            (log/debug "Updating view content to match db for active uri")
                            (.dispatch editor-view #js {:changes #js {:from 0
-                                                                     :to (.length current-doc)
+                                                                     :to (count current-doc)
                                                                      :insert active-text}})
                            (emit-event events "content-change" {:content active-text
                                                                 :uri (db/active-uri)})
