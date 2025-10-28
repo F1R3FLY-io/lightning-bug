@@ -67,7 +67,7 @@ jobs:
         run: npm run test:types
 
   test:
-    timeout-minutes: 15
+    timeout-minutes: 20
     needs: [lint-and-test-types]
     strategy:
       fail-fast: false
