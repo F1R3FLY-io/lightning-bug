@@ -98,9 +98,9 @@
   "..."
 ] @punctuation.delimiter
 
-; Pathmap specific delimiters
-(pathmap "{|" @punctuation.bracket)
-(pathmap "|}" @punctuation.bracket)
+; Pathmap specific delimiters (commented out - not in grammar 1.1.9)
+; (pathmap "{|" @punctuation.bracket)
+; (pathmap "|}" @punctuation.bracket)
 
 ; Collections keyword
 (set "Set" @type.builtin)
@@ -170,4 +170,5 @@
 (let decls: (_))
 (let proc: (_))
 
-(bundle proc: (_))
+; Bundle node commented out - structure may differ in grammar 1.1.9
+; (bundle proc: (_))

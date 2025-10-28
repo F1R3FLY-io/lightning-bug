@@ -80,7 +80,7 @@
   (tuple)
   (set)
   (map)
-  (pathmap)
+  ; (pathmap)  ; Not in grammar 1.1.9
 ] @collection.outer
 
 ; Key-value pairs in maps

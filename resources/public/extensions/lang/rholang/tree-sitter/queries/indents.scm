@@ -5,7 +5,7 @@
   (tuple)
   (set)
   (map)
-  (pathmap)
+  ; (pathmap)  ; Not in grammar 1.1.9
 ] @indent
 
 ; Indent control structures
