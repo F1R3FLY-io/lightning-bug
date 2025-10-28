@@ -13,7 +13,6 @@
   "select"
   "new"
   "let"
-  ; "bundle"  ; Not a keyword in grammar 1.1.9
 ] @keyword
 
 ; Bundle keywords
@@ -22,7 +21,15 @@
   (bundle_read)
   (bundle_equiv)
   (bundle_read_write)
-] @keyword.modifier
+] @keyword
+
+; Literals
+(bool_literal) @boolean
+(long_literal) @number
+(string_literal) @string
+(uri_literal) @string
+(nil) @constant.builtin
+(simple_type) @type
 
 ; Word-based operators (logical/keyword-like)
 [
@@ -32,7 +39,7 @@
   "not"
 ] @keyword.operator
 
-; Symbolic operators
+; Symbolic operators (including added '=' and '&' for declarations and concurrent declarations)
 [
   "|"
   "!?"
@@ -57,7 +64,6 @@
   "/\\"
   "<-"
   "<<-"
-  "<="
   "?!"
   "=>"
   ":"
@@ -65,20 +71,8 @@
   "&"
 ] @operator
 
-; Literals
-(bool_literal) @boolean
-(long_literal) @number
-(string_literal) @string
-(uri_literal) @string.special
-(nil) @constant.builtin
-(unit) @constant.builtin
-
-; Types
-(simple_type) @type.builtin
-
 ; Additional operators in context
 (quote "@" @operator)
-(eval "*" @operator)
 (var_ref_kind) @operator
 
 ; Punctuation (split for brackets and delimiters)
@@ -98,77 +92,28 @@
   "..."
 ] @punctuation.delimiter
 
-; Pathmap specific delimiters (commented out - not in grammar 1.1.9)
-; (pathmap "{|" @punctuation.bracket)
-; (pathmap "|}" @punctuation.bracket)
-
-; Collections keyword
-(set "Set" @type.builtin)
-
 ; Variables and Names
 (var) @variable
-(wildcard) @variable.builtin
-(var_ref var: (var) @variable)
+(wildcard) @variable
+(var_ref) @variable
 
-; Contract and function names
-(contract name: (quote) @function)
-(contract name: (var) @function)
-(contract name: (wildcard) @function)
+; Channels and Quotes
+(quote) @function
+(eval) @function
 
-; Method names
-(method name: (var) @function.method)
-(method receiver: (_) @variable)
+; Collections (updated capture to @type for alignment with style-map)
+(list) @type
+(tuple) @type
+(set) @type
+(map) @type
+(set "Set" @type)
+(key_value_pair key: (_) @variable value: (_) @variable)
 
-; Name declarations
-(name_decl (var) @variable)
-(name_decl uri: (uri_literal) @string.special)
+; Methods
+(method name: (_) @function)
 
-; Receipts and bindings
-(linear_bind names: (names) @variable)
-(repeated_bind names: (names) @variable)
-(peek_bind names: (names) @variable)
-
-; Let declarations
-(decl names: (names) @variable)
-
-; Case and branch patterns
+; Case patterns
 (case pattern: (_) @variable)
-(branch pattern: (_) @variable)
 
-; Key-value pairs in maps
-(key_value_pair key: (_) @property)
-(key_value_pair value: (_))
-
-; Remainder patterns
-(_proc_remainder remainder: (_) @variable)
-(_name_remainder cont: (_) @variable)
-
-; Channels (quotes and evals)
-(quote) @function.call
-(eval name: (_) @variable)
-
-; Send and receive
-(send channel: (_) @function.call)
-(send_sync channel: (_) @function.call)
-(input receipts: (receipts))
-
-; Source channels in bindings
-(linear_bind input: (_) @function.call)
-(repeated_bind input: (name) @function.call)
-(peek_bind input: (name) @function.call)
-
-; Field labels for better semantic understanding
-(ifElse condition: (_))
-(ifElse consequence: (_))
-(ifElse alternative: (_))
-
-(match expression: (_))
-
-(new decls: (name_decls))
-(new proc: (_))
-
-(let decls: (_))
-(let proc: (_))
-
-; Bundle node commented out - structure may differ in grammar 1.1.9
-; (bundle proc: (_))
+; Function-like constructs
+(contract name: (_) @function)
