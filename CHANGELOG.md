@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2025-10-28
+
+### Added
+
+- Complete Tree-sitter query files for Rholang language support
+  - Added `folds.scm` for code folding
+  - Added `injections.scm` for language injection support
+  - Added `locals.scm` for scope and variable tracking
+  - Added `textobjects.scm` for semantic navigation
+
+### Changed
+
+- Enhanced `highlights.scm` with better semantic highlighting for Rholang
+- Improved `indents.scm` with more comprehensive indentation rules
+
+### Fixed
+
+- Fixed editor crash when switching between agent versions in Embers integration
+  - Resolved TypeError: "l.length is not a function"
+  - Changed improper method call `(.length current-doc)` to idiomatic `(count current-doc)`
+  - Bug occurred during version switching in the agent editor
+
 ## [0.7.6] - 2025-10-06
 
 ### Changed
