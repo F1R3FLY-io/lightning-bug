@@ -34,6 +34,8 @@
 !/tsconfig.json
 !/types/**/*.d.ts
 !/types/**/*.test-d.ts
+!/docs/benchmarks/**/*.md
+!/docs/benchmarks/results/*.json
 
 # Exclude specific file patterns
 /resources/public/js/test/*
