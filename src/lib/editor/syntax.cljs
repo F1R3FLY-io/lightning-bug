@@ -119,40 +119,64 @@
                         (+ base add)))))))))))))
 
 (defn make-language-state
-  "Creates a CodeMirror StateField for managing the Tree-Sitter parse tree."
+  "Creates a CodeMirror StateField for managing the Tree-Sitter parse tree.
+
+   Optimizations:
+   - Skips re-parsing when document hasn't actually changed (isEmpty && same content)
+   - Uses incremental parsing for user edits
+   - Full re-parse only for external changes that require it"
   [parser]
   (.define StateField #js {:create (fn [^js state]
                                      (let [tree (.parse parser (str (.-doc state)))]
                                        #js {:tree tree :parser parser}))
                            :update (fn [value ^js tr]
                                      (if-not (.-docChanged tr)
+                                       ;; No document change, reuse existing tree
                                        value
-                                       (if (some #(.annotation % external-set-annotation) (.-transactions tr))
-                                         (let [new-tree (.parse (.-parser ^js value) (str (.-doc (.-state tr))))]
-                                           #js {:tree new-tree :parser (.-parser ^js value)})
-                                         (let [old-tree (.-tree ^js value)
-                                               edited-tree (.copy ^js old-tree)
-                                               old-doc (.-doc (.-startState tr))
-                                               new-doc (.-doc (.-state tr))
-                                               changes (.-changes tr)]
-                                           (if (.-isEmpty changes)
+                                       (let [old-doc (.-doc (.-startState tr))
+                                             new-doc (.-doc (.-state tr))
+                                             changes (.-changes tr)
+                                             is-external? (some #(.annotation % external-set-annotation) (.-transactions tr))]
+                                         (cond
+                                           ;; Optimization: Skip re-parse if changes are empty AND content is identical
+                                           ;; This handles cases where transaction is created but no actual change occurred
+                                           (and (.-isEmpty changes)
+                                                (= (str old-doc) (str new-doc)))
+                                           (do
+                                             (log/trace "Skipping re-parse: empty changes with identical content")
+                                             value)
+
+                                           ;; External change (e.g., setText): full re-parse required
+                                           is-external?
+                                           (let [new-tree (.parse (.-parser ^js value) (str new-doc))]
+                                             #js {:tree new-tree :parser (.-parser ^js value)})
+
+                                           ;; Empty changes but content differs: full re-parse
+                                           ;; This shouldn't normally happen, but handle defensively
+                                           (.-isEmpty changes)
+                                           (do
+                                             (log/trace "Full re-parse: empty changes but content differs")
                                              (let [new-tree (.parse (.-parser ^js value) (str new-doc))]
-                                               #js {:tree new-tree :parser (.-parser ^js value)})
-                                             (do
-                                               (.iterChanges changes
-                                                             (fn [fromA toA _fromB toB _]
-                                                               (let [start (index->point old-doc fromA)
-                                                                     old-end (index->point old-doc toA)
-                                                                     new-end (index->point new-doc toB)]
-                                                                 (.edit ^js edited-tree #js {:startIndex fromA
-                                                                                             :oldEndIndex toA
-                                                                                             :newEndIndex toB
-                                                                                             :startPosition start
-                                                                                             :oldEndPosition old-end
-                                                                                             :newEndPosition new-end})))
-                                                             false)
-                                               (let [new-tree (.parse (.-parser ^js value) (str new-doc) edited-tree)]
-                                                 #js {:tree new-tree :parser (.-parser ^js value)})))))))}))
+                                               #js {:tree new-tree :parser (.-parser ^js value)}))
+
+                                           ;; Normal user edits: incremental parsing
+                                           :else
+                                           (let [old-tree (.-tree ^js value)
+                                                 edited-tree (.copy ^js old-tree)]
+                                             (.iterChanges changes
+                                                           (fn [fromA toA _fromB toB _]
+                                                             (let [start (index->point old-doc fromA)
+                                                                   old-end (index->point old-doc toA)
+                                                                   new-end (index->point new-doc toB)]
+                                                               (.edit ^js edited-tree #js {:startIndex fromA
+                                                                                           :oldEndIndex toA
+                                                                                           :newEndIndex toB
+                                                                                           :startPosition start
+                                                                                           :oldEndPosition old-end
+                                                                                           :newEndPosition new-end})))
+                                                           false)
+                                             (let [new-tree (.parse (.-parser ^js value) (str new-doc) edited-tree)]
+                                               #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
 
 (defn make-highlighter-plugin
   "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries."

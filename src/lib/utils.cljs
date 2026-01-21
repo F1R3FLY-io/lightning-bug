@@ -69,7 +69,7 @@
 (defn split-uri
   "Splits a URI into its protocol and file path."
   [uri]
-  (let [[_ protocol path] (re-find #"^([a-zA-Z]+:/{0,2})?(.*)$" uri)]
+  (let [[_ protocol path] (re-find #"^([a-zA-Z]+:(?://)?)?(.*)$" uri)]
     [protocol path]))
 
 (defn resolve-nested-promise

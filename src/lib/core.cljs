@@ -87,20 +87,71 @@
      :default-protocol default-protocol
      :debounce-timer nil}))
 
+;; =============================================================================
+;; Event Emission with Debouncing
+;; =============================================================================
+;; Fixed: Use string-based keys to avoid memory leaks from object key accumulation.
+;; Events are debounced based on type and URI/lang context.
+
 (defonce emit-timers (atom {}))
+
+(def ^:private EVENT-DEBOUNCE-MS
+  "Debounce delays for different event types (in milliseconds)."
+  {"content-change" 100
+   "selection-change" 50
+   "cursor-change" 50
+   "search-term-change" 200
+   "lsp-message" 0        ; No debounce for LSP messages
+   "diagnostics" 0        ; No debounce for diagnostics
+   "symbols" 0            ; No debounce for symbols
+   "connect" 0            ; No debounce for connection events
+   "disconnect" 0         ; No debounce for disconnection events
+   "document-open" 0      ; No debounce for document events
+   "document-close" 0
+   "language-change" 0
+   :default 50})
+
+(defn- make-emit-key
+  "Creates a string key for event debouncing based on type and context.
+   Uses type and optional URI/lang to deduplicate without memory leaks."
+  [type data]
+  (let [uri (or (:uri data) "")
+        lang (or (:lang data) "")]
+    (str type ":" uri ":" lang)))
 
 (defn emit-event
   "Emits an event to the RxJS ReplaySubject with debouncing for frequent updates.
-  Ensures consistent event emission for all state changes."
+   Uses string-based keys to prevent memory leaks from accumulated object keys.
+
+   Events are debounced based on type:
+   - Selection/cursor changes: 50ms
+   - Content changes: 100ms
+   - Search term changes: 200ms
+   - LSP/diagnostic events: immediate (no debounce)"
   [events type data]
-  (log/trace "Emitting event:" type data)
-  (let [key {:type type :data data}
-        ms 50]
+  (log/trace "Emitting event:" type)
+  (let [key (make-emit-key type data)
+        ms (get EVENT-DEBOUNCE-MS type (:default EVENT-DEBOUNCE-MS))]
+    ;; Cancel any pending emission for this key
     (when-let [timer (get @emit-timers key)]
       (js/clearTimeout timer))
-    (swap! emit-timers assoc key (js/setTimeout (fn []
-                                                   (swap! emit-timers dissoc key)
-                                                   (.next events (clj->js {:type type :data data}))) ms))))
+    (if (zero? ms)
+      ;; Immediate emission for critical events
+      (.next events (clj->js {:type type :data data}))
+      ;; Debounced emission for frequent events
+      (swap! emit-timers assoc key
+             (js/setTimeout
+              (fn []
+                (swap! emit-timers dissoc key)
+                (.next events (clj->js {:type type :data data})))
+              ms)))))
+
+(defn clear-emit-timers!
+  "Cancels all pending event emissions. Call on unmount."
+  []
+  (doseq [[_ timer] @emit-timers]
+    (js/clearTimeout timer))
+  (reset! emit-timers {}))
 
 (defn- update-editor-state
   "Updates the internal state-atom with cursor and selection info from CodeMirror state.
@@ -989,6 +1040,7 @@
                              (.destroy editor-view))
                            (set! (.-current view-ref) nil)
                            (.unsubscribe sub)
+                           (clear-emit-timers!) ;; Clean up pending event timers
                            (emit-event events "destroy" {})
                            (set-ready false)
                            (db/reset-active-uri!)))

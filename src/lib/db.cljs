@@ -6,10 +6,24 @@
 
 (goog-define ^boolean DEBUG true)
 
+;; =============================================================================
+;; Schema Definition
+;; =============================================================================
+;; Added indexes for frequently queried attributes to improve query performance.
+;; Indexes are especially important for:
+;; - :document/language - used for filtering documents by language
+;; - :document/version - used for version matching in diagnostic queries
+;; - :document/opened - used for tracking opened documents per language
+;; - :diagnostic/version - used for version-based filtering
+
 (def schema {:symbol/parent {:db/valueType :db.type/ref}
-             :symbol/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
-             :diagnostic/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
+             :symbol/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one :db/index true}
+             :diagnostic/document {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one :db/index true}
+             :diagnostic/version {:db/index true}
              :document/uri {:db/unique :db.unique/identity}
+             :document/language {:db/index true}
+             :document/version {:db/index true}
+             :document/opened {:db/index true}
              :workspace/active-uri {:db/unique :db.unique/identity}})
 
 (defonce conn (d/create-conn schema))
@@ -224,6 +238,35 @@
          :in $ ?uri
          :where [?e :document/uri ?uri]
                 [?e :document/opened ?opened]]
+       @conn uri))
+
+(defn document-opened-by-uri
+  "Alias for document-opened-by-uri? for API consistency."
+  [uri]
+  (document-opened-by-uri? uri))
+
+(defn document-dirty-by-uri
+  "Returns the dirty flag for a document by URI."
+  [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (d/q '[:find ?dirty .
+         :in $ ?uri
+         :where [?e :document/uri ?uri]
+                [?e :document/dirty ?dirty]]
+       @conn uri))
+
+(defn document-version-by-uri
+  "Returns the version for a document by URI."
+  [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (d/q '[:find ?version .
+         :in $ ?uri
+         :where [?e :document/uri ?uri]
+                [?e :document/version ?version]]
        @conn uri))
 
 (defn documents
@@ -448,6 +491,10 @@
         (d/transact! conn tx)
         new-version))))
 
+(def increment-document-version-by-uri!
+  "Alias for inc-document-version-by-uri! for API consistency."
+  inc-document-version-by-uri!)
+
 (defn update-document-dirty-by-id!
   [id dirty?]
   (when DEBUG
@@ -552,6 +599,17 @@
       (log/warn (s/explain-str :document/uri uri))))
   (when-let [id (document-id-by-uri uri)]
     (let [tx [[:db/add id :document/opened false]]]
+      (log/trace "Executing transaction:" tx)
+      (d/transact! conn tx))))
+
+(defn document-saved-by-uri!
+  "Marks a document as saved (clears dirty flag) by URI."
+  [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (when-let [id (document-id-by-uri uri)]
+    (let [tx [[:db/add id :document/dirty false]]]
       (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
@@ -859,6 +917,6 @@
                          :where [?e :workspace/active-uri _]]
                        @conn)]
     (when (seq prev-eids)
-      (let [tx (mapv :db/retractEntity prev-eids)]
+      (let [tx (mapv (fn [eid] [:db/retractEntity eid]) prev-eids)]
         (log/trace "Retracting active-uri on destroy:" tx)
         (d/transact! conn tx)))))
