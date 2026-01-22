@@ -19,15 +19,14 @@
 (rf/reg-cofx
  :document-repo/active-document
  (fn [coeffects _]
-   (let [uri (lib-db/active-uri)]
+   ;; EXP-007: Coalesced query - single query instead of 3 separate queries
+   (let [[uri text lang version] (lib-db/active-uri-text-lang-version)]
      (if uri
-       (let [[text lang] (lib-db/doc-text-lang-by-uri uri)
-             [_ version] (lib-db/document-id-version-by-uri uri)]
-         (assoc coeffects :active-document
-                {:uri uri
-                 :text text
-                 :language lang
-                 :version version}))
+       (assoc coeffects :active-document
+              {:uri uri
+               :text text
+               :language lang
+               :version version})
        (assoc coeffects :active-document nil)))))
 
 (rf/reg-cofx
@@ -38,8 +37,8 @@
 (rf/reg-cofx
  :document-repo/document
  (fn [coeffects uri]
-   (let [[text lang] (lib-db/doc-text-lang-by-uri uri)
-         [_ version] (lib-db/document-id-version-by-uri uri)]
+   ;; EXP-007: Coalesced query - single query instead of 2 separate queries
+   (let [[text lang version] (lib-db/doc-text-lang-version-by-uri uri)]
      (assoc coeffects :document
             (when text
               {:uri uri
