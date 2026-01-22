@@ -24,7 +24,8 @@
    [lib.editor.syntax :as syntax]
    [lib.lsp.client :as lsp]
    [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config!]]
-   [lib.utils :refer [split-uri debounce offset->pos pos->offset log-error-with-cause]]
+   [lib.utils :refer [split-uri offset->pos pos->offset log-error-with-cause]]
+   [lib.debounce :as debounce]
    [taoensso.timbre :as log]))
 
 ;; Hardcoded default languages for the library; uses string keys.
@@ -75,6 +76,7 @@
     (log/info "Editor state initialized with languages:" (keys languages))
     (when-not (every? string? (keys languages))
       (log/warn "Non-string keys found in languages map:" (keys languages)))
+    ;; EXP-008: Removed :debounce-timer - now using lib.debounce coordination
     {:mounted? true
      :cursor {:line 1 :column 1}
      :selection nil
@@ -84,78 +86,82 @@
      :tree-sitter-wasm tree-sitter-wasm
      :extra-extensions extra-extensions
      :lsp-init-timeout-ms lsp-init-timeout-ms
-     :default-protocol default-protocol
-     :debounce-timer nil}))
+     :default-protocol default-protocol}))
 
 ;; =============================================================================
-;; Event Emission with Debouncing
+;; Event Emission with Debouncing (EXP-008: Consolidated Debouncing)
 ;; =============================================================================
-;; Fixed: Use string-based keys to avoid memory leaks from object key accumulation.
-;; Events are debounced based on type and URI/lang context.
-
-(defonce emit-timers (atom {}))
+;; Uses lib.debounce for centralized debounce coordination.
+;; Events are debounced based on type and URI/lang context using string keys.
 
 (def ^:private EVENT-DEBOUNCE-MS
-  "Debounce delays for different event types (in milliseconds)."
+  "Debounce delays for different event types (in milliseconds).
+   EXP-008: Optimized delays with max-wait for responsiveness."
   {"content-change" 100
    "selection-change" 50
    "cursor-change" 50
-   "search-term-change" 200
-   "lsp-message" 0        ; No debounce for LSP messages
-   "diagnostics" 0        ; No debounce for diagnostics
-   "symbols" 0            ; No debounce for symbols
-   "connect" 0            ; No debounce for connection events
-   "disconnect" 0         ; No debounce for disconnection events
-   "document-open" 0      ; No debounce for document events
+   "search-term-change" 150   ; Reduced from 200ms for better responsiveness
+   "lsp-message" 0            ; No debounce for LSP messages
+   "diagnostics" 0            ; No debounce for diagnostics
+   "symbols" 0                ; No debounce for symbols
+   "connect" 0                ; No debounce for connection events
+   "disconnect" 0             ; No debounce for disconnection events
+   "document-open" 0          ; No debounce for document events
    "document-close" 0
    "language-change" 0
    :default 50})
 
+(def ^:private EVENT-MAX-WAIT-MS
+  "Maximum wait times before forced execution during continuous events.
+   EXP-008: Ensures responsiveness during rapid input."
+  {"content-change" 500       ; Ensure update within 500ms even during rapid typing
+   "selection-change" 200     ; Ensure cursor updates within 200ms
+   "search-term-change" 400}) ; Ensure search updates within 400ms
+
 (defn- make-emit-key
-  "Creates a string key for event debouncing based on type and context.
-   Uses type and optional URI/lang to deduplicate without memory leaks."
+  "Creates a keyword key for event debouncing based on type and context.
+   Uses type and optional URI/lang to deduplicate."
   [type data]
   (let [uri (or (:uri data) "")
         lang (or (:lang data) "")]
-    (str type ":" uri ":" lang)))
+    (keyword "emit" (str type ":" uri ":" lang))))
 
 (defn emit-event
   "Emits an event to the RxJS ReplaySubject with debouncing for frequent updates.
-   Uses string-based keys to prevent memory leaks from accumulated object keys.
+   Uses lib.debounce for centralized coordination.
 
-   Events are debounced based on type:
-   - Selection/cursor changes: 50ms
-   - Content changes: 100ms
-   - Search term changes: 200ms
+   EXP-008: Consolidated debouncing with max-wait for responsiveness.
+   - Selection/cursor changes: 50ms debounce, 200ms max-wait
+   - Content changes: 100ms debounce, 500ms max-wait
+   - Search term changes: 150ms debounce, 400ms max-wait
    - LSP/diagnostic events: immediate (no debounce)"
   [events type data]
   (log/trace "Emitting event:" type)
   (let [key (make-emit-key type data)
-        ms (get EVENT-DEBOUNCE-MS type (:default EVENT-DEBOUNCE-MS))]
-    ;; Cancel any pending emission for this key
-    (when-let [timer (get @emit-timers key)]
-      (js/clearTimeout timer))
+        ms (get EVENT-DEBOUNCE-MS type (:default EVENT-DEBOUNCE-MS))
+        max-wait (get EVENT-MAX-WAIT-MS type)]
     (if (zero? ms)
       ;; Immediate emission for critical events
       (.next events (clj->js {:type type :data data}))
-      ;; Debounced emission for frequent events
-      (swap! emit-timers assoc key
-             (js/setTimeout
-              (fn []
-                (swap! emit-timers dissoc key)
-                (.next events (clj->js {:type type :data data})))
-              ms)))))
+      ;; Debounced emission with optional max-wait for responsiveness
+      (debounce/debounced-call
+       key
+       #(.next events (clj->js {:type type :data data}))
+       ms
+       (if max-wait
+         {:max-wait max-wait}
+         {})))))
 
 (defn clear-emit-timers!
   "Cancels all pending event emissions. Call on unmount."
   []
-  (doseq [[_ timer] @emit-timers]
-    (js/clearTimeout timer))
-  (reset! emit-timers {}))
+  (debounce/cancel-matching #(and (keyword? %)
+                                  (= "emit" (namespace %)))))
 
 (defn- update-editor-state
   "Updates the internal state-atom with cursor and selection info from CodeMirror state.
-  Emits a debounced 'selection-change' event for external listeners."
+  Emits a debounced 'selection-change' event for external listeners.
+  EXP-008: Uses centralized debounce coordination."
   [^js cm-state state-atom events]
   (let [main-sel (.-main (.-selection cm-state))
         anchor (.-anchor main-sel)
@@ -169,31 +175,20 @@
                     to-pos (offset->pos doc to true)
                     text (.sliceString doc from to)]
                 {:from from-pos :to to-pos :text text}))
-        uri (db/active-uri)
-        debounced-emit (debounce
-                        #(emit-event events "selection-change" {:cursor cursor-pos
-                                                                :selection sel
-                                                                :uri uri})
-                        200)]
+        uri (db/active-uri)]
     (swap! state-atom assoc :cursor cursor-pos :selection sel)
-    (debounced-emit)))
+    ;; EXP-008: Consolidated debounce - selection-change already debounced in emit-event
+    ;; No need for double debouncing here
+    (emit-event events "selection-change" {:cursor cursor-pos
+                                           :selection sel
+                                           :uri uri})))
 
 (defn- get-extensions
   "Returns the array of CodeMirror extensions, including dynamic syntax compartment,
-  static diagnostic compartment. Appends extra-extensions from state."
+  static diagnostic compartment. Appends extra-extensions from state.
+  EXP-008: Uses centralized debounce coordination for LSP and search."
   [state-atom events on-content-change]
-  (let [debounced-lsp (debounce (fn []
-                                  (let [[uri text lang] (db/active-uri-text-lang)]
-                                    (when (and uri text lang)
-                                      (let [version (db/inc-document-version-by-uri! uri)]
-                                        (lsp/notify-did-change lang uri text version state-atom)))))
-                                200)
-        debounced-search-emit (debounce
-                               (fn [term]
-                                 (let [uri (db/active-uri)]
-                                   (emit-event events "search-term-change" {:term term :uri uri})))
-                               200)
-        update-ext (.. EditorView -updateListener
+  (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              (when (or (.-docChanged u) (.-selectionSet u))
                                (update-editor-state (.-state u) state-atom events))
@@ -201,7 +196,9 @@
                                    new-term (or (.-search (getSearchQuery (.-state u))) "")]
                                (when (not= old-term new-term)
                                  (swap! state-atom assoc :search-term new-term)
-                                 (debounced-search-emit new-term)))
+                                 ;; EXP-008: search-term-change is debounced in emit-event
+                                 (emit-event events "search-term-change" {:term new-term
+                                                                          :uri (db/active-uri)})))
                              (when (.-docChanged u)
                                (when-let [uri (db/active-uri)]
                                  (let [new-text (str (.-doc (.-state u)))]
@@ -212,7 +209,16 @@
                                      (on-content-change new-text))
                                    (when (db/document-opened-by-uri? uri)
                                      (when-not (some #(.annotation % external-set-annotation) (.-transactions u))
-                                       (debounced-lsp)))))))))
+                                       ;; EXP-008: Consolidated LSP debounce with max-wait
+                                       (debounce/debounced-call
+                                        :lsp-did-change
+                                        (fn []
+                                          (let [[uri text lang] (db/active-uri-text-lang)]
+                                            (when (and uri text lang)
+                                              (let [version (db/inc-document-version-by-uri! uri)]
+                                                (lsp/notify-did-change lang uri text version state-atom)))))
+                                        150  ; Reduced from 200ms
+                                        {:max-wait 500})))))))))
         default-exts [(lineNumbers)
                       (bracketMatching)
                       (closeBrackets)
@@ -332,65 +338,62 @@
 (defn- activate-document
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
   Emits events for document activation and LSP open if necessary.
-  Debounced to handle rapid calls during initialization/reloads."
+  EXP-008: Uses centralized debounce coordination to handle rapid calls."
   [uri state-atom view-ref events]
-  (when-let [timer (:debounce-timer @state-atom)]
-    (js/clearTimeout timer))
-  (swap! state-atom assoc :debounce-timer
-         (js/setTimeout
-          (fn []
-            (swap! state-atom dissoc :debounce-timer)
-            (go
-              (try
-                (log/trace "Activating document:" uri)
-                (let [old-lang (db/active-lang)]
-                  (when (not= uri (db/active-uri))
-                    (log/debug "Updating active URI for document with old-lang:" old-lang)
-                    (db/update-active-uri! uri))
-                  (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
-                    (log/debug "New language for activation:" new-lang)
-                    (when-let [view (.-current view-ref)]
-                      (let [current-doc (.-doc (.-state view))
-                            current-length (.-length current-doc)]
-                        (.dispatch view #js {:changes #js {:from 0
-                                                           :to current-length
-                                                           :insert text}
-                                             :annotations (.of external-set-annotation true)})))
-                    (let [lsp-ch (go
-                                   (try
-                                     (if (get-in @state-atom [:languages new-lang :lsp-url])
-                                       (<! (ensure-lsp-document-opened new-lang uri state-atom events))
-                                       (do
-                                         (db/document-opened-by-uri! uri)
-                                         [:ok nil]))
-                                     (catch :default e
-                                       [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
-                          syntax-ch (go
-                                      (try
-                                        (<! (syntax/init-syntax (.-current view-ref) state-atom))
-                                        (catch :default e
-                                          [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})])))
-                          lsp-timeout-ms (:lsp-init-timeout-ms @state-atom 5000)
-                          [lsp-val lsp-ch'] (alts! [lsp-ch (timeout lsp-timeout-ms)])
-                          lsp-res (if (identical? lsp-ch lsp-ch') lsp-val [:error (js/Error. "LSP init timeout")])
-                          [syntax-val syntax-ch'] (alts! [syntax-ch (timeout 5000)])
-                          syntax-res (if (identical? syntax-ch syntax-ch') syntax-val [:error (js/Error. "Syntax init timeout")])]
-                      (when (and (:mounted? @state-atom) (= :error (first lsp-res)))
-                        (log/warn "LSP init timeout or failed for lang" new-lang ", continuing without LSP:" (.-message (second lsp-res))))
-                      (if (= :error (first syntax-res))
-                        (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second syntax-res)}))
-                        (emit-event events "language-change" {:uri uri :language new-lang}))
-                      (emit-event events "document-open" {:uri uri
-                                                          :content text
-                                                          :language new-lang
-                                                          :activated true}))))
-                [:ok nil]
-                (catch js/Error error
-                  (when (and @state-atom (:mounted? @state-atom))
-                    (emit-event events "error" {:message (.-message error) :uri uri}))
-                  (log/error (str "Failed to activate document " uri ": " (.-message error)))
-                  [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
-          50)))
+  (debounce/debounced-call
+   [:activate-document uri]
+   (fn []
+     (go
+       (try
+         (log/trace "Activating document:" uri)
+         (let [old-lang (db/active-lang)]
+           (when (not= uri (db/active-uri))
+             (log/debug "Updating active URI for document with old-lang:" old-lang)
+             (db/update-active-uri! uri))
+           (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
+             (log/debug "New language for activation:" new-lang)
+             (when-let [view (.-current view-ref)]
+               (let [current-doc (.-doc (.-state view))
+                     current-length (.-length current-doc)]
+                 (.dispatch view #js {:changes #js {:from 0
+                                                    :to current-length
+                                                    :insert text}
+                                      :annotations (.of external-set-annotation true)})))
+             (let [lsp-ch (go
+                            (try
+                              (if (get-in @state-atom [:languages new-lang :lsp-url])
+                                (<! (ensure-lsp-document-opened new-lang uri state-atom events))
+                                (do
+                                  (db/document-opened-by-uri! uri)
+                                  [:ok nil]))
+                              (catch :default e
+                                [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
+                   syntax-ch (go
+                               (try
+                                 (<! (syntax/init-syntax (.-current view-ref) state-atom))
+                                 (catch :default e
+                                   [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})])))
+                   lsp-timeout-ms (:lsp-init-timeout-ms @state-atom 5000)
+                   [lsp-val lsp-ch'] (alts! [lsp-ch (timeout lsp-timeout-ms)])
+                   lsp-res (if (identical? lsp-ch lsp-ch') lsp-val [:error (js/Error. "LSP init timeout")])
+                   [syntax-val syntax-ch'] (alts! [syntax-ch (timeout 5000)])
+                   syntax-res (if (identical? syntax-ch syntax-ch') syntax-val [:error (js/Error. "Syntax init timeout")])]
+               (when (and (:mounted? @state-atom) (= :error (first lsp-res)))
+                 (log/warn "LSP init timeout or failed for lang" new-lang ", continuing without LSP:" (.-message (second lsp-res))))
+               (if (= :error (first syntax-res))
+                 (throw (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause (second syntax-res)}))
+                 (emit-event events "language-change" {:uri uri :language new-lang}))
+               (emit-event events "document-open" {:uri uri
+                                                   :content text
+                                                   :language new-lang
+                                                   :activated true}))))
+         [:ok nil]
+         (catch js/Error error
+           (when (and @state-atom (:mounted? @state-atom))
+             (emit-event events "error" {:message (.-message error) :uri uri}))
+           (log/error (str "Failed to activate document " uri ": " (.-message error)))
+           [:error (js/Error. (str "(activate-document " uri " state-atom view-ref events) failed") #js {:cause error})]))))
+   50))
 
 (defn- normalize-uri [file-or-uri-js default-protocol]
   (if (and file-or-uri-js (pos? (count file-or-uri-js)))

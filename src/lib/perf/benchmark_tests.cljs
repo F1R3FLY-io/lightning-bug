@@ -11,7 +11,8 @@
    - Frame time monitoring
    - Diagnostic transformation
    - Syntax initialization time
-   - Scroll performance (EXP-005a)"
+   - Scroll performance (EXP-005a)
+   - Debounce timing and latency (EXP-008)"
   (:require
    [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.core.async.interop :refer-macros [<p!]]
@@ -20,6 +21,7 @@
    [lib.perf.stats :as stats]
    [lib.db :as db]
    [lib.query-cache :as qc]
+   [lib.debounce :as debounce]
    [lib.editor.syntax :as syntax]
    [lib.utils :refer [promise->chan]]
    [taoensso.timbre :as log]
@@ -261,6 +263,168 @@
   (let [[text lang] (db/doc-text-lang-by-uri "file:///test/large.rho")
         [_ version] (db/document-id-version-by-uri "file:///test/large.rho")]
     {:text text :language lang :version version}))
+
+;; =============================================================================
+;; Debounce Timing Benchmarks (EXP-008)
+;; =============================================================================
+;;
+;; These benchmarks measure the performance of the centralized debounce system.
+;; Key metrics:
+;; - Debounce call overhead: Time to schedule a debounced call
+;; - Max-wait enforcement: Verify events fire within max-wait limits
+;; - Consolidation ratio: How many events are consolidated
+
+(defn debounce-call-overhead-benchmark
+  "Measures the overhead of scheduling a debounced call.
+   This benchmark does NOT wait for the callback to execute -
+   it only measures the synchronous scheduling overhead."
+  []
+  ;; Cancel any pending calls from previous benchmark
+  (debounce/cancel-all)
+  ;; Schedule a debounced call (measuring just the scheduling overhead)
+  (debounce/debounced-call
+   :benchmark-overhead
+   #(identity nil)
+   100
+   {}))
+
+(defn debounce-cancel-overhead-benchmark
+  "Measures the overhead of cancelling a debounced call."
+  []
+  ;; First schedule a call
+  (debounce/debounced-call
+   :benchmark-cancel
+   #(identity nil)
+   1000
+   {})
+  ;; Then cancel it (this is what we're measuring)
+  (debounce/cancel :benchmark-cancel))
+
+(defn debounce-key-lookup-benchmark
+  "Measures the overhead of key-based deduplication.
+   Simulates rapid calls with the same key."
+  []
+  ;; Multiple calls with the same key - measures timer cancellation + rescheduling
+  (dotimes [_ 10]
+    (debounce/debounced-call
+     :benchmark-dedup
+     #(identity nil)
+     100
+     {}))
+  ;; Clean up
+  (debounce/cancel :benchmark-dedup))
+
+(defn debounce-multiple-keys-benchmark
+  "Measures handling of multiple independent debounce keys.
+   Simulates real-world scenario with different event types."
+  []
+  ;; Cancel any existing
+  (debounce/cancel-all)
+  ;; Schedule calls for different keys
+  (doseq [i (range 10)]
+    (debounce/debounced-call
+     (keyword (str "benchmark-key-" i))
+     #(identity nil)
+     100
+     {}))
+  ;; Cancel all
+  (debounce/cancel-all))
+
+(defn debounce-max-wait-check-benchmark
+  "Measures the overhead of max-wait calculation.
+   When max-wait is provided, additional timestamp checks are performed."
+  []
+  (debounce/cancel-all)
+  ;; Call with max-wait option
+  (debounce/debounced-call
+   :benchmark-max-wait
+   #(identity nil)
+   100
+   {:max-wait 500})
+  ;; Call again (triggers max-wait check)
+  (debounce/debounced-call
+   :benchmark-max-wait
+   #(identity nil)
+   100
+   {:max-wait 500})
+  ;; Clean up
+  (debounce/cancel :benchmark-max-wait))
+
+(defn debounce-leading-edge-benchmark
+  "Measures leading-edge execution overhead.
+   Leading edge executes immediately on first call."
+  []
+  (debounce/cancel-all)
+  (let [executed (atom false)]
+    (debounce/debounced-call
+     :benchmark-leading
+     #(reset! executed true)
+     100
+     {:leading? true})
+    ;; Verify it executed
+    @executed)
+  (debounce/cancel :benchmark-leading))
+
+(defn debounce-throttle-benchmark
+  "Measures throttled call overhead.
+   Throttle guarantees regular execution during continuous calls."
+  []
+  (debounce/cancel-all)
+  (dotimes [_ 5]
+    (debounce/throttled-call
+     :benchmark-throttle
+     #(identity nil)
+     100))
+  (debounce/cancel :benchmark-throttle))
+
+;; Async debounce benchmark for measuring actual latency
+(defn debounce-latency-benchmark
+  "Measures actual end-to-end latency of debounced execution.
+   This async benchmark times from call to callback execution."
+  []
+  (js/Promise.
+   (fn [resolve _]
+     (debounce/cancel-all)
+     (let [start (js/performance.now)]
+       (debounce/debounced-call
+        :benchmark-latency
+        (fn []
+          (let [end (js/performance.now)]
+            (resolve (- end start))))
+        50  ; 50ms debounce delay
+        {})))))
+
+(defn debounce-max-wait-latency-benchmark
+  "Measures latency when max-wait forces execution.
+   Simulates continuous typing scenario where max-wait ensures updates."
+  []
+  (js/Promise.
+   (fn [resolve _]
+     (debounce/cancel-all)
+     (let [start (atom nil)
+           call-count (atom 0)]
+       ;; Simulate continuous calls that would keep delaying
+       ;; but max-wait should force execution within 200ms
+       (letfn [(make-call []
+                 (when (nil? @start)
+                   (reset! start (js/performance.now)))
+                 (swap! call-count inc)
+                 (debounce/debounced-call
+                  :benchmark-max-wait-latency
+                  (fn []
+                    (let [end (js/performance.now)
+                          latency (- end @start)]
+                      (resolve {:latency-ms latency
+                                :call-count @call-count})))
+                  100  ; 100ms debounce (would keep delaying)
+                  {:max-wait 200}))]  ; but max-wait forces execution at 200ms
+         ;; Make rapid calls every 50ms for 300ms
+         (make-call)
+         (js/setTimeout make-call 50)
+         (js/setTimeout make-call 100)
+         (js/setTimeout make-call 150)
+         (js/setTimeout make-call 200)
+         (js/setTimeout make-call 250))))))
 
 ;; =============================================================================
 ;; Syntax Initialization Benchmark
@@ -616,6 +780,45 @@
    {:name :sequential-document-lookup
     :fn sequential-document-lookup-benchmark
     :async? false}
+
+   ;; EXP-008: Debounce timing benchmarks
+   {:name :debounce-call-overhead
+    :fn debounce-call-overhead-benchmark
+    :async? false}
+
+   {:name :debounce-cancel-overhead
+    :fn debounce-cancel-overhead-benchmark
+    :async? false}
+
+   {:name :debounce-key-lookup
+    :fn debounce-key-lookup-benchmark
+    :async? false}
+
+   {:name :debounce-multiple-keys
+    :fn debounce-multiple-keys-benchmark
+    :async? false}
+
+   {:name :debounce-max-wait-check
+    :fn debounce-max-wait-check-benchmark
+    :async? false}
+
+   {:name :debounce-leading-edge
+    :fn debounce-leading-edge-benchmark
+    :async? false}
+
+   {:name :debounce-throttle
+    :fn debounce-throttle-benchmark
+    :async? false}
+
+   ;; NOTE: Async debounce latency benchmarks are disabled by default
+   ;; because they add significant time to the benchmark suite.
+   ;; Uncomment to enable for latency testing:
+   ;; {:name :debounce-latency
+   ;;  :fn debounce-latency-benchmark
+   ;;  :async? true}
+   ;; {:name :debounce-max-wait-latency
+   ;;  :fn debounce-max-wait-latency-benchmark
+   ;;  :async? true}
 
    ;; NOTE: syntax-init benchmark is disabled because it requires WASM files.
    ;; The 100ms timeout removal in EXP-004 saves 100ms per syntax init.
