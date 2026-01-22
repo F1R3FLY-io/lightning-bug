@@ -289,27 +289,72 @@
                 [?e :log/lang ?lang]]
        @conn))
 
+;; EXP-003: Pull pattern for batch diagnostic extraction
+(def ^:private diagnostic-pull-pattern
+  [:diagnostic/message :diagnostic/severity
+   :diagnostic/start-line :diagnostic/start-char
+   :diagnostic/end-line :diagnostic/end-char
+   :diagnostic/version])
+
+;; EXP-003: Pull pattern for all-diagnostics (includes document ref for URI and version)
+(def ^:private diagnostic-pull-pattern-with-doc
+  [:diagnostic/message :diagnostic/severity
+   :diagnostic/start-line :diagnostic/start-char
+   :diagnostic/end-line :diagnostic/end-char
+   :diagnostic/version
+   {:diagnostic/document [:document/uri :document/version]}])
+
+(defn- diagnostic-version-matches?
+  "Returns true if the diagnostic version matches the document version.
+   A diagnostic matches if:
+   - Its version is nil (always matches)
+   - Its version equals the document version"
+  [diag-version doc-version]
+  (or (nil? diag-version)
+      (= diag-version doc-version)))
+
+(defn- transform-pulled-diagnostic
+  "Transforms a pulled diagnostic entity to the expected output format.
+   Returns nil if the diagnostic version doesn't match the document version."
+  [uri doc-version entity]
+  (let [diag-version (:diagnostic/version entity)]
+    (when (diagnostic-version-matches? diag-version doc-version)
+      {:uri uri
+       :message (:diagnostic/message entity)
+       :severity (:diagnostic/severity entity)
+       :startLine (:diagnostic/start-line entity)
+       :startChar (:diagnostic/start-char entity)
+       :endLine (:diagnostic/end-line entity)
+       :endChar (:diagnostic/end-char entity)
+       :version (or diag-version doc-version)})))
+
+(defn- transform-pulled-diagnostic-with-doc
+  "Transforms a pulled diagnostic entity (with document) to the expected output format.
+   Returns nil if the diagnostic version doesn't match the document version."
+  [entity]
+  (let [doc (:diagnostic/document entity)
+        doc-version (:document/version doc)
+        diag-version (:diagnostic/version entity)]
+    (when (diagnostic-version-matches? diag-version doc-version)
+      {:uri (:document/uri doc)
+       :message (:diagnostic/message entity)
+       :severity (:diagnostic/severity entity)
+       :startLine (:diagnostic/start-line entity)
+       :startChar (:diagnostic/start-char entity)
+       :endLine (:diagnostic/end-line entity)
+       :endChar (:diagnostic/end-char entity)
+       :version (or diag-version doc-version)})))
+
 (defn diagnostics
   []
-  (d/q '[:find ?uri ?diag-version ?message ?severity ?start-line ?start-char ?end-line ?end-char
-         :keys uri version message severity startLine startChar endLine endChar
-         :where [?e :diagnostic/document ?doc]
-                [?doc :document/uri ?uri]
-                [?doc :document/version ?doc-version]
-                [?e :diagnostic/message ?message]
-                [?e :diagnostic/severity ?severity]
-                [?e :diagnostic/start-line ?start-line]
-                [?e :diagnostic/start-char ?start-char]
-                [?e :diagnostic/end-line ?end-line]
-                [?e :diagnostic/end-char ?end-char]
-                (or-join [?e ?diag-version ?doc-version]
-                          (and [?e :diagnostic/version ?diag-version]
-                               [(= ?diag-version ?doc-version)])
-                          (and [(missing? $ ?e :diagnostic/version)]
-                               [(identity ?doc-version) ?diag-version])
-                          (and [?e :diagnostic/version ?diag-version]
-                               [(nil? ?diag-version)]))]
-       @conn))
+  ;; EXP-003: Use d/pull-many for batch attribute extraction with post-query filtering
+  (let [entity-ids (d/q '[:find [?e ...]
+                          :where [?e :diagnostic/document _]]
+                        @conn)]
+    (when (seq entity-ids)
+      (into []
+            (keep transform-pulled-diagnostic-with-doc)
+            (d/pull-many @conn diagnostic-pull-pattern-with-doc entity-ids)))))
 
 ;; EXP-002: Pull pattern for all-symbols (includes document ref for URI)
 (def ^:private symbol-pull-pattern-with-doc
@@ -835,26 +880,16 @@
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (d/q '[:find ?uri ?message ?severity ?start-line ?start-char ?end-line ?end-char ?diag-version
-         :keys uri message severity startLine startChar endLine endChar version
-         :in $ ?uri
-         :where [?doc :document/uri ?uri]
-                [?doc :document/version ?doc-version]
-                [?e :diagnostic/document ?doc]
-                [?e :diagnostic/message ?message]
-                [?e :diagnostic/severity ?severity]
-                [?e :diagnostic/start-line ?start-line]
-                [?e :diagnostic/start-char ?start-char]
-                [?e :diagnostic/end-line ?end-line]
-                [?e :diagnostic/end-char ?end-char]
-                (or-join [?e ?diag-version ?doc-version]
-                          (and [?e :diagnostic/version ?diag-version]
-                               [(= ?diag-version ?doc-version)])
-                          (and [(missing? $ ?e :diagnostic/version)]
-                               [(identity ?doc-version) ?diag-version])
-                          (and [?e :diagnostic/version ?diag-version]
-                               [(nil? ?diag-version)]))]
-       @conn uri))
+  ;; EXP-003: Use d/pull-many for batch attribute extraction with post-query filtering
+  (when-let [[doc-id doc-version] (document-id-version-by-uri uri)]
+    (let [entity-ids (d/q '[:find [?e ...]
+                            :in $ ?doc
+                            :where [?e :diagnostic/document ?doc]]
+                          @conn doc-id)]
+      (when (seq entity-ids)
+        (into []
+              (keep #(transform-pulled-diagnostic uri doc-version %))
+              (d/pull-many @conn diagnostic-pull-pattern entity-ids))))))
 
 ;; EXP-002: Pull pattern for batch symbol extraction
 (def ^:private symbol-pull-pattern
