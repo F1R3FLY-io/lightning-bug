@@ -22,6 +22,7 @@
    :datascript-query {:target-ms 5 :description "Typical DataScript query"}
    :frame-time {:target-ms 16.67 :description "60fps frame budget"}
    :startup {:target-ms 2000 :description "Time to interactive"}
+   :syntax-init {:target-ms 500 :description "Syntax initialization (cached WASM)"}
    :lsp-response {:target-ms 500 :description "LSP request/response"}
    :diagnostic-transform {:target-ms 10 :description "Diagnostic transformation"}})
 
@@ -29,14 +30,12 @@
 ;; Timing State
 ;; =============================================================================
 
-(defonce ^:private measurements
-  "Atom holding collected measurements.
-   Structure: {:metric-name [{:duration ms :timestamp Date.now :metadata {}}]}"
-  (atom {}))
+;; Atom holding collected measurements.
+;; Structure: {:metric-name [{:duration ms :timestamp Date.now :metadata {}}]}
+(defonce ^:private measurements (atom {}))
 
-(defonce ^:private active-marks
-  "Atom holding active marks that haven't been ended."
-  (atom {}))
+;; Atom holding active marks that haven't been ended.
+(defonce ^:private active-marks (atom {}))
 
 ;; =============================================================================
 ;; High-Resolution Timing

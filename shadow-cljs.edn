@@ -88,6 +88,20 @@
                                                   :pseudo-names true
                                                   :externs ["externs/libs.ext.js"
                                                             "datascript/externs.js"
-                                                            "externs/goog.ext.js"]}}}
+                                                            "externs/goog.ext.js"]}}
+          :benchmark {:target :browser
+                      :output-dir "resources/public/benchmark/js"
+                      :asset-path "/js"
+                      :modules {:main {:init-fn lib.perf.benchmark-tests/init
+                                       :entries [lib.perf.benchmark-tests]}}
+                      :devtools {:http-root "resources/public/benchmark"
+                                 :http-port 3002}
+                      :js-options {:resolve {"fs" false
+                                             "fs/promises" false
+                                             "path" false
+                                             "url" false}}
+                      :compiler-options {:optimizations :simple
+                                         :closure-defines {lib.perf.bench/BENCHMARKS-ENABLED true
+                                                           lib.db/DEBUG false}}}}
  :dev-http {3000 "resources/public"}
  :jvm-opts ["--sun-misc-unsafe-memory-access=allow"]}

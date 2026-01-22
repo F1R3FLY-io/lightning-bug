@@ -79,7 +79,17 @@
     "test:debug": "npx shadow-cljs compile karma-test-debug && cross-env KARMA_FILE=target/karma-test-debug.js npx karma start --single-run",
     "test:release": "npx shadow-cljs compile karma-test-release && cross-env KARMA_FILE=target/karma-test-release.js npx karma start --single-run",
     "test:demo": "node scripts/test-demo.js",
-    "test": "npm run test:types && npm run test:debug && npm run test:release && MODE=release npm run build:demo && npm run test:demo"
+    "test": "npm run test:types && npm run test:debug && npm run test:release && MODE=release npm run build:demo && npm run test:demo",
+    "benchmark:build": "npx shadow-cljs compile benchmark",
+    "benchmark:serve": "npx shadow-cljs watch benchmark",
+    "benchmark:run": "node scripts/run-benchmark.js",
+    "benchmark:baseline": "node scripts/run-benchmark.js --output docs/benchmarks/results/baseline.json",
+    "benchmark:experiment": "node scripts/run-benchmark.js --output docs/benchmarks/results/experiment.json",
+    "benchmark:quick": "node scripts/run-benchmark.js --quick",
+    "benchmark:setup": "./scripts/benchmark-setup.sh --status",
+    "benchmark:prepare": "sudo ./scripts/benchmark-setup.sh --prepare",
+    "benchmark:restore": "sudo ./scripts/benchmark-setup.sh --restore",
+    "compare-benchmarks": "node scripts/compare-benchmarks.js"
   },
   "main": "dist/libs/lib.core.js",
   "module": "dist/libs/lib.core.js",
