@@ -182,6 +182,45 @@
 ;; This reduces decoration rebuilds when scrolling within the cached range.
 (def ^:const viewport-margin 2000)
 
+;; =============================================================================
+;; Cache Statistics (EXP-005a)
+;; =============================================================================
+;;
+;; Observable counters for measuring cache effectiveness during scroll
+;; performance benchmarking. These statistics track:
+;; - :hits    - Number of viewport updates served from cached decorations
+;; - :misses  - Number of viewport updates requiring decoration rebuild
+;; - :rebuilds - Total decoration rebuilds (same as misses for now)
+;; - :queries - Number of Tree-Sitter queries executed
+;;
+;; Usage:
+;;   (reset-cache-stats!)  ; Clear stats before benchmark
+;;   ;; ... perform scroll operations ...
+;;   (get-cache-stats)     ; Get {:hits N :misses M ...}
+
+(defonce cache-stats
+  (atom {:hits 0 :misses 0 :rebuilds 0 :queries 0}))
+
+(defn reset-cache-stats!
+  "Resets all cache statistics to zero. Call before starting a benchmark run."
+  []
+  (reset! cache-stats {:hits 0 :misses 0 :rebuilds 0 :queries 0}))
+
+(defn get-cache-stats
+  "Returns current cache statistics map."
+  []
+  @cache-stats)
+
+(defn ^:export getCacheStats
+  "JavaScript-accessible function to get cache stats."
+  []
+  (clj->js @cache-stats))
+
+(defn ^:export resetCacheStats
+  "JavaScript-accessible function to reset cache stats."
+  []
+  (reset-cache-stats!))
+
 (defn make-highlighter-plugin
   "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries.
 
@@ -193,6 +232,7 @@
   (let [style-js (clj->js style-map)
         ;; Build decorations for a given range, with optional margin extension
         build-decorations-for-range (fn [^js state ^js tree doc from to]
+                                      (swap! cache-stats update :queries inc)
                                       (let [builder (RangeSetBuilder.)
                                             start-point (index->point doc from)
                                             end-point (index->point doc to)
@@ -228,19 +268,23 @@
                                              (if within-cache?
                                                ;; Viewport is within cached range, reuse decorations
                                                (do
+                                                 (swap! cache-stats update :hits inc)
                                                  (log/trace "Reusing cached decorations for viewport" viewport-from "-" viewport-to
                                                             "(cached:" cached-from "-" cached-to ")")
                                                  cached-decos)
                                                ;; Need to rebuild with extended margin
-                                               (let [extended-from (max 0 (- viewport-from viewport-margin))
-                                                     extended-to (min doc-length (+ viewport-to viewport-margin))
-                                                     decos (build-decorations-for-range state tree doc extended-from extended-to)]
-                                                 (log/trace "Building decorations for extended range" extended-from "-" extended-to
-                                                            "(viewport:" viewport-from "-" viewport-to ")")
-                                                 (reset! cache-atom {:from extended-from
-                                                                     :to extended-to
-                                                                     :decorations decos})
-                                                 decos))))))]
+                                               (do
+                                                 (swap! cache-stats update :misses inc)
+                                                 (swap! cache-stats update :rebuilds inc)
+                                                 (let [extended-from (max 0 (- viewport-from viewport-margin))
+                                                       extended-to (min doc-length (+ viewport-to viewport-margin))
+                                                       decos (build-decorations-for-range state tree doc extended-from extended-to)]
+                                                   (log/trace "Building decorations for extended range" extended-from "-" extended-to
+                                                              "(viewport:" viewport-from "-" viewport-to ")")
+                                                   (reset! cache-atom {:from extended-from
+                                                                       :to extended-to
+                                                                       :decorations decos})
+                                                   decos)))))))]
     (.define ViewPlugin
              (fn [^js view]
                ;; Each plugin instance has its own cache atom
