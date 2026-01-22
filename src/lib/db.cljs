@@ -311,49 +311,41 @@
                                [(nil? ?diag-version)]))]
        @conn))
 
+;; EXP-002: Pull pattern for all-symbols (includes document ref for URI)
+(def ^:private symbol-pull-pattern-with-doc
+  [:symbol/name :symbol/kind
+   :symbol/start-line :symbol/start-char
+   :symbol/end-line :symbol/end-char
+   :symbol/selection-start-line :symbol/selection-start-char
+   :symbol/selection-end-line :symbol/selection-end-char
+   :symbol/parent
+   {:symbol/document [:document/uri]}])
+
+(defn- transform-pulled-symbol-with-doc
+  "Transforms a pulled symbol entity (with document) to the expected output format."
+  [entity]
+  {:uri (get-in entity [:symbol/document :document/uri])
+   :name (:symbol/name entity)
+   :kind (:symbol/kind entity)
+   :startLine (:symbol/start-line entity)
+   :startChar (:symbol/start-char entity)
+   :endLine (:symbol/end-line entity)
+   :endChar (:symbol/end-char entity)
+   :selectionStartLine (:symbol/selection-start-line entity)
+   :selectionStartChar (:symbol/selection-start-char entity)
+   :selectionEndLine (:symbol/selection-end-line entity)
+   :selectionEndChar (:symbol/selection-end-char entity)
+   :parent (or (:symbol/parent entity) 0)})
+
 (defn symbols
   []
-  (d/q '[:find ?uri
-               ?name
-               ?kind
-               ?start-line
-               ?start-char
-               ?end-line
-               ?end-char
-               ?selection-start-line
-               ?selection-start-char
-               ?selection-end-line
-               ?selection-end-char
-               ?parent
-         :keys uri
-               name
-               kind
-               startLine
-               startChar
-               endLine
-               endChar
-               selectionStartLine
-               selectionStartChar
-               selectionEndLine
-               selectionEndChar
-               parent
-         :where [?e :symbol/document ?doc]
-                [?doc :document/uri ?uri]
-                [?e :symbol/name ?name]
-                [?e :symbol/kind ?kind]
-                [?e :symbol/start-line ?start-line]
-                [?e :symbol/start-char ?start-char]
-                [?e :symbol/end-line ?end-line]
-                [?e :symbol/end-char ?end-char]
-                [?e :symbol/selection-start-line ?selection-start-line]
-                [?e :symbol/selection-start-char ?selection-start-char]
-                [?e :symbol/selection-end-line ?selection-end-line]
-                [?e :symbol/selection-end-char ?selection-end-char]
-                (or-join [?e ?parent]
-                          [?e :symbol/parent ?parent]
-                          (and [(missing? $ ?e :symbol/parent)]
-                              [(ground 0) ?parent]))]
-       @conn))
+  ;; EXP-002: Use d/pull-many for batch attribute extraction
+  (let [entity-ids (d/q '[:find [?e ...]
+                          :where [?e :symbol/document _]]
+                        @conn)]
+    (when (seq entity-ids)
+      (mapv transform-pulled-symbol-with-doc
+            (d/pull-many @conn symbol-pull-pattern-with-doc entity-ids)))))
 
 (defn active-uri-text-lang
   []
@@ -809,8 +801,8 @@
                            :symbol/selection-start-char (:symbol/selection-start-char s)
                            :symbol/selection-end-line (:symbol/selection-end-line s)
                            :symbol/selection-end-char (:symbol/selection-end-char s)
-                           :db/id (:db/id s)
                            :type :symbol}
+                    (:db/id s) (assoc :db/id (:db/id s))
                     (:symbol/parent s) (assoc :symbol/parent (:symbol/parent s))))
                 flat-symbols)]
     (when DEBUG
@@ -864,52 +856,44 @@
                                [(nil? ?diag-version)]))]
        @conn uri))
 
+;; EXP-002: Pull pattern for batch symbol extraction
+(def ^:private symbol-pull-pattern
+  [:symbol/name :symbol/kind
+   :symbol/start-line :symbol/start-char
+   :symbol/end-line :symbol/end-char
+   :symbol/selection-start-line :symbol/selection-start-char
+   :symbol/selection-end-line :symbol/selection-end-char
+   :symbol/parent])
+
+(defn- transform-pulled-symbol
+  "Transforms a pulled symbol entity to the expected output format."
+  [uri entity]
+  {:uri uri
+   :name (:symbol/name entity)
+   :kind (:symbol/kind entity)
+   :startLine (:symbol/start-line entity)
+   :startChar (:symbol/start-char entity)
+   :endLine (:symbol/end-line entity)
+   :endChar (:symbol/end-char entity)
+   :selectionStartLine (:symbol/selection-start-line entity)
+   :selectionStartChar (:symbol/selection-start-char entity)
+   :selectionEndLine (:symbol/selection-end-line entity)
+   :selectionEndChar (:symbol/selection-end-char entity)
+   :parent (or (:symbol/parent entity) 0)})
+
 (defn symbols-by-uri [uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (d/q '[:find ?uri
-               ?name
-               ?kind
-               ?start-line
-               ?start-char
-               ?end-line
-               ?end-char
-               ?selection-start-line
-               ?selection-start-char
-               ?selection-end-line
-               ?selection-end-char
-               ?parent
-         :keys uri
-               name
-               kind
-               startLine
-               startChar
-               endLine
-               endChar
-               selectionStartLine
-               selectionStartChar
-               selectionEndLine
-               selectionEndChar
-               parent
-         :in $ ?uri
-         :where [?e :symbol/document ?doc]
-                [?doc :document/uri ?uri]
-                [?e :symbol/name ?name]
-                [?e :symbol/kind ?kind]
-                [?e :symbol/start-line ?start-line]
-                [?e :symbol/start-char ?start-char]
-                [?e :symbol/end-line ?end-line]
-                [?e :symbol/end-char ?end-char]
-                [?e :symbol/selection-start-line ?selection-start-line]
-                [?e :symbol/selection-start-char ?selection-start-char]
-                [?e :symbol/selection-end-line ?selection-end-line]
-                [?e :symbol/selection-end-char ?selection-end-char]
-                (or-join [?e ?parent]
-                          [?e :symbol/parent ?parent]
-                          (and [(missing? $ ?e :symbol/parent)]
-                              [(ground 0) ?parent]))]
-       @conn uri))
+  ;; EXP-002: Use d/pull-many for batch attribute extraction
+  (let [entity-ids (d/q '[:find [?e ...]
+                          :in $ ?uri
+                          :where [?doc :document/uri ?uri]
+                                 [?e :symbol/document ?doc]]
+                        @conn uri)]
+    (when (seq entity-ids)
+      (mapv #(transform-pulled-symbol uri %)
+            (d/pull-many @conn symbol-pull-pattern entity-ids)))))
 
 (defn reset-active-uri!
   []
