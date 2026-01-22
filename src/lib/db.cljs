@@ -403,6 +403,36 @@
         @conn)
    [nil nil nil]))
 
+;; =============================================================================
+;; EXP-007: Coalesced Active Document Queries
+;; =============================================================================
+
+(defn active-uri-version
+  "Returns [uri version] for the active document in a single query.
+   EXP-007: Coalesces active-uri + active-version."
+  []
+  (or
+   (d/q '[:find [?uri ?version]
+          :where [?a :workspace/active-uri ?uri]
+                 [?e :document/uri ?uri]
+                 [?e :document/version ?version]]
+        @conn)
+   [nil nil]))
+
+(defn active-uri-text-lang-version
+  "Returns [uri text lang version] for the active document in a single query.
+   EXP-007: Coalesces active-uri + text + lang + version for coeffects."
+  []
+  (or
+   (d/q '[:find [?uri ?text ?lang ?version]
+          :where [?a :workspace/active-uri ?uri]
+                 [?e :document/uri ?uri]
+                 [?e :document/text ?text]
+                 [?e :document/language ?lang]
+                 [?e :document/version ?version]]
+        @conn)
+   [nil nil nil nil]))
+
 (defn doc-text-version-by-uri
   [uri]
   (when DEBUG
@@ -469,6 +499,23 @@
                  [?e :document/language ?lang]]
         @conn uri)
    [nil nil]))
+
+(defn doc-text-lang-version-by-uri
+  "Returns [text lang version] for a document by URI in a single query.
+   EXP-007: Coalesces text + lang + version for coeffects."
+  [uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (or
+   (d/q '[:find [?text ?lang ?version]
+          :in $ ?uri
+          :where [?e :document/uri ?uri]
+                 [?e :document/text ?text]
+                 [?e :document/language ?lang]
+                 [?e :document/version ?version]]
+        @conn uri)
+   [nil nil nil]))
 
 (defn document-language-by-uri
   [uri]

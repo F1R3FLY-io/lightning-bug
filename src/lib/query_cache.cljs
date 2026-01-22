@@ -24,20 +24,17 @@
 ;; Cache State
 ;; =============================================================================
 
-(defonce ^:private cache
-  "Atom holding cached query results.
-   Structure: {cache-key {:result query-result
-                          :timestamp timestamp-ms
-                          :ttl-ms ttl}}"
-  (atom {}))
+;; Atom holding cached query results.
+;; Structure: {cache-key {:result query-result
+;;                        :timestamp timestamp-ms
+;;                        :ttl-ms ttl}}
+(defonce ^:private cache (atom {}))
 
-(defonce ^:private cache-stats
-  "Atom holding cache statistics."
-  (atom {:hits 0 :misses 0 :evictions 0}))
+;; Atom holding cache statistics.
+(defonce ^:private cache-stats (atom {:hits 0 :misses 0 :evictions 0}))
 
-(defonce ^:private transaction-counter
-  "Counter incremented on each transaction to invalidate stale caches."
-  (atom 0))
+;; Counter incremented on each transaction to invalidate stale caches.
+(defonce ^:private transaction-counter (atom 0))
 
 ;; =============================================================================
 ;; Cache Key Generation
@@ -69,14 +66,15 @@
   "Evicts the oldest entries to make room for new ones."
   []
   (let [entries @cache
-        count (count entries)]
-    (when (> count MAX-CACHE-ENTRIES)
+        entry-count (count entries)]
+    (when (> entry-count MAX-CACHE-ENTRIES)
       (let [sorted (sort-by (fn [[_ v]] (:timestamp v)) entries)
-            to-evict (take (- count (quot MAX-CACHE-ENTRIES 2)) sorted)]
+            to-evict (take (- entry-count (quot MAX-CACHE-ENTRIES 2)) sorted)
+            eviction-count (count to-evict)]
         (doseq [[k _] to-evict]
           (swap! cache dissoc k))
-        (swap! cache-stats update :evictions + (count to-evict))
-        (log/trace "Evicted" (count to-evict) "cache entries")))))
+        (swap! cache-stats update :evictions + eviction-count)
+        (log/trace "Evicted" eviction-count "cache entries")))))
 
 (defn get-cached
   "Gets a cached result if available and not expired.

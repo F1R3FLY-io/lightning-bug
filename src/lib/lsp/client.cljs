@@ -186,8 +186,9 @@
         version (:version params)
         diags (:diagnostics params)
         flat-diags (flatten-diags diags uri version)
-        active-version (db/active-version)]
-    (when (and (= uri (db/active-uri))
+        ;; EXP-007: Coalesced query - single query instead of 2 separate queries
+        [active-uri active-version] (db/active-uri-version)]
+    (when (and (= uri active-uri)
                (or (nil? version) (= version active-version)))
       (db/replace-diagnostics-by-uri! uri version flat-diags)
       (.next events (clj->js {:type "diagnostics"
