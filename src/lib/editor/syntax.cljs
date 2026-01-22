@@ -1,6 +1,6 @@
 (ns lib.editor.syntax
   (:require
-   [clojure.core.async :as async :refer [go <! timeout promise-chan put!]]
+   [clojure.core.async :as async :refer [go <! promise-chan put!]]
    [clojure.string :as str]
    [taoensso.timbre :as log]
    ["@codemirror/state" :refer [Compartment RangeSetBuilder StateField Text]]
@@ -299,7 +299,7 @@
                               (log/error "Failed to initialize Tree-Sitter for" lang-key ":" (.-message (second ts-init-res)))
                               (throw (js/Error. "Failed to initialize Tree-Sitter" #js {:cause (second ts-init-res)})))
                             (log/debug "Tree-Sitter initialized for" lang-key)))
-                        (<! (timeout 100))
+                        ;; Note: Removed unnecessary 100ms timeout (EXP-004)
                         ;; Load queries and parser in parallel
                         (let [indent-size (or (:indent-size lang-config) 2)
                               indent-unit-str (str/join (repeat indent-size " "))
