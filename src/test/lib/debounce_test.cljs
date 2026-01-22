@@ -362,3 +362,169 @@
              (debounce/throttled-call :throttle-other #(reset! other-called true) 50)
              (is (true? @other-called)))
            (done))))
+
+;; =============================================================================
+;; Edge Case Tests - Phase 2
+;; =============================================================================
+
+(deftest debounced-call-max-wait-forces-execution
+  (async done
+         (go
+           (let [call-count (atom 0)
+                 call-times (atom [])]
+             ;; Continuously call with max-wait
+             ;; The max-wait should force execution after 100ms even with continuous calls
+             (dotimes [_ 5]
+               (debounce/debounced-call :max-wait-test
+                                        #(do (swap! call-count inc)
+                                             (swap! call-times conj (js/Date.now)))
+                                        50 ; delay
+                                        {:max-wait 100})
+               (<! (timeout 30))) ; Call every 30ms, total 150ms
+             ;; Wait for any trailing execution
+             (<! (timeout 100))
+             ;; Should have been called at least once due to max-wait
+             (is (>= @call-count 1) "max-wait should force at least one execution"))
+           (done))))
+
+(deftest debounced-call-error-does-not-prevent-future-calls
+  (async done
+         (go
+           (let [success-count (atom 0)
+                 error-thrown (atom false)]
+             ;; First call throws
+             (debounce/debounced-call :error-recovery
+                                      #(do (reset! error-thrown true)
+                                           (throw (js/Error. "intentional error")))
+                                      30)
+             (<! (timeout 50))
+             (is (true? @error-thrown) "Error should have been thrown")
+             ;; Second call should still work
+             (debounce/debounced-call :error-recovery
+                                      #(swap! success-count inc)
+                                      30)
+             (<! (timeout 50))
+             (is (= 1 @success-count) "Subsequent call should succeed after error"))
+           (done))))
+
+(deftest debounced-call-leading-and-trailing-both-fire
+  (async done
+         (go
+           (let [call-times (atom [])]
+             ;; Call with both leading and trailing enabled
+             (debounce/debounced-call :leading-trailing
+                                      #(swap! call-times conj (js/Date.now))
+                                      50
+                                      {:leading? true :trailing? true})
+             ;; Leading should fire immediately
+             (is (= 1 (count @call-times)) "Leading edge should fire immediately")
+             ;; Wait for trailing
+             (<! (timeout 100))
+             ;; Both leading and trailing should have fired
+             (is (= 2 (count @call-times)) "Both leading and trailing should fire"))
+           (done))))
+
+(deftest throttled-call-error-does-not-break-throttle
+  (async done
+         (go
+           (let [success-count (atom 0)]
+             ;; First call throws
+             (debounce/throttled-call :throttle-error-recovery
+                                      #(throw (js/Error. "intentional error"))
+                                      50)
+             (<! (timeout 60))
+             ;; Second call should work after interval
+             (debounce/throttled-call :throttle-error-recovery
+                                      #(swap! success-count inc)
+                                      50)
+             (is (= 1 @success-count) "Throttle should work after error"))
+           (done))))
+
+(deftest rapid-cancel-reschedule-works
+  (async done
+         (go
+           (let [call-count (atom 0)]
+             ;; Rapidly schedule and cancel
+             (dotimes [_ 10]
+               (debounce/debounced-call :rapid-cancel
+                                        #(swap! call-count inc)
+                                        30)
+               (debounce/cancel :rapid-cancel))
+             ;; None should have executed
+             (is (= 0 @call-count))
+             ;; Now schedule one that should execute
+             (debounce/debounced-call :rapid-cancel
+                                      #(swap! call-count inc)
+                                      30)
+             (<! (timeout 50))
+             (is (= 1 @call-count) "Final call should execute"))
+           (done))))
+
+(deftest debounced-call-with-different-functions
+  (async done
+         (go
+           (let [results (atom [])]
+             ;; Same key, different functions - last function wins
+             (debounce/debounced-call :same-key #(swap! results conj :first) 50)
+             (debounce/debounced-call :same-key #(swap! results conj :second) 50)
+             (debounce/debounced-call :same-key #(swap! results conj :third) 50)
+             (<! (timeout 100))
+             ;; Only the last function should have executed
+             (is (= [:third] @results) "Only last function should execute"))
+           (done))))
+
+(deftest throttled-call-executes-scheduled-after-immediate
+  (async done
+         (go
+           (let [call-count (atom 0)
+                 call-times (atom [])]
+             ;; First call executes immediately
+             (debounce/throttled-call :throttle-schedule
+                                      #(do (swap! call-count inc)
+                                           (swap! call-times conj (js/Date.now)))
+                                      100)
+             (is (= 1 @call-count) "First call immediate")
+             ;; Second call during throttle window
+             (<! (timeout 20))
+             (debounce/throttled-call :throttle-schedule
+                                      #(do (swap! call-count inc)
+                                           (swap! call-times conj (js/Date.now)))
+                                      100)
+             (is (= 1 @call-count) "Second call should be throttled")
+             ;; Wait for scheduled execution
+             (<! (timeout 120))
+             (is (= 2 @call-count) "Scheduled call should have executed"))
+           (done))))
+
+(deftest debounce-fn-cancel-via-returned-function
+  (async done
+         (go
+           (let [call-count (atom 0)
+                 debounced (debounce/debounce-fn #(swap! call-count inc)
+                                                 :delay 50)]
+             ;; Call and get cancel function
+             (let [cancel-fn (debounced)]
+               ;; Cancel before execution
+               (cancel-fn)
+               (<! (timeout 100))
+               ;; Should not have executed
+               (is (= 0 @call-count) "Cancelled call should not execute")))
+           (done))))
+
+(deftest pending-state-tracking-accuracy
+  (testing "Pending state accurately reflects scheduled calls"
+    ;; Initially empty
+    (is (= 0 (debounce/pending-count)))
+    (is (empty? (debounce/pending-keys)))
+    ;; Schedule some calls
+    (debounce/debounced-call :track-a #() 500)
+    (debounce/debounced-call :track-b #() 500)
+    (is (= 2 (debounce/pending-count)))
+    (is (debounce/has-pending? :track-a))
+    (is (debounce/has-pending? :track-b))
+    (is (not (debounce/has-pending? :track-c)))
+    ;; Cancel one
+    (debounce/cancel :track-a)
+    (is (= 1 (debounce/pending-count)))
+    (is (not (debounce/has-pending? :track-a)))
+    (is (debounce/has-pending? :track-b))))

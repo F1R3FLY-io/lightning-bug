@@ -96,7 +96,7 @@
 (rf/reg-cofx
  :editor/ready?
  (fn [coeffects _]
-   (let [editor (some-> @editor-ref-atom .-current)]
+   (let [^js editor (some-> @editor-ref-atom .-current)]
      (assoc coeffects :editor-ready?
             (and editor (.isReady editor))))))
 

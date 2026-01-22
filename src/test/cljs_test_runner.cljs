@@ -22,7 +22,12 @@
             [test.lib.debounce-test]
             ;; Phase 6: Integration tests
             [test.integration.document-flow-test]
-            [test.integration.lsp-integration-test]))
+            [test.integration.lsp-integration-test]
+            ;; Phase 7: New coverage tests
+            [test.lib.query-cache-test]
+            [test.lib.state-test]
+            [test.lib.position-property-test]
+            [test.integration.coordination-test]))
 
 (defn ^:export main []
   (k/init))

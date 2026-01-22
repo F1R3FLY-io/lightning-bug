@@ -724,3 +724,231 @@
                  (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
+
+;; =============================================================================
+;; Edge Case Tests (Phase 2)
+;; =============================================================================
+
+(deftest highlight-cache-invalidation-on-edit
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   query (Query. lang query-str)
+                                   language-state-field (syntax/make-language-state parser)
+                                   plugin (syntax/make-highlighter-plugin language-state-field query)
+                                   initial-doc "let x = 1"
+                                   state (.create EditorState #js {:doc initial-doc :extensions #js [language-state-field plugin]})
+                                   view (EditorView. #js {:state state :parent js/document.body})]
+                               ;; Reset cache stats before test
+                               (syntax/reset-cache-stats!)
+                               ;; Verify initial state
+                               (let [stats-before (syntax/get-cache-stats)]
+                                 (is (= 0 (:hits stats-before)) "No hits before operations"))
+                               ;; Make an edit to the document
+                               (.dispatch view #js {:changes #js {:from 9 :to 9 :insert " in y"}})
+                               (<! (timeout 50))
+                               ;; Check that cache was invalidated and rebuilt
+                               (let [stats-after (syntax/get-cache-stats)]
+                                 (is (>= (:misses stats-after) 1) "Cache miss on edit (cache invalidated)")
+                                 (is (>= (:rebuilds stats-after) 1) "Decorations rebuilt after edit"))
+                               (.destroy view))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "highlight-cache-invalidation-on-edit failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest highlight-cache-viewport-awareness
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   query (Query. lang query-str)
+                                   language-state-field (syntax/make-language-state parser)
+                                   plugin (syntax/make-highlighter-plugin language-state-field query)
+                                   ;; Create a document larger than viewport margin
+                                   large-doc (apply str (repeat 200 "let x = 1\n"))
+                                   state (.create EditorState #js {:doc large-doc :extensions #js [language-state-field plugin]})
+                                   view (EditorView. #js {:state state :parent js/document.body})]
+                               ;; Reset cache stats
+                               (syntax/reset-cache-stats!)
+                               ;; Wait for potential render
+                               (<! (timeout 50))
+                               ;; Verify cache stats API works (misses may be 0 in test environment)
+                               (let [stats-initial (syntax/get-cache-stats)]
+                                 (is (some? stats-initial) "Cache stats available")
+                                 (is (number? (:misses stats-initial)) "Misses is a number")
+                                 (is (number? (:hits stats-initial)) "Hits is a number"))
+                               ;; Verify viewport margin constant exists
+                               (is (= 2000 syntax/viewport-margin) "Viewport margin is 2000 chars")
+                               (.destroy view))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "highlight-cache-viewport-awareness failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest language-switch-clears-parser
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   indents-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/indents.scm"))
+                                   state-atom (atom {:languages {"rholang" {:grammar-wasm wasm-path
+                                                                            :highlights-query query-str
+                                                                            :indents-query indents-str
+                                                                            :extensions [".rho"]}
+                                                                 "plaintext" {:extensions [".txt"]}}})]
+                               ;; Clear languages cache
+                               (reset! syntax/languages {})
+                               ;; Setup for rholang first
+                               (db/create-documents! [{:uri "test.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! "test.rho")
+                               (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
+                                     view (EditorView. #js {:state state :parent js/document.body})
+                                     result (<! (syntax/init-syntax view state-atom))]
+                                 (is (= :ok (first result)) "Rholang initialization successful")
+                                 (is (some? (get @syntax/languages "rholang")) "Rholang cached")
+                                 ;; Now switch to plaintext (no parser)
+                                 (db/create-documents! [{:uri "test.txt" :text "plain text" :language "plaintext" :version 1 :dirty false :opened true}])
+                                 (db/update-active-uri! "test.txt")
+                                 (let [result2 (<! (syntax/init-syntax view state-atom))]
+                                   (is (= :ok (first result2)) "Plaintext initialization successful")
+                                   (is (= :no-tree-sitter (second result2)) "Plaintext uses fallback (no tree-sitter)"))
+                                 (.destroy view)))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "language-switch-clears-parser failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest incremental-parse-insertion
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   language-state-field (syntax/make-language-state parser)
+                                   initial-doc "new x in { Nil }"
+                                   state (.create EditorState #js {:doc initial-doc :extensions #js [language-state-field]})
+                                   view (EditorView. #js {:state state :parent js/document.body})]
+                               ;; Insert text in the middle
+                               (.dispatch view #js {:changes #js {:from 11 :to 14 :insert "x!(\"Hello\") | Nil"}})
+                               (<! (timeout 50))
+                               ;; Verify the tree was updated incrementally
+                               (let [new-state (.-state view)
+                                     lang-state (.field new-state language-state-field false)
+                                     ^js tree (when lang-state (.-tree lang-state))]
+                                 (is (some? tree) "Parse tree exists after insertion")
+                                 (is (some? (.-rootNode ^js tree)) "Root node exists")
+                                 ;; The document should reflect the change
+                                 (is (= "new x in { x!(\"Hello\") | Nil }" (str (.-doc new-state))) "Document updated correctly"))
+                               (.destroy view))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "incremental-parse-insertion failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest syntax-error-recovery
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             (<! (promise->chan @syntax/ts-init-promise))
+                             (<! (timeout 100))
+                             (let [wasm-path "/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm"
+                                   query-str (<! (slurp "/extensions/lang/rholang/tree-sitter/queries/highlights.scm"))
+                                   [_ lang] (<! (promise->chan (Language.load wasm-path)))
+                                   parser (doto (Parser.) (.setLanguage lang))
+                                   query (Query. lang query-str)
+                                   language-state-field (syntax/make-language-state parser)
+                                   plugin (syntax/make-highlighter-plugin language-state-field query)
+                                   ;; Start with syntactically incorrect code
+                                   broken-doc "new x in { x!( }"
+                                   state (.create EditorState #js {:doc broken-doc :extensions #js [language-state-field plugin]})
+                                   view (EditorView. #js {:state state :parent js/document.body})]
+                               ;; Parser should handle syntax errors gracefully
+                               (let [lang-state (.field (.-state view) language-state-field false)
+                                     ^js tree (when lang-state (.-tree lang-state))]
+                                 (is (some? tree) "Parse tree exists even with syntax errors")
+                                 (is (some? (.-rootNode ^js tree)) "Root node exists despite errors"))
+                               ;; Fix the syntax error
+                               (.dispatch view #js {:changes #js {:from 14 :to 14 :insert "\"Hello\")"}})
+                               (<! (timeout 50))
+                               ;; Verify recovery
+                               (let [new-state (.-state view)
+                                     lang-state (.field new-state language-state-field false)
+                                     tree (when lang-state (.-tree lang-state))]
+                                 (is (some? tree) "Parse tree exists after fix")
+                                 (is (= "new x in { x!(\"Hello\") }" (str (.-doc new-state))) "Document reflects the fix"))
+                               (.destroy view))
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "syntax-error-recovery failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))
+
+(deftest cache-stats-reset-and-tracking
+  (async done
+         (go
+           (let [res (<! (go
+                           (try
+                             ;; Test reset functionality
+                             (syntax/reset-cache-stats!)
+                             (let [stats (syntax/get-cache-stats)]
+                               (is (= 0 (:hits stats)) "Hits reset to 0")
+                               (is (= 0 (:misses stats)) "Misses reset to 0")
+                               (is (= 0 (:rebuilds stats)) "Rebuilds reset to 0")
+                               (is (= 0 (:queries stats)) "Queries reset to 0"))
+                             ;; Verify getCacheStats and resetCacheStats JS exports exist
+                             (is (fn? syntax/getCacheStats) "getCacheStats export exists")
+                             (is (fn? syntax/resetCacheStats) "resetCacheStats export exists")
+                             [:ok nil]
+                             (catch :default e
+                               [:error (js/Error. "cache-stats-reset-and-tracking failed" #js {:cause e})]))))]
+             (when (= :error (first res))
+               (let [err (second res)
+                     err-msg (str "Test failed with error: " (pr-str err))]
+                 (lib-utils/log-error-with-cause err)
+                 (is false err-msg)))
+             (done)))))

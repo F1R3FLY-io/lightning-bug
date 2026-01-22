@@ -77,16 +77,31 @@
     (when-not (every? string? (keys languages))
       (log/warn "Non-string keys found in languages map:" (keys languages)))
     ;; EXP-008: Removed :debounce-timer - now using lib.debounce coordination
+    ;; EXP-010: Added :lsp-document-opened cache for hot path optimization
     {:mounted? true
      :cursor {:line 1 :column 1}
      :selection nil
      :search-term ""
      :lsp {}
+     :lsp-document-opened {}  ; EXP-010: Cache {uri -> true} for documents opened with LSP
      :languages languages
      :tree-sitter-wasm tree-sitter-wasm
      :extra-extensions extra-extensions
      :lsp-init-timeout-ms lsp-init-timeout-ms
      :default-protocol default-protocol}))
+
+;; =============================================================================
+;; EXP-011: Delta-Based Text Synchronization State
+;; =============================================================================
+
+;; EXP-011 Phase 1: Track pending requestIdleCallback handles to prevent duplicates.
+;; Maps URI -> idle callback handle (number returned by requestIdleCallback).
+(defonce ^:private pending-idle-syncs (atom {}))
+
+;; EXP-011 Phase 2b: Accumulates ContentChangeEvent objects during the debounce window
+;; for efficient incremental sync with LSP servers that support it.
+;; Maps URI -> vector of ContentChangeEvent objects containing :range, :rangeLength, :text.
+(defonce ^:private pending-lsp-changes (atom {}))
 
 ;; =============================================================================
 ;; Event Emission with Debouncing (EXP-008: Consolidated Debouncing)
@@ -161,8 +176,9 @@
 (defn- update-editor-state
   "Updates the internal state-atom with cursor and selection info from CodeMirror state.
   Emits a debounced 'selection-change' event for external listeners.
-  EXP-008: Uses centralized debounce coordination."
-  [^js cm-state state-atom events]
+  EXP-008: Uses centralized debounce coordination.
+  EXP-009: Accepts URI as parameter to avoid redundant queries."
+  [^js cm-state state-atom events uri]
   (let [main-sel (.-main (.-selection cm-state))
         anchor (.-anchor main-sel)
         head (.-head main-sel)
@@ -174,8 +190,7 @@
                     from-pos (offset->pos doc from true)
                     to-pos (offset->pos doc to true)
                     text (.sliceString doc from to)]
-                {:from from-pos :to to-pos :text text}))
-        uri (db/active-uri)]
+                {:from from-pos :to to-pos :text text}))]
     (swap! state-atom assoc :cursor cursor-pos :selection sel)
     ;; EXP-008: Consolidated debounce - selection-change already debounced in emit-event
     ;; No need for double debouncing here
@@ -186,37 +201,122 @@
 (defn- get-extensions
   "Returns the array of CodeMirror extensions, including dynamic syntax compartment,
   static diagnostic compartment. Appends extra-extensions from state.
-  EXP-008: Uses centralized debounce coordination for LSP and search."
-  [state-atom events on-content-change]
+  EXP-008: Uses centralized debounce coordination for LSP and search.
+  EXP-009: Optimizes keystroke hot path with:
+    - Phase 1: Debounced DataScript text sync
+    - Phase 2: LSP-aware lazy text serialization
+    - Phase 3: Cached active URI within handler"
+  [state-atom events on-content-change view-ref]
   (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
-                             (when (or (.-docChanged u) (.-selectionSet u))
-                               (update-editor-state (.-state u) state-atom events))
-                             (let [old-term (:search-term @state-atom "")
-                                   new-term (or (.-search (getSearchQuery (.-state u))) "")]
-                               (when (not= old-term new-term)
-                                 (swap! state-atom assoc :search-term new-term)
-                                 ;; EXP-008: search-term-change is debounced in emit-event
-                                 (emit-event events "search-term-change" {:term new-term
-                                                                          :uri (db/active-uri)})))
-                             (when (.-docChanged u)
-                               (when-let [uri (db/active-uri)]
-                                 (let [new-text (str (.-doc (.-state u)))]
-                                   (log/trace (str "Document changed for uri: " uri ", new length:" (count new-text)))
-                                   (db/update-document-text-by-uri! uri new-text)
-                                   (emit-event events "content-change" {:content new-text :uri uri})
+                             ;; EXP-009 Phase 3: Cache URI once per handler invocation
+                             (let [uri (db/active-uri)]
+                               (when (or (.-docChanged u) (.-selectionSet u))
+                                 ;; EXP-009 Phase 4: Pass cached URI to update-editor-state
+                                 (update-editor-state (.-state u) state-atom events uri))
+                               (let [old-term (:search-term @state-atom "")
+                                     new-term (or (.-search (getSearchQuery (.-state u))) "")]
+                                 (when (not= old-term new-term)
+                                   (swap! state-atom assoc :search-term new-term)
+                                   ;; EXP-008: search-term-change is debounced in emit-event
+                                   ;; EXP-009: Use cached URI
+                                   (emit-event events "search-term-change" {:term new-term
+                                                                            :uri uri})))
+                               (when (and (.-docChanged u) uri)
+                                 ;; EXP-010: Removed lazy text that was still forced on every keystroke
+                                 (let [^js doc (.-doc (.-state u))
+                                       doc-length (.-length doc)
+                                       ;; EXP-010 Phase 3: Use cached LSP status instead of DataScript query
+                                       lsp-connected? (get-in @state-atom [:lsp-document-opened uri] false)
+                                       from-api? (some #(.annotation % external-set-annotation) (.-transactions u))]
+                                   (log/trace (str "Document changed for uri: " uri ", length:" doc-length))
+                                   ;; EXP-011 Phase 2b: Accumulate incremental changes for LSP
+                                   ;; Only accumulate for user edits (not API calls) when LSP is connected
+                                   (when (and lsp-connected? (not from-api?))
+                                     (let [old-doc (.-doc (.-startState u))
+                                           changes (.-changes u)]
+                                       (.iterChanges changes
+                                                     (fn [fromA toA _fromB _toB inserted]
+                                                       (let [start-pos (offset->pos old-doc fromA false)
+                                                             end-pos (offset->pos old-doc toA false)]
+                                                         (swap! pending-lsp-changes update uri (fnil conj [])
+                                                                {:range {:start {:line (:line start-pos)
+                                                                                 :character (:column start-pos)}
+                                                                         :end {:line (:line end-pos)
+                                                                               :character (:column end-pos)}}
+                                                                 :rangeLength (- toA fromA)
+                                                                 :text (str inserted)})))
+                                                     false)))
+                                   ;; EXP-011 Phase 1: Idle-deferred DataScript sync
+                                   ;; CodeMirror is the source of truth during editing.
+                                   ;; DataScript only needs eventual consistency for LSP and persistence.
+                                   ;; Use requestIdleCallback to avoid blocking the main thread with O(n) serialization.
+                                   (debounce/debounced-call
+                                    [:db-text-sync uri]
+                                    (fn []
+                                      (when-let [view (.-current view-ref)]
+                                        (let [sync-fn (fn []
+                                                        ;; Clear the pending handle before executing
+                                                        (swap! pending-idle-syncs dissoc uri)
+                                                        (when (.-current view-ref)
+                                                          (let [current-text (str (.-doc (.-state (.-current view-ref))))]
+                                                            (db/update-document-text-by-uri! uri current-text))))]
+                                          ;; Cancel any pending idle callback for this URI to prevent duplicates
+                                          (when-let [pending-handle (get @pending-idle-syncs uri)]
+                                            (when (exists? js/cancelIdleCallback)
+                                              (js/cancelIdleCallback pending-handle)))
+                                          (if (exists? js/requestIdleCallback)
+                                            ;; Use requestIdleCallback for non-blocking sync
+                                            (let [handle (js/requestIdleCallback
+                                                          (fn [deadline]
+                                                            (when (pos? (.timeRemaining deadline))
+                                                              (sync-fn)))
+                                                          #js {:timeout 500})]  ; Guarantee sync within 500ms
+                                              (swap! pending-idle-syncs assoc uri handle))
+                                            ;; Fallback for unsupported browsers (Safari)
+                                            (js/setTimeout sync-fn 0)))))
+                                    50      ; 50ms debounce
+                                    {:max-wait 200})  ; Force sync within 200ms
+                                   ;; EXP-010: Don't serialize text in hot path - consumers fetch from DataScript
+                                   ;; DataScript is kept in sync via the debounced db-text-sync above
+                                   (emit-event events "content-change"
+                                               {:uri uri :length doc-length})
+                                   ;; EXP-010: Handle on-content-change based on source
+                                   ;; - API calls (external-set-annotation): immediate callback
+                                   ;; - Keystrokes: debounced to avoid O(n) stringify every keystroke
                                    (when on-content-change
-                                     (on-content-change new-text))
-                                   (when (db/document-opened-by-uri? uri)
-                                     (when-not (some #(.annotation % external-set-annotation) (.-transactions u))
-                                       ;; EXP-008: Consolidated LSP debounce with max-wait
+                                     (if from-api?
+                                       ;; Immediate callback for API calls (setText, openDocument)
+                                       (on-content-change (str doc))
+                                       ;; Debounced callback for keystrokes
+                                       (debounce/debounced-call
+                                        [:on-content-change uri]
+                                        (fn []
+                                          (when-let [view (.-current view-ref)]
+                                            (on-content-change (str (.-doc (.-state view))))))
+                                        50
+                                        {:max-wait 200})))
+                                   ;; LSP notification (still debounced separately for server rate limiting)
+                                   (when lsp-connected?
+                                     (when-not from-api?
+                                       ;; EXP-011 Phase 2: Use incremental sync when available
                                        (debounce/debounced-call
                                         :lsp-did-change
                                         (fn []
                                           (let [[uri text lang] (db/active-uri-text-lang)]
                                             (when (and uri text lang)
-                                              (let [version (db/inc-document-version-by-uri! uri)]
-                                                (lsp/notify-did-change lang uri text version state-atom)))))
+                                              (let [version (db/inc-document-version-by-uri! uri)
+                                                    changes (get @pending-lsp-changes uri)
+                                                    incremental? (and (seq changes)
+                                                                      (get-in @state-atom [:lsp lang :incremental-sync?]))]
+                                                (if incremental?
+                                                  (do
+                                                    (lsp/notify-did-change-incremental lang uri changes version state-atom)
+                                                    (swap! pending-lsp-changes dissoc uri))
+                                                  ;; Fallback to full sync - clear any accumulated changes
+                                                  (do
+                                                    (lsp/notify-did-change lang uri text version state-atom)
+                                                    (swap! pending-lsp-changes dissoc uri)))))))
                                         150  ; Reduced from 200ms
                                         {:max-wait 500})))))))))
         default-exts [(lineNumbers)
@@ -262,6 +362,8 @@
                                                                           :version version
                                                                           :text text}}})
                 (db/document-opened-by-uri! uri)
+                ;; EXP-010 Phase 3: Update cache for hot path
+                (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                 (emit-event events "document-open" {:uri uri
                                                     :content text
                                                     :language lang
@@ -292,6 +394,8 @@
                                                                                       :version version
                                                                                       :text text}}})
                             (db/document-opened-by-uri! uri)
+                            ;; EXP-010 Phase 3: Update cache for hot path
+                            (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                             (emit-event events "document-open" {:uri uri
                                                                 :content text
                                                                 :language lang
@@ -319,6 +423,8 @@
                                                                                     :version version
                                                                                     :text text}}})
                           (db/document-opened-by-uri! uri)
+                          ;; EXP-010 Phase 3: Update cache for hot path
+                          (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                           (emit-event events "document-open" {:uri uri
                                                               :content text
                                                               :language lang
@@ -401,11 +507,7 @@
       (if (re-find #"^[a-zA-Z]+:" file-or-uri)
         file-or-uri
         (str (or default-protocol "inmemory://") file-or-uri)))
-    (if-let [active-uri (db/active-uri)]
-      active-uri
-      (throw
-       (js/Error.
-        "Invalid URI or file path: either parameter must be non-empty or a document must be active")))))
+    (db/active-uri)))  ;; Returns nil if no active URI
 
 ;; Inner React functional component, handling CodeMirror integration and state management.
 (let [inner (fn [js-props forwarded-ref]
@@ -597,7 +699,9 @@
                                                    (lsp/notify-did-close lang uri state-atom)
                                                    (emit-event events "lsp-message" {:method "textDocument/didClose"
                                                                                      :lang lang
-                                                                                     :params {:textDocument {:uri uri}}}))
+                                                                                     :params {:textDocument {:uri uri}}})
+                                                   ;; EXP-010 Phase 3: Clear cache on close
+                                                   (swap! state-atom update :lsp-document-opened dissoc uri))
                                                  (db/delete-document-by-id! id)
                                                  (when (db/active-uri? uri)
                                                    (if-let [next-uri (db/first-document-uri)]
@@ -639,7 +743,10 @@
                                                               (emit-event events "lsp-message" {:method "workspace/didRenameFiles"
                                                                                                 :lang old-lang
                                                                                                 :params {:files [{:oldUri old-uri
-                                                                                                                  :newUri new-uri}]}})))
+                                                                                                                  :newUri new-uri}]}}))
+                                                            ;; EXP-010 Phase 3: Update cache for renamed document
+                                                            (swap! state-atom update :lsp-document-opened
+                                                                   (fn [m] (-> m (dissoc old-uri) (assoc new-uri true)))))
                                                           (if lang-changed?
                                                             (db/update-document-uri-language-by-id! id new-uri new-lang)
                                                             (db/update-document-uri-by-id! id new-uri))
@@ -1012,7 +1119,7 @@
                      (log/info "Editor: Initializing EditorView")
                      (try
                        (let [container (.-current container-ref)
-                             exts (get-extensions state-atom events on-content-change)
+                             exts (get-extensions state-atom events on-content-change view-ref)
                              editor-state (EditorState.create #js {:doc ""
                                                                    :extensions exts})
                              editor-view (EditorView. #js {:state editor-state
@@ -1034,7 +1141,7 @@
                             (emit-event events "ready" {})
                             (set-ready true))
                           0)
-                         (update-editor-state editor-state state-atom events)
+                         (update-editor-state editor-state state-atom events (db/active-uri))
                          (fn []
                            (log/info "Editor: Destroying EditorView")
                            (swap! state-atom assoc :mounted? false)

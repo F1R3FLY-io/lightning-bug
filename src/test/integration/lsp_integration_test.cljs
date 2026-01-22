@@ -435,3 +435,248 @@
     (doseq [state cm/STATES]
       (is (contains? cm/TRANSITIONS state)
           (str "TRANSITIONS should contain " state)))))
+
+;; =============================================================================
+;; Complete Flow Integration Tests (Phase 3)
+;; =============================================================================
+
+(deftest lsp-diagnostics-flow-complete
+  (testing "Complete diagnostics flow: notification -> DB -> subscriptions"
+    (let [uri "file:///test/diag-flow.rho"]
+      ;; Step 1: Create document and make it active
+      (h/create-test-document! {:uri uri
+                                :text "new x in { x!( }"
+                                :language "rholang"
+                                :version 1
+                                :opened true})
+      (db/update-active-uri! uri)
+
+      ;; Verify initial state (no diagnostics)
+      (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))))
+
+      ;; Step 2: Simulate LSP publishDiagnostics notification
+      (let [lsp-notification {:jsonrpc "2.0"
+                              :method "textDocument/publishDiagnostics"
+                              :params {:uri uri
+                                       :diagnostics [{:range {:start {:line 0 :character 13}
+                                                              :end {:line 0 :character 14}}
+                                                      :severity 1
+                                                      :message "Unexpected end of input"}
+                                                     {:range {:start {:line 0 :character 15}
+                                                              :end {:line 0 :character 16}}
+                                                      :severity 2
+                                                      :message "Missing closing parenthesis"}]}}]
+        ;; Process diagnostics as the LSP client would
+        (db/replace-diagnostics-by-uri!
+         uri
+         nil
+         (map (fn [d]
+                {:message (:message d)
+                 :severity (:severity d)
+                 :startLine (get-in d [:range :start :line])
+                 :startChar (get-in d [:range :start :character])
+                 :endLine (get-in d [:range :end :line])
+                 :endChar (get-in d [:range :end :character])})
+              (get-in lsp-notification [:params :diagnostics]))))
+
+      ;; Step 3: Verify subscription reflects the update
+      (let [diags @(rf/subscribe [:lsp/diagnostics])]
+        (is (= 2 (count diags)) "Two diagnostics received")
+        (is (some #(= 1 (:severity %)) diags) "Contains error")
+        (is (some #(= 2 (:severity %)) diags) "Contains warning")
+        (is (some #(= "Unexpected end of input" (:message %)) diags)))
+
+      ;; Step 4: Fix the code and receive empty diagnostics
+      (db/update-document-text-by-uri! uri "new x in { x!(\"Hello\") }")
+      (db/replace-diagnostics-by-uri! uri nil [])
+
+      ;; Step 5: Verify diagnostics cleared
+      (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))) "Diagnostics cleared after fix"))))
+
+(deftest lsp-symbol-update-flow
+  (testing "Complete symbol flow: request -> response -> flatten -> DB"
+    (let [uri "file:///test/symbol-flow.rho"]
+      ;; Step 1: Create document
+      (h/create-test-document! {:uri uri
+                                :text "contract Outer { contract Inner { def method() } }"
+                                :language "rholang"
+                                :version 1
+                                :opened true})
+      (db/update-active-uri! uri)
+
+      ;; Step 2: Simulate LSP documentSymbol response (nested structure)
+      (let [lsp-response {:jsonrpc "2.0"
+                          :id 1
+                          :result [{:name "Outer"
+                                    :kind 5  ; Class
+                                    :range {:start {:line 0 :character 0}
+                                            :end {:line 0 :character 50}}
+                                    :selectionRange {:start {:line 0 :character 9}
+                                                     :end {:line 0 :character 14}}
+                                    :children [{:name "Inner"
+                                                :kind 5  ; Class
+                                                :range {:start {:line 0 :character 17}
+                                                        :end {:line 0 :character 49}}
+                                                :selectionRange {:start {:line 0 :character 26}
+                                                                 :end {:line 0 :character 31}}
+                                                :children [{:name "method"
+                                                            :kind 6  ; Method
+                                                            :range {:start {:line 0 :character 34}
+                                                                    :end {:line 0 :character 47}}
+                                                            :selectionRange {:start {:line 0 :character 38}
+                                                                             :end {:line 0 :character 44}}}]}]}]}
+            ;; Step 3: Flatten symbols
+            flattened (db/flatten-symbols (:result lsp-response) nil uri)]
+
+        ;; Step 4: Store in DB
+        (db/replace-symbols! uri flattened)
+
+        ;; Step 5: Verify via subscription
+        (let [syms @(rf/subscribe [:lsp/symbols])]
+          (is (= 3 (count syms)) "Three symbols (Outer, Inner, method)")
+          (is (some #(= "Outer" (:name %)) syms))
+          (is (some #(= "Inner" (:name %)) syms))
+          (is (some #(= "method" (:name %)) syms))
+
+          ;; Verify parent-child relationships are tracked via :parent entity ID
+          ;; The :parent field stores the DB entity ID of the parent symbol
+          (let [outer-sym (first (filter #(= "Outer" (:name %)) syms))
+                inner-sym (first (filter #(= "Inner" (:name %)) syms))
+                method-sym (first (filter #(= "method" (:name %)) syms))]
+            ;; Outer has no parent (root level)
+            (is (= 0 (:parent outer-sym)) "Outer has no parent (root)")
+            ;; Inner and method should have non-zero parent references
+            (is (not= 0 (:parent inner-sym)) "Inner has a parent")
+            (is (not= 0 (:parent method-sym)) "method has a parent")))))))
+
+(deftest lsp-document-sync-flow
+  (async done
+         (go
+           (let [uri "file:///test/sync-flow.rho"]
+             ;; Step 1: Create and open document
+             (h/create-test-document! {:uri uri
+                                       :text "initial content"
+                                       :language "rholang"
+                                       :version 1
+                                       :dirty false
+                                       :opened true})
+             (db/update-active-uri! uri)
+
+             ;; Verify initial state
+             (is (= 1 (db/document-version-by-uri uri)))
+             (is (false? (db/document-dirty-by-uri uri)))
+
+             ;; Step 2: Simulate user edit
+             (db/update-document-text-by-uri! uri "modified content")
+
+             ;; Step 3: Verify state after edit
+             (is (= "modified content" (db/document-text-by-uri uri)))
+             (is (true? (db/document-dirty-by-uri uri)) "Document marked dirty after edit")
+
+             ;; Step 4: Simulate version increment (as LSP didChange would do)
+             (db/increment-document-version-by-uri! uri)
+             (is (= 2 (db/document-version-by-uri uri)) "Version incremented for LSP")
+
+             ;; Step 5: Simulate another edit
+             (db/update-document-text-by-uri! uri "final content")
+             (db/increment-document-version-by-uri! uri)
+
+             ;; Step 6: Verify final state
+             (is (= 3 (db/document-version-by-uri uri)) "Version 3 after two edits")
+             (is (= "final content" (db/document-text-by-uri uri)))
+             (is (true? (db/document-dirty-by-uri uri)))
+
+             ;; Step 7: Simulate save
+             (db/document-saved-by-uri! uri)
+             (is (false? (db/document-dirty-by-uri uri)) "Dirty cleared after save"))
+           (done))))
+
+(deftest concurrent-diagnostics-across-documents
+  (testing "Diagnostics for multiple documents don't interfere"
+    (let [uri1 "file:///test/concurrent1.rho"
+          uri2 "file:///test/concurrent2.rho"
+          uri3 "file:///test/concurrent3.rho"]
+      ;; Create multiple documents
+      (doseq [[uri text] [[uri1 "code1"] [uri2 "code2"] [uri3 "code3"]]]
+        (h/create-test-document! {:uri uri :text text :language "rholang" :opened true}))
+
+      ;; Add diagnostics to each document
+      (db/replace-diagnostics-by-uri! uri1 nil
+                                       [{:message "Error in doc1"
+                                         :severity 1
+                                         :startLine 0 :startChar 0
+                                         :endLine 0 :endChar 5}])
+      (db/replace-diagnostics-by-uri! uri2 nil
+                                       [{:message "Warning in doc2"
+                                         :severity 2
+                                         :startLine 0 :startChar 0
+                                         :endLine 0 :endChar 5}
+                                        {:message "Info in doc2"
+                                         :severity 3
+                                         :startLine 0 :startChar 0
+                                         :endLine 0 :endChar 5}])
+      (db/replace-diagnostics-by-uri! uri3 nil [])  ; No diagnostics
+
+      ;; Verify each document has correct diagnostics using db functions
+      (let [diags1 (db/diagnostics-by-uri uri1)]
+        (is (= 1 (count diags1)) "Doc1 has 1 diagnostic")
+        (is (= "Error in doc1" (:message (first diags1)))))
+
+      (let [diags2 (db/diagnostics-by-uri uri2)]
+        (is (= 2 (count diags2)) "Doc2 has 2 diagnostics"))
+
+      (let [diags3 (db/diagnostics-by-uri uri3)]
+        (is (= 0 (count diags3)) "Doc3 has 0 diagnostics")))))
+
+(deftest symbol-update-replaces-previous
+  (testing "Symbol updates replace previous symbols for a document"
+    (let [uri "file:///test/symbol-replace.rho"]
+      (h/create-test-document! {:uri uri :text "code" :language "rholang" :opened true})
+      (db/update-active-uri! uri)
+
+      ;; First symbol set
+      (let [symbols1 (db/flatten-symbols
+                      [{:name "OldSymbol"
+                        :kind 5
+                        :range {:start {:line 0 :character 0}
+                                :end {:line 0 :character 10}}
+                        :selectionRange {:start {:line 0 :character 0}
+                                         :end {:line 0 :character 10}}}]
+                      nil uri)]
+        (db/replace-symbols! uri symbols1))
+      (is (= 1 (count @(rf/subscribe [:lsp/symbols]))))
+      (is (= "OldSymbol" (:name (first @(rf/subscribe [:lsp/symbols])))))
+
+      ;; Second symbol set replaces first
+      (let [symbols2 (db/flatten-symbols
+                      [{:name "NewSymbol1"
+                        :kind 6
+                        :range {:start {:line 0 :character 0}
+                                :end {:line 0 :character 10}}
+                        :selectionRange {:start {:line 0 :character 0}
+                                         :end {:line 0 :character 10}}}
+                       {:name "NewSymbol2"
+                        :kind 6
+                        :range {:start {:line 1 :character 0}
+                                :end {:line 1 :character 10}}
+                        :selectionRange {:start {:line 1 :character 0}
+                                         :end {:line 1 :character 10}}}]
+                      nil uri)]
+        (db/replace-symbols! uri symbols2))
+      (is (= 2 (count @(rf/subscribe [:lsp/symbols]))))
+      (is (not (some #(= "OldSymbol" (:name %)) @(rf/subscribe [:lsp/symbols])))))))
+
+(deftest lsp-state-affects-feature-availability
+  (testing "LSP state affects whether features are available"
+    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})]
+      (let [manager (cm/make-connection-manager state-atom nil)]
+        ;; Disconnected: features not available
+        (is (false? (cm/initialized? manager "rholang")))
+
+        ;; Transition to initialized
+        (swap! state-atom assoc-in [:lsp "rholang" :state] :initialized)
+        (is (true? (cm/initialized? manager "rholang")))
+
+        ;; Transition to error
+        (swap! state-atom assoc-in [:lsp "rholang" :state] :error)
+        (is (false? (cm/initialized? manager "rholang")))))))

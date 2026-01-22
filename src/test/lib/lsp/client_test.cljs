@@ -446,3 +446,174 @@
                  (lib-utils/log-error-with-cause err)
                  (is false err-msg)))
              (done)))))
+
+;; =============================================================================
+;; Edge Case Tests - Phase 2
+;; =============================================================================
+
+(deftest message-serialization-unicode-preserved
+  (testing "Unicode characters in messages are preserved through serialization"
+    (let [ws-mock (js/Object.)
+          state (r/atom {:lsp {"test" {:ws ws-mock
+                                       :pending {}
+                                       :connected? true
+                                       :reachable? true
+                                       :warned-unreachable? false}}})
+          unicode-text "// 你好世界 🌍 λx.x Привет"
+          msg {:method "textDocument/didChange"
+               :params {:textDocument {:uri "file:///test.rho"}
+                        :contentChanges [{:text unicode-text}]}}
+          sent (atom nil)]
+      (set! (.-send ws-mock) (fn [data] (reset! sent data)))
+      (set-resource! :lsp "test" ws-mock)
+      (lsp/send "test" msg state)
+      (is (some? @sent) "Message sent")
+      ;; Parse and verify unicode is preserved
+      (is (str/includes? @sent "你好世界") "Chinese characters preserved")
+      (is (str/includes? @sent "🌍") "Emoji preserved")
+      (is (str/includes? @sent "λx.x") "Lambda preserved")
+      (is (str/includes? @sent "Привет") "Cyrillic preserved"))))
+
+(deftest content-length-header-byte-vs-char-length
+  (testing "Content-Length header value reflects implementation behavior"
+    ;; Note: Per LSP spec, Content-Length SHOULD be byte count, but the current
+    ;; implementation uses JavaScript string .length (character count in UTF-16).
+    ;; This test documents actual behavior, not ideal behavior.
+    (let [ws-mock (js/Object.)
+          state (r/atom {:lsp {"test" {:ws ws-mock
+                                       :pending {}
+                                       :connected? true
+                                       :reachable? true
+                                       :warned-unreachable? false}}})
+          ;; This string has multi-byte unicode characters
+          ;; "你好" = 6 bytes in UTF-8 (3 bytes each), but 2 chars in JS
+          msg {:method "test" :params {:text "你好"}}
+          sent (atom nil)]
+      (set! (.-send ws-mock) (fn [data] (reset! sent data)))
+      (set-resource! :lsp "test" ws-mock)
+      (lsp/send "test" msg state)
+      ;; Extract Content-Length from sent message
+      (let [header-match (re-find #"Content-Length: (\d+)" @sent)
+            declared-length (when header-match (js/parseInt (second header-match) 10))
+            ;; Find the actual body after \r\n\r\n
+            body-start (+ 4 (str/index-of @sent "\r\n\r\n"))
+            body (subs @sent body-start)
+            ;; Implementation uses JS string length (character count), not byte count
+            char-count (.-length body)]
+        (is (= declared-length char-count)
+            "Content-Length matches JS string length (characters, not bytes)")))))
+
+(deftest request-response-matching-out-of-order
+  (testing "Responses are matched to requests by ID regardless of order"
+    (let [state (r/atom {:lsp {"test-lang" {:pending {1 :initialize
+                                                       2 :shutdown
+                                                       3 {:type :document-symbol :uri "test-uri"}}}}})
+          events (rxjs/Subject.)
+          ;; Respond to request 3 first (out of order)
+          response3-js #js {:jsonrpc "2.0"
+                            :id 3
+                            :result #js []}
+          response3 (js/JSON.stringify response3-js)
+          full3 (str "Content-Length: " (.-length response3) "\r\n\r\n" response3)]
+      ;; Create document for symbol response
+      (db/create-documents! [{:uri "test-uri"
+                              :text ""
+                              :language "test-lang"
+                              :version 1
+                              :dirty false
+                              :opened true}])
+      ;; Handle response 3 first
+      (lsp/handle-message "test-lang" full3 state events)
+      ;; Request 3 should be removed, but 1 and 2 should remain
+      (is (not (contains? (get-in @state [:lsp "test-lang" :pending]) 3))
+          "Request 3 should be cleared")
+      (is (contains? (get-in @state [:lsp "test-lang" :pending]) 1)
+          "Request 1 should still be pending")
+      (is (contains? (get-in @state [:lsp "test-lang" :pending]) 2)
+          "Request 2 should still be pending"))))
+
+(deftest handle-message-ignores-unknown-notifications
+  (testing "Unknown notifications are handled gracefully"
+    (let [state (r/atom {:lsp {"test-lang" {:pending {}}}})
+          events (rxjs/Subject.)
+          unknown-js #js {:jsonrpc "2.0"
+                          :method "someUnknown/notification"
+                          :params #js {:foo "bar"}}
+          unknown-msg (js/JSON.stringify unknown-js)
+          full (str "Content-Length: " (.-length unknown-msg) "\r\n\r\n" unknown-msg)]
+      ;; Should not throw
+      (lsp/handle-message "test-lang" full state events)
+      ;; State should be unchanged
+      (is (empty? (get-in @state [:lsp "test-lang" :pending]))
+          "Pending should remain empty"))))
+
+(deftest handle-error-response
+  (testing "Error responses are handled correctly"
+    (let [state (r/atom {:lsp {"test-lang" {:pending {1 {:type :document-symbol :uri "test-uri"}}}}})
+          events (rxjs/Subject.)
+          error-js #js {:jsonrpc "2.0"
+                        :id 1
+                        :error #js {:code -32600
+                                    :message "Invalid request"}}
+          error-msg (js/JSON.stringify error-js)
+          full (str "Content-Length: " (.-length error-msg) "\r\n\r\n" error-msg)]
+      ;; Should not throw
+      (lsp/handle-message "test-lang" full state events)
+      ;; Pending should be cleared even for error
+      (is (empty? (get-in @state [:lsp "test-lang" :pending]))
+          "Pending should be cleared on error response"))))
+
+(deftest handle-null-result-response
+  (testing "Response with null result is handled"
+    (let [state (r/atom {:lsp {"test-lang" {:pending {1 {:type :document-symbol :uri "test-uri"}}}}})
+          events (rxjs/Subject.)
+          null-result-js #js {:jsonrpc "2.0"
+                              :id 1
+                              :result nil}
+          null-result-msg (js/JSON.stringify null-result-js)
+          full (str "Content-Length: " (.-length null-result-msg) "\r\n\r\n" null-result-msg)]
+      (db/create-documents! [{:uri "test-uri"
+                              :text ""
+                              :language "test-lang"
+                              :version 1
+                              :dirty false
+                              :opened true}])
+      ;; Should not throw
+      (lsp/handle-message "test-lang" full state events)
+      ;; Pending should be cleared
+      (is (empty? (get-in @state [:lsp "test-lang" :pending]))
+          "Pending should be cleared on null result"))))
+
+(deftest handle-multiple-diagnostics-for-same-uri
+  (testing "Multiple diagnostics for same URI are all stored"
+    (let [state (r/atom {:lsp {"test-lang" {:pending {}}}})
+          events (rxjs/Subject.)
+          diag-params-js #js {:uri "test-uri"
+                              :diagnostics #js [#js {:range #js {:start #js {:line 0 :character 0}
+                                                                  :end #js {:line 0 :character 5}}
+                                                     :severity 1
+                                                     :message "Error 1"}
+                                                #js {:range #js {:start #js {:line 1 :character 0}
+                                                                  :end #js {:line 1 :character 5}}
+                                                     :severity 2
+                                                     :message "Warning 2"}
+                                                #js {:range #js {:start #js {:line 2 :character 0}
+                                                                  :end #js {:line 2 :character 5}}
+                                                     :severity 3
+                                                     :message "Info 3"}]}
+          diag-js #js {:jsonrpc "2.0"
+                       :method "textDocument/publishDiagnostics"
+                       :params diag-params-js}
+          diag-msg (js/JSON.stringify diag-js)
+          full (str "Content-Length: " (.-length diag-msg) "\r\n\r\n" diag-msg)]
+      (db/create-documents! [{:uri "test-uri"
+                              :text ""
+                              :language "test-lang"
+                              :version 1
+                              :dirty false
+                              :opened true}])
+      (db/update-active-uri! "test-uri")
+      (lsp/handle-message "test-lang" full state events)
+      (let [diags (db/diagnostics-by-uri "test-uri")]
+        (is (= 3 (count diags)) "All three diagnostics stored")
+        (is (= #{1 2 3} (set (map :severity diags))) "All severities present")))))

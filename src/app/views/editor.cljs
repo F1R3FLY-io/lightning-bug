@@ -33,8 +33,7 @@
                                               (rf/dispatch [::e/update-selection selection]))
 
                                             "content-change"
-                                            (let [{:keys [content uri]} (:data evt)]
-                                              (rf/dispatch [::e/editor-update-content content uri]))
+                                            nil  ; Content updates handled by DataScript in lib.core (EXP-009)
 
                                             "highlight-change"
                                             (rf/dispatch [::e/update-highlights (:data evt)])

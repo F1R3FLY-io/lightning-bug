@@ -330,3 +330,225 @@
                       (+ acc 1 (total-count (:children s []))))
                     0 syms))]
     (= (total-count symbols) (count flattened))))
+
+;; =============================================================================
+;; Timing Helpers (Phase 4 additions)
+;; =============================================================================
+
+(defn assert-timing-within
+  "Asserts that actual timing is within tolerance of expected.
+   All values in milliseconds."
+  [expected-ms tolerance-ms actual-ms]
+  (let [diff (js/Math.abs (- actual-ms expected-ms))]
+    (is (<= diff tolerance-ms)
+        (str "Expected ~" expected-ms "ms (±" tolerance-ms "ms), got " actual-ms "ms"))))
+
+(defn measure-time
+  "Measures execution time of a function in milliseconds.
+   Returns [result time-ms]."
+  [f]
+  (let [start (js/performance.now)
+        result (f)
+        end (js/performance.now)]
+    [result (- end start)]))
+
+(defn with-timing
+  "Wraps a test function to measure and return its execution time.
+   Returns a channel with [result time-ms]."
+  [f]
+  (let [result-ch (promise-chan)]
+    (go
+      (let [start (js/performance.now)
+            result (<! (f))
+            end (js/performance.now)]
+        (put! result-ch [result (- end start)])))
+    result-ch))
+
+;; =============================================================================
+;; DB State Snapshot Helpers
+;; =============================================================================
+
+(defn- get-all-document-uris
+  "Returns a set of all document URIs in the database."
+  []
+  (set (map :uri (db/documents))))
+
+(defn snapshot-db-state
+  "Captures current database state for later comparison.
+   Returns a map with document count, diagnostics count, symbols count,
+   active URI, and sample data checksums."
+  []
+  (let [all-uris (get-all-document-uris)]
+    {:documents all-uris
+     :document-count (count all-uris)
+     :active-uri (db/active-uri)
+     :timestamp (js/Date.now)
+     :dirty-uris (set (filter db/document-dirty-by-uri all-uris))}))
+
+(defn assert-db-unchanged
+  "Asserts that database state matches a previous snapshot.
+   Use for verifying operations don't have unintended side effects."
+  [snapshot]
+  (let [current (snapshot-db-state)]
+    (is (= (:documents snapshot) (:documents current))
+        "Document set should be unchanged")
+    (is (= (:document-count snapshot) (:document-count current))
+        "Document count should be unchanged")
+    (is (= (:active-uri snapshot) (:active-uri current))
+        "Active URI should be unchanged")
+    (is (= (:dirty-uris snapshot) (:dirty-uris current))
+        "Dirty URIs should be unchanged")))
+
+(defn assert-db-documents-added
+  "Asserts that only the specified URIs were added to the database."
+  [snapshot added-uris]
+  (let [current-docs (get-all-document-uris)
+        expected-docs (clojure.set/union (:documents snapshot) (set added-uris))]
+    (is (= expected-docs current-docs)
+        (str "Expected documents " expected-docs " but got " current-docs))))
+
+(defn assert-db-documents-removed
+  "Asserts that only the specified URIs were removed from the database."
+  [snapshot removed-uris]
+  (let [current-docs (get-all-document-uris)
+        expected-docs (clojure.set/difference (:documents snapshot) (set removed-uris))]
+    (is (= expected-docs current-docs)
+        (str "Expected documents " expected-docs " but got " current-docs))))
+
+;; =============================================================================
+;; Enhanced Async Helpers
+;; =============================================================================
+
+(defn wait-for-condition
+  "Waits for a condition to become true within timeout.
+
+   Parameters:
+   - pred: Predicate function to check (returns truthy when condition met)
+   - timeout-ms: Maximum time to wait (default 5000ms)
+   - poll-ms: Time between checks (default 50ms)
+
+   Returns channel with:
+   - [:ok value] when predicate returns truthy (value is predicate result)
+   - [:error :timeout] when timeout exceeded"
+  ([pred]
+   (wait-for-condition pred 5000 50))
+  ([pred timeout-ms]
+   (wait-for-condition pred timeout-ms 50))
+  ([pred timeout-ms poll-ms]
+   (let [result-ch (promise-chan)]
+     (go
+       (let [start (js/Date.now)]
+         (loop []
+           (let [value (try (pred) (catch :default _ nil))]
+             (cond
+               value
+               (put! result-ch [:ok value])
+
+               (> (- (js/Date.now) start) timeout-ms)
+               (put! result-ch [:error :timeout])
+
+               :else
+               (do
+                 (<! (timeout poll-ms))
+                 (recur)))))))
+     result-ch)))
+
+(defn wait-for-value
+  "Waits for a function to return a specific value.
+
+   Returns channel with:
+   - [:ok] when value matches
+   - [:error :timeout] when timeout exceeded"
+  ([f expected]
+   (wait-for-value f expected 5000 50))
+  ([f expected timeout-ms]
+   (wait-for-value f expected timeout-ms 50))
+  ([f expected timeout-ms poll-ms]
+   (wait-for-condition #(= expected (f)) timeout-ms poll-ms)))
+
+(defn wait-for-count
+  "Waits for a collection-producing function to reach expected count.
+
+   Returns channel with:
+   - [:ok collection] when count matches
+   - [:error :timeout] when timeout exceeded"
+  ([f expected-count]
+   (wait-for-count f expected-count 5000 50))
+  ([f expected-count timeout-ms]
+   (wait-for-count f expected-count timeout-ms 50))
+  ([f expected-count timeout-ms poll-ms]
+   (wait-for-condition
+    (fn []
+      (let [coll (f)]
+        (when (= expected-count (count coll))
+          coll)))
+    timeout-ms
+    poll-ms)))
+
+(defn wait-for-document-dirty
+  "Waits for a document to become dirty or clean."
+  ([uri expected-dirty?]
+   (wait-for-document-dirty uri expected-dirty? 1000))
+  ([uri expected-dirty? timeout-ms]
+   (wait-for-condition
+    #(= expected-dirty? (db/document-dirty-by-uri uri))
+    timeout-ms)))
+
+(defn wait-for-version
+  "Waits for a document to reach a specific version."
+  ([uri expected-version]
+   (wait-for-version uri expected-version 1000))
+  ([uri expected-version timeout-ms]
+   (wait-for-condition
+    #(= expected-version (db/document-version-by-uri uri))
+    timeout-ms)))
+
+;; =============================================================================
+;; Batch Testing Helpers
+;; =============================================================================
+
+(defn create-test-documents!
+  "Creates multiple test documents at once.
+   Takes a collection of document specs."
+  [doc-specs]
+  (doseq [spec doc-specs]
+    (create-test-document! spec)))
+
+(defn create-documents-with-diagnostics!
+  "Creates documents with associated diagnostics."
+  [docs-with-diags]
+  (doseq [{:keys [doc diagnostics]} docs-with-diags]
+    (create-test-document! doc)
+    (when (seq diagnostics)
+      (db/replace-diagnostics-by-uri! (:uri doc) nil diagnostics))))
+
+(defn create-documents-with-symbols!
+  "Creates documents with associated symbols."
+  [docs-with-symbols]
+  (doseq [{:keys [doc symbols]} docs-with-symbols]
+    (create-test-document! doc)
+    (when (seq symbols)
+      (let [flattened (db/flatten-symbols symbols nil (:uri doc))]
+        (db/replace-symbols! (:uri doc) flattened)))))
+
+;; =============================================================================
+;; Test Isolation Helpers
+;; =============================================================================
+
+(defn with-isolated-db
+  "Runs test function with isolated database state.
+   Restores previous state after test completes."
+  [f]
+  (let [saved-db @db/conn]
+    (try
+      (reset-db!)
+      (f)
+      (finally
+        (d/reset-conn! db/conn saved-db)))))
+
+(defn with-test-documents
+  "Higher-order fixture that creates documents, runs test, then cleans up."
+  [doc-specs f]
+  (reset-db!)
+  (create-test-documents! doc-specs)
+  (f))

@@ -90,11 +90,19 @@
                                       :text text}}} state-atom))
 
 (defn notify-did-change
-  "Notifies the LSP server of document changes."
+  "Notifies the LSP server of document changes (full text sync)."
   [lang uri text version state-atom]
   (send lang {:method "textDocument/didChange"
               :params {:textDocument {:uri uri :version version}
                        :contentChanges [{:text text}]}} state-atom))
+
+(defn notify-did-change-incremental
+  "Notifies the LSP server with incremental content changes (EXP-011 Phase 2c).
+   Each change contains :range, :rangeLength, and :text for efficient delta sync."
+  [lang uri changes version state-atom]
+  (send lang {:method "textDocument/didChange"
+              :params {:textDocument {:uri uri :version version}
+                       :contentChanges changes}} state-atom))
 
 (defn notify-did-close
   "Notifies the LSP server that a document has been closed."
@@ -144,9 +152,18 @@
 ;; Response handlers (server -> client responses)
 
 (defn handle-initialize-response
-  "Handles the LSP initialize response, marking the connection as initialized and resolving the promise."
-  [lang _result state-atom events]
+  "Handles the LSP initialize response, marking the connection as initialized and resolving the promise.
+   EXP-011: Also detects TextDocumentSyncKind for incremental sync support."
+  [lang result state-atom events]
   (log/info "LSP initialized for lang" lang)
+  ;; EXP-011 Phase 2a: Detect incremental sync capability
+  ;; TextDocumentSyncKind: 0=None, 1=Full, 2=Incremental
+  (let [sync-kind (or (get-in result [:capabilities :textDocumentSync :change])
+                      (get-in result [:capabilities :textDocumentSync])
+                      1)  ; Default to full sync
+        incremental? (= sync-kind 2)]
+    (log/debug "LSP textDocumentSync kind for lang" lang ":" sync-kind "(incremental:" incremental? ")")
+    (swap! state-atom assoc-in [:lsp lang :incremental-sync?] incremental?))
   (notify-initialized lang state-atom)
   (swap! state-atom assoc-in [:lsp lang :initialized?] true)
   (when-let [res-fn (get-in @state-atom [:lsp lang :promise-res-fn])]

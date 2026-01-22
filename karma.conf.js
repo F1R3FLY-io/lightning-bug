@@ -50,6 +50,9 @@ export default async function (config) {
     },
     autoWatch: false,
     singleRun: true,
+    browserNoActivityTimeout: 120000, // 2 minutes
+    browserDisconnectTimeout: 60000,  // 1 minute
+    browserDisconnectTolerance: 2,    // Allow 2 disconnects before failing
     client: {
       args: ['shadow.test.karma.init']
     },

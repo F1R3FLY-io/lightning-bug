@@ -181,7 +181,7 @@
               (let [res (<! p)]
                 (put! ch res)))
             ch)
-          (let [p (chan)]
+          (let [p (promise-chan)]
             (set-resource-promise! type lang p)
             (go
               (try
