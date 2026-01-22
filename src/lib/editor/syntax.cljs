@@ -178,37 +178,88 @@
                                              (let [new-tree (.parse (.-parser ^js value) (str new-doc) edited-tree)]
                                                #js {:tree new-tree :parser (.-parser ^js value)}))))))}))
 
+;; Viewport margin for pre-fetching decorations beyond visible area (EXP-005)
+;; This reduces decoration rebuilds when scrolling within the cached range.
+(def ^:const viewport-margin 2000)
+
 (defn make-highlighter-plugin
-  "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries."
+  "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries.
+
+   Optimization (EXP-005): Uses viewport-aware caching to reduce decoration rebuilds.
+   - Extends query range beyond viewport by `viewport-margin` characters
+   - Caches decorations with their covered range
+   - Only rebuilds when viewport exceeds cached range or document changes"
   [language-state-field highlights-query]
   (let [style-js (clj->js style-map)
-        build-decorations (fn [view-or-update]
-                            (let [view (or (.-view view-or-update) view-or-update)
-                                  ^js state (.-state view)
-                                  ^js lang-state (.field state language-state-field false)
-                                  tree (when lang-state (.-tree lang-state))
-                                  doc (.-doc state)
-                                  builder (RangeSetBuilder.)]
-                              (if (nil? tree)
-                                (.finish builder)
-                                (let [start-point (index->point doc (.-from (.-viewport view)))
-                                      end-point (index->point doc (.-to (.-viewport view)))
-                                      captures (.captures ^js highlights-query (.-rootNode ^js tree) start-point end-point)]
-                                  (doseq [capture captures]
-                                    (let [cls (aget style-js (.-name capture))
-                                          node ^js (.-node capture)]
-                                      (when cls
-                                        (.add builder (.-startIndex node) (.-endIndex node) (.mark Decoration #js {:class cls})))))
-                                  (.finish builder)))))]
+        ;; Build decorations for a given range, with optional margin extension
+        build-decorations-for-range (fn [^js state ^js tree doc from to]
+                                      (let [builder (RangeSetBuilder.)
+                                            start-point (index->point doc from)
+                                            end-point (index->point doc to)
+                                            captures (.captures ^js highlights-query (.-rootNode ^js tree) start-point end-point)]
+                                        (doseq [capture captures]
+                                          (let [cls (aget style-js (.-name capture))
+                                                node ^js (.-node capture)]
+                                            (when cls
+                                              (.add builder (.-startIndex node) (.-endIndex node) (.mark Decoration #js {:class cls})))))
+                                        (.finish builder)))
+        ;; Build decorations with margin extension for caching
+        build-decorations-with-cache (fn [view-or-update cache-atom]
+                                       (let [view (or (.-view view-or-update) view-or-update)
+                                             ^js state (.-state view)
+                                             ^js lang-state (.field state language-state-field false)
+                                             tree (when lang-state (.-tree lang-state))
+                                             doc (.-doc state)
+                                             doc-length (.-length doc)
+                                             viewport-from (.-from (.-viewport view))
+                                             viewport-to (.-to (.-viewport view))]
+                                         (if (nil? tree)
+                                           (do
+                                             (reset! cache-atom nil)
+                                             (.finish (RangeSetBuilder.)))
+                                           ;; Check if current viewport is within cached range
+                                           (let [cached @cache-atom
+                                                 cached-from (when cached (:from cached))
+                                                 cached-to (when cached (:to cached))
+                                                 cached-decos (when cached (:decorations cached))
+                                                 within-cache? (and cached-from cached-to
+                                                                    (<= cached-from viewport-from)
+                                                                    (>= cached-to viewport-to))]
+                                             (if within-cache?
+                                               ;; Viewport is within cached range, reuse decorations
+                                               (do
+                                                 (log/trace "Reusing cached decorations for viewport" viewport-from "-" viewport-to
+                                                            "(cached:" cached-from "-" cached-to ")")
+                                                 cached-decos)
+                                               ;; Need to rebuild with extended margin
+                                               (let [extended-from (max 0 (- viewport-from viewport-margin))
+                                                     extended-to (min doc-length (+ viewport-to viewport-margin))
+                                                     decos (build-decorations-for-range state tree doc extended-from extended-to)]
+                                                 (log/trace "Building decorations for extended range" extended-from "-" extended-to
+                                                            "(viewport:" viewport-from "-" viewport-to ")")
+                                                 (reset! cache-atom {:from extended-from
+                                                                     :to extended-to
+                                                                     :decorations decos})
+                                                 decos))))))]
     (.define ViewPlugin
              (fn [^js view]
-               #js {:decorations (build-decorations view)
-                    :update (fn [^js update]
-                              (when (or (.-docChanged update) (.-viewportChanged update)
-                                        (not= (.field (.-startState update) language-state-field)
-                                              (.field (.-state update) language-state-field)))
+               ;; Each plugin instance has its own cache atom
+               (let [cache (atom nil)
+                     initial-decos (build-decorations-with-cache view cache)]
+                 #js {:decorations initial-decos
+                      :cache cache
+                      :update (fn [^js update]
                                 (this-as ^js self
-                                         (set! (.-decorations self) (build-decorations update)))))})
+                                  (let [doc-changed? (.-docChanged update)
+                                        viewport-changed? (.-viewportChanged update)
+                                        lang-state-changed? (not= (.field (.-startState update) language-state-field)
+                                                                  (.field (.-state update) language-state-field))]
+                                    ;; Invalidate cache on document or language state change
+                                    (when (or doc-changed? lang-state-changed?)
+                                      (reset! (.-cache self) nil))
+                                    ;; Rebuild decorations if needed
+                                    (when (or doc-changed? viewport-changed? lang-state-changed?)
+                                      (set! (.-decorations self) (build-decorations-with-cache update (.-cache self)))))))}))
              #js {:decorations (fn [^js value] (.-decorations value))})))
 
 (defn- make-indent-ext
