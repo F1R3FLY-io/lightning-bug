@@ -350,6 +350,10 @@ export interface EditorRef {
   /**
    * Queries the internal DataScript database with the given query and optional params.
    * Returns the result as JS array.
+   *
+   * NOTE: `query`, `params`, and the result are intentionally typed `any`: DataScript
+   * Datalog queries and their result shapes are dynamic (they depend on the `:find`
+   * clause), so no single static type applies. Narrow the result at the call site.
    * @example editorRef.current.query([:find ?uri :where [?e :document/uri ?uri]])
    * @param {any} query The DataScript query.
    * @param {any[]} [params] Optional parameters.

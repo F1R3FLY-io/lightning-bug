@@ -3,6 +3,7 @@
    ["react-dom/client" :as rd]
    [lib.db :as lib-db :refer [conn]]
    [app.events :as e]
+   [app.system :as sys]
    [app.subs] ;; Registers subscriptions on load.
    [app.views.main :refer [root-component]]
    [day8.re-frame-10x.preload.react-18]
@@ -47,6 +48,7 @@
   (log/info "Initializing app")
   (rf/dispatch-sync [::e/initialize])
   (rp/connect! conn) ;; Connect before mount to ensure subs work.
+  (sys/init!) ;; Instantiate repositories before any event can dispatch.
   (mount-root) ;; Mount after connect.
   (rfsk/enable)) ;; Enable re-frisk for app-db inspection.
 
@@ -55,4 +57,5 @@
   []
   (log/debug "Hot reload triggered: re-connecting Posh and updating UI")
   (rp/connect! conn)
+  (sys/init!)
   (mount-root))

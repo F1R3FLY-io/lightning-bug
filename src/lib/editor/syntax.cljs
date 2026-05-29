@@ -231,7 +231,7 @@
   [language-state-field highlights-query]
   (let [style-js (clj->js style-map)
         ;; Build decorations for a given range, with optional margin extension
-        build-decorations-for-range (fn [^js state ^js tree doc from to]
+        build-decorations-for-range (fn [^js _state ^js tree doc from to]
                                       (swap! cache-stats update :queries inc)
                                       (let [builder (RangeSetBuilder.)
                                             start-point (index->point doc from)

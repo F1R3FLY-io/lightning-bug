@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `app.system`: a dependency-injection container holding the DataScript-backed
+  repositories, injectable in tests via `set-system!`/`reset-system!` (delivers the
+  testability the `app.cofx`/`app.fx` docstrings always promised).
+- `lib.editor.runtime`: namespace extracted from `lib.core` (event emission, CodeMirror
+  extension assembly, document activation, and the LSP didOpen lifecycle).
+- Test coverage: `infrastructure.datascript-adapter` (repository delegation + EXP-007
+  coalesced-query regression guard), `app.system` (the DI seam), and `app.languages`.
+
+### Changed
+
+- Completed the hexagonal architecture migration: `app.cofx`/`app.fx` and `lib.core`'s
+  ~16 LSP call sites now go through `domain.protocols` (`IDocumentRepository`,
+  `ILspClient`) via dependency injection; `lib.lsp.connection-manager/ConnectionManager`
+  is the live per-editor LSP client. EXP-007 coalesced-query performance preserved
+  (benchmark-verified, no regression).
+- `lib/core.cljs` reduced from 1158 to 728 lines (−37%) by extracting `lib.editor.runtime`
+  (behavior-preserving byte-exact move; no benchmark regression).
+- Consolidated `get-lang-from-ext` into `lib.utils` as the single source of truth.
+- Documented the `lib.db` query-naming convention (`document-*` single-attribute vs
+  `doc-*`/`active-uri-*` coalesced accessors).
+
+### Fixed
+
+- Re-enabled the Rholang par-operator (`|`) indentation tests: corrected their
+  expectations to the branch-alignment semantics (`indents.scm` `(par "|" @branch)`) and
+  refreshed stale APIs; `calculate-indent` itself was already correct.
+- README WASM-setup docs now reference `npm run prepare:all`; removed the nonexistent
+  `scripts/postinstall.js` reference and dropped it from `package.json` `files`.
+- Declared previously-transitive test dependencies (`clojure.string`/`clojure.set`/`reagent.core`).
+
+### Removed
+
+- Dead code: orphaned `app.utils`; superseded `lib.utils/debounce`; two never-dispatched
+  Re-frame effects (`:timer/debounced-dispatch`, `:editor/with-highlight`); the redundant
+  `infrastructure.lsp-adapter`; the unused `domain.entities`; and three never-implemented
+  protocols (`IEventEmitter`, `ISyntaxHighlighter`, `IEditorOperations`).
+
 ## [0.7.7] - 2025-10-28
 
 ### Added

@@ -7,7 +7,7 @@
    [clojure.test :refer [deftest is testing use-fixtures async]]
    [clojure.core.async :refer [go <! timeout promise-chan put!]]
    [re-frame.core :as rf]
-   [re-frame.db :as rf-db]
+   [reagent.core :as r]
    [datascript.core :as d]
    [lib.db :as db]
    [lib.lsp.connection-manager :as cm]
@@ -59,7 +59,7 @@
 
 (deftest connection-manager-tracks-state
   (testing "Connection manager tracks connection state correctly"
-    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :initialized}}})]
+    (let [state-atom (r/atom {:lsp {"rholang" {:state :initialized}}})]
       (let [manager (cm/make-connection-manager state-atom nil)]
         ;; Should report as connected when initialized
         (is (true? (cm/connected? manager "rholang")))

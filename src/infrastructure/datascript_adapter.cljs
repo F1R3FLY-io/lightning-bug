@@ -41,9 +41,17 @@
   (get-active-uri [_this]
     (db/active-uri))
 
-  (get-active-document [this]
-    (when-let [uri (p/get-active-uri this)]
-      (p/get-document this uri)))
+  (get-active-document [_this]
+    ;; EXP-007: single coalesced query (preserves the cofx hot-path perf).
+    (let [[uri text lang version] (db/active-uri-text-lang-version)]
+      (when uri
+        {:uri uri :text text :language lang :version version})))
+
+  (get-document-summary [_this uri]
+    ;; EXP-007: single coalesced query for the :document-repo/document coeffect.
+    (let [[text lang version] (db/doc-text-lang-version-by-uri uri)]
+      (when text
+        {:uri uri :text text :language lang :version version})))
 
   (list-documents [_this]
     (db/documents))

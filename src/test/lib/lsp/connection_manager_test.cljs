@@ -2,9 +2,10 @@
   "Tests for the LSP connection manager module."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures async]]
-   [clojure.core.async :refer [go <! timeout promise-chan put!]]
+   [clojure.core.async :refer [go <! timeout]]
    [reagent.core :as r]
    [lib.lsp.connection-manager :as cm]
+   [lib.lsp.client :as lsp]
    [domain.protocols :as p]))
 
 ;; =============================================================================
@@ -298,3 +299,63 @@
     (doseq [state cm/STATES]
       (is (contains? cm/TRANSITIONS state)
           (str "TRANSITIONS should contain " state)))))
+
+;; =============================================================================
+;; ILspClient Delegation Tests (Phase 2 — CM is now the live per-editor client)
+;; =============================================================================
+
+(deftest connect-supplier-returns-resource-supplier
+  (testing "connect-supplier returns a 0-arg fn that calls lsp/connect with this client's state-atom + events"
+    (let [state-atom (r/atom {})
+          events (js/Object.)
+          manager (cm/make-connection-manager state-atom events)
+          captured (atom nil)]
+      (with-redefs [lsp/connect (fn [lang config sa ev]
+                                  (reset! captured {:lang lang :config config :sa sa :ev ev})
+                                  :connect-ch)]
+        (let [supplier (p/connect-supplier manager "rholang" "ws://localhost:1234")]
+          (is (fn? supplier))
+          (is (= :connect-ch (supplier)))
+          (is (= {:lang "rholang" :config {:url "ws://localhost:1234"} :sa state-atom :ev events}
+                 @captured)))))))
+
+(deftest notify-did-change-incremental!-delegates
+  (testing "notify-did-change-incremental! passes through to lsp with the client's state-atom"
+    (let [state-atom (r/atom {})
+          manager (cm/make-connection-manager state-atom nil)
+          captured (atom nil)]
+      (with-redefs [lsp/notify-did-change-incremental
+                    (fn [lang uri changes version sa] (reset! captured [lang uri changes version sa]))]
+        (p/notify-did-change-incremental! manager "rholang" "file:///a.rho" [{:text "x"}] 3)
+        (is (= ["rholang" "file:///a.rho" [{:text "x"}] 3 state-atom] @captured))))))
+
+(deftest shutdown-all!-uses-1-arity
+  (testing "shutdown-all! calls lsp/request-shutdown with only the state-atom (1-arity = all languages)"
+    (let [state-atom (r/atom {:lsp {"a" {} "b" {}}})
+          manager (cm/make-connection-manager state-atom nil)
+          captured (atom nil)]
+      (with-redefs [lsp/request-shutdown (fn ([sa] (reset! captured [sa]))
+                                           ([lang sa] (reset! captured [lang sa])))]
+        (p/shutdown-all! manager)
+        (is (= [state-atom] @captured))))))
+
+(deftest request-shutdown!-is-thin-pass-through
+  (testing "request-shutdown! delegates with [language state-atom] and does NOT run the state machine"
+    (let [state-atom (r/atom {:lsp {"rholang" {:state :initialized}}})
+          manager (cm/make-connection-manager state-atom nil)
+          captured (atom nil)]
+      (with-redefs [lsp/request-shutdown (fn ([sa] (reset! captured [sa]))
+                                           ([lang sa] (reset! captured [lang sa])))]
+        (p/request-shutdown! manager "rholang")
+        (is (= ["rholang" state-atom] @captured))
+        (is (= :initialized (get-in @state-atom [:lsp "rholang" :state]))
+            "narrowed: no transition to :disconnecting/:disconnected")))))
+
+(deftest request-symbols!-is-unguarded-pass-through
+  (testing "request-symbols! delegates even when not initialized (matches lib.core's live behavior)"
+    (let [state-atom (r/atom {:lsp {"rholang" {:state :disconnected}}})
+          manager (cm/make-connection-manager state-atom nil)
+          captured (atom nil)]
+      (with-redefs [lsp/request-document-symbol (fn [& args] (reset! captured (vec args)))]
+        (p/request-symbols! manager "rholang" "file:///a.rho")
+        (is (= ["rholang" "file:///a.rho" state-atom] @captured))))))

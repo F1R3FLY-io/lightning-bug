@@ -6,10 +6,9 @@
    - Periodic cleanup of stale pending requests
    - Connection state machine
    - Graceful reconnection handling"
-  (:require [clojure.core.async :refer [go chan put! <! >! close! alts! timeout promise-chan]]
+  (:require [clojure.core.async :refer [go put! <! alts! timeout promise-chan]]
             [domain.protocols :as p]
             [lib.lsp.client :as lsp]
-            [lib.state :refer [get-resource set-resource! close-resource!]]
             [taoensso.timbre :as log]))
 
 ;; =============================================================================
@@ -160,6 +159,11 @@
   (initialized? [_this language]
     (= :initialized (get-in @state-atom [:lsp language :state])))
 
+  (connect-supplier [_this language url]
+    ;; Returns the exact resource supplier lib.core feeds to lib.state/load-resource,
+    ;; preserving the resource-managed connect flow (no state-machine adoption).
+    #(lsp/connect language {:url url} state-atom events))
+
   ;; === Document Lifecycle Notifications ===
 
   (notify-did-open! [_this language uri text version]
@@ -167,6 +171,9 @@
 
   (notify-did-change! [_this language uri text version]
     (lsp/notify-did-change language uri text version state-atom))
+
+  (notify-did-change-incremental! [_this language uri changes version]
+    (lsp/notify-did-change-incremental language uri changes version state-atom))
 
   (notify-did-close! [_this language uri]
     (lsp/notify-did-close language uri state-atom))
@@ -179,12 +186,16 @@
 
   ;; === Request Operations ===
 
-  (request-symbols! [this language uri]
-    (when (p/initialized? this language)
-      (lsp/request-document-symbol language uri state-atom)))
+  (request-symbols! [_this language uri]
+    ;; Narrowed (Phase 2): thin pass-through matching lib.core's live (unguarded) behavior.
+    ;; State-machine disconnect remains available via disconnect!.
+    (lsp/request-document-symbol language uri state-atom))
 
-  (request-shutdown! [this language]
-    (p/disconnect! this language)))
+  (request-shutdown! [_this language]
+    (lsp/request-shutdown language state-atom))
+
+  (shutdown-all! [_this]
+    (lsp/request-shutdown state-atom)))
 
 ;; =============================================================================
 ;; Cleanup Manager

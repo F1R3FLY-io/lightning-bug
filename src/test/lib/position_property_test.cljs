@@ -6,6 +6,7 @@
    edge cases like Unicode, tabs, and different line endings."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [clojure.string :as str]
    [clojure.test.check :as tc]
    [clojure.test.check.generators :as gen]
    [clojure.test.check.properties :as prop]
@@ -109,8 +110,7 @@
 (deftest position-offset-roundtrip-property
   (testing "offset->pos->offset roundtrip preserves offset (0-based)"
     (let [prop (prop/for-all [doc-str gen-multiline-document]
-                 (let [doc (make-text-doc doc-str)
-                       max-offset (count doc-str)]
+                 (let [max-offset (count doc-str)]
                    (every? (fn [offset]
                              (let [recovered (roundtrip-offset->pos->offset doc-str offset false)]
                                (= offset recovered)))
@@ -121,8 +121,7 @@
 
   (testing "offset->pos->offset roundtrip preserves offset (1-based)"
     (let [prop (prop/for-all [doc-str gen-multiline-document]
-                 (let [doc (make-text-doc doc-str)
-                       max-offset (count doc-str)]
+                 (let [max-offset (count doc-str)]
                    (every? (fn [offset]
                              (let [recovered (roundtrip-offset->pos->offset doc-str offset true)]
                                (= offset recovered)))
@@ -134,8 +133,7 @@
 (deftest position-offset-unicode-property
   (testing "Unicode characters are handled correctly in position conversion"
     (let [prop (prop/for-all [doc-str gen-unicode-document]
-                 (let [doc (make-text-doc doc-str)
-                       max-offset (count doc-str)]
+                 (let [max-offset (count doc-str)]
                    (every? (fn [offset]
                              (let [recovered (roundtrip-offset->pos->offset doc-str offset false)]
                                (= offset recovered)))
@@ -147,8 +145,7 @@
 (deftest position-offset-tabs-property
   (testing "Tab characters are handled correctly in position conversion"
     (let [prop (prop/for-all [doc-str gen-tabbed-document]
-                 (let [doc (make-text-doc doc-str)
-                       max-offset (count doc-str)]
+                 (let [max-offset (count doc-str)]
                    (every? (fn [offset]
                              (let [recovered (roundtrip-offset->pos->offset doc-str offset false)]
                                (= offset recovered)))

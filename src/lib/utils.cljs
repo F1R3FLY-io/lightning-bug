@@ -29,9 +29,16 @@
   (or (first (get-in db [:languages lang :extensions])) "text"))
 
 (defn get-lang-from-ext
-  [db ext]
-  (or (ffirst (filter (fn [[_ v]] (some #{ext} (:extensions v))) (:languages db)))
-      (:default-language db)))
+  "Returns the language key (from a languages map) matching the given extension,
+  or \"text\" if none. Logs a warning if multiple languages match."
+  [languages ext]
+  (log/debug "Looking for language with extension:" ext)
+  (log/debug "Available languages:" (keys languages))
+  (let [matches (filter (fn [[_ conf]] (some #(= ext %) (:extensions conf))) languages)]
+    (log/debug "Matching languages:" (keys matches))
+    (when (> (count matches) 1)
+      (log/warn (str "Multiple languages match extension " ext ": " (keys matches) " - using first")))
+    (or (ffirst matches) "text")))
 
 (defn new-untitled-name
   "Generates an untitled file name with optional index and extension."
@@ -57,14 +64,6 @@
             max-c (.-length line)]
         (when (and (>= c 0) (<= c max-c))
           (+ (.-from line) c))))))
-
-(defn debounce
-  "Returns a debounced version of function f that delays invocation by ms milliseconds."
-  [f ms]
-  (let [timer (atom nil)]
-    (fn [& args]
-      (when @timer (js/clearTimeout @timer))
-      (reset! timer (js/setTimeout #(apply f args) ms)))))
 
 (defn split-uri
   "Splits a URI into its protocol and file path."

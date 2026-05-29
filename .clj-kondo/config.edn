@@ -6,7 +6,13 @@
            :invalid-arity {:level :error}
            :private-call {:level :error}
            :unused-private-var {:level :warning}
-           :not-a-function {:level :error}}
+           :not-a-function {:level :error}
+           ;; Style-only linters: a nested/single-binding `let` or a `do` wrapping one
+           ;; expression is readability-neutral structure (common in property tests where
+           ;; the property definition is kept separate from its quick-check invocation),
+           ;; not a defect. Disabled project-wide as a deliberate style policy.
+           :redundant-let {:level :off}
+           :redundant-do {:level :off}}
  :lint-as {reagent.core/defn reagent.core/defn
            reagent.core/defnc reagent.core/defn
            day8.re-frame-10x.preload.react-18/defn

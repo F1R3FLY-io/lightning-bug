@@ -7,7 +7,6 @@
    [clojure.test :refer [deftest is testing use-fixtures async]]
    [clojure.core.async :refer [go <! timeout]]
    [re-frame.core :as rf]
-   [re-frame.db :as rf-db]
    [datascript.core :as d]
    [lib.db :as db]
    [lib.debounce :as debounce]

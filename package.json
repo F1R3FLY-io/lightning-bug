@@ -120,7 +120,6 @@
     "dist/**",
     "types/**",
     "resources/public/extensions/**",
-    "scripts/utils.js",
-    "scripts/postinstall.js"
+    "scripts/utils.js"
   ]
 }

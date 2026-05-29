@@ -146,18 +146,6 @@
     (<= df 120) 1.980
     :else 1.960))
 
-(defn- gamma-sterling
-  "Sterling's approximation for gamma function."
-  [x]
-  (* (Math/sqrt (/ (* 2 Math/PI) x))
-     (Math/pow (/ (+ x (/ 1 (* 12 x (- 1 (/ 1 (* 10 x x)))))) Math/E) x)))
-
-(defn- beta-function
-  "Beta function approximation using Sterling's gamma."
-  [a b]
-  (/ (* (gamma-sterling a) (gamma-sterling b))
-     (gamma-sterling (+ a b))))
-
 (defn- regularized-incomplete-beta
   "Approximation of regularized incomplete beta function.
    Uses continued fraction expansion for better accuracy."

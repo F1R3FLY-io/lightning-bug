@@ -5,8 +5,8 @@
    and closed with all subsystems (database, state, LSP) remaining
    consistent."
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures async]]
-   [clojure.core.async :refer [go <! timeout]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
+   [clojure.string :as str]
    [re-frame.core :as rf]
    [re-frame.db :as rf-db]
    [datascript.core :as d]
@@ -443,7 +443,7 @@
             doc-lang (db/document-language-by-uri old-uri)
             doc-version (db/document-version-by-uri old-uri)
             old-diags @(rf/subscribe [:lsp/diagnostics])
-            old-syms @(rf/subscribe [:lsp/symbols])]
+            _old-syms @(rf/subscribe [:lsp/symbols])]
 
         ;; Create new document
         (h/create-test-document! {:uri new-uri

@@ -2,21 +2,27 @@
   (:require [shadow.test.karma :as k]
             ;; Existing tests
             [test.lib.core-test]
+            [test.lib.core-api-test]
             [test.lib.editor.diagnostics-test]
             [test.lib.editor.highlight-test]
             [test.lib.editor.syntax-test]
+            [test.lib.editor.syntax-parser-config-test]
             [test.lib.lsp.client-test]
             [test.lib.embedded-test]
             [test.ext.embedded-test]
             ;; Phase 2: Database layer tests
             [test.lib.db-test]
+            [test.lib.db-diagnostics-symbols-test]
+            [test.lib.db-query-test]
             ;; Phase 3: Application layer tests
             [test.app.events-test]
             [test.app.subs-test]
+            [test.app.languages-test]
+            [test.app.system-test]
             ;; Phase 4: Infrastructure tests
             [test.lib.lifecycle-test]
             [test.lib.lsp.connection-manager-test]
-            [test.domain.entities-test]
+            [test.infrastructure.datascript-adapter-test]
             ;; Phase 5: Utility tests
             [test.lib.utils-test]
             [test.lib.debounce-test]

@@ -16,18 +16,16 @@
   (:require
    [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.core.async.interop :refer-macros [<p!]]
-   [lib.perf.bench :as bench]
+   [clojure.string :as str]
    [lib.perf.bench-runner :as runner]
    [lib.perf.stats :as stats]
    [lib.db :as db]
    [lib.query-cache :as qc]
    [lib.debounce :as debounce]
    [lib.editor.syntax :as syntax]
-   [lib.utils :refer [promise->chan]]
    [taoensso.timbre :as log]
    ["@codemirror/state" :refer [EditorState]]
-   ["@codemirror/view" :refer [EditorView]]
-   ["@codemirror/commands" :refer [cursorDocEnd]]))
+   ["@codemirror/view" :refer [EditorView]]))
 
 ;; =============================================================================
 ;; Sample Data Generation
@@ -44,8 +42,8 @@
                    "let val = 100 + 200 in { stdout!(val) }"
                    "// This is a comment line"
                    "new ch1, ch2, ch3 in { ch1!(ch2) | ch2!(ch3) }"]]
-    (clojure.string/join "\n"
-                         (map #(nth templates (mod % (count templates)))
+    (str/join "\n"
+              (map #(nth templates (mod % (count templates)))
                               (range num-lines)))))
 
 (def sample-1k-lines (delay (generate-rholang-code 1000)))
@@ -451,7 +449,7 @@
   []
   ;; Create a promise that resolves when syntax init completes
   (js/Promise.
-   (fn [resolve reject]
+   (fn [resolve _reject]
      ;; Check if WASM files are likely available
      (-> (js/fetch "/js/tree-sitter.wasm" #js {:method "HEAD"})
          (.then (fn [resp]

@@ -17,6 +17,7 @@
   (:require
    [clojure.core.async :as async :refer [go go-loop <! timeout]]
    [clojure.core.async.interop :refer-macros [<p!]]
+   [clojure.string :as str]
    [lib.perf.bench :as bench]
    [lib.perf.stats :as stats]
    [taoensso.timbre :as log]))
@@ -61,6 +62,7 @@
                  (-> (js/Intl.DateTimeFormat.)
                      (.resolvedOptions)
                      (.-timeZone))
+                 ;; Timezone is optional environment metadata; fall back to nil if Intl is unavailable.
                  (catch js/Error _ nil))
      ;; Git info would be injected at build time
      :git-commit (when (exists? js/BENCHMARK_GIT_COMMIT)
@@ -86,6 +88,7 @@
              (exists? js/window.gc))
     (try
       (js/window.gc)
+      ;; GC is a best-effort hint (only present under --expose-gc); ignore if unsupported.
       (catch js/Error _ nil))))
 
 (defn run-single-iteration
@@ -342,8 +345,8 @@
             passes? (:passes-target? bench)]
         (swap! lines conj (str "### " (name (:name bench))))
         (swap! lines conj "")
-        (swap! lines conj (str "| Metric | Value |"))
-        (swap! lines conj (str "|--------|-------|"))
+        (swap! lines conj "| Metric | Value |")
+        (swap! lines conj "|--------|-------|")
         (swap! lines conj (str "| Mean | " (.toFixed (:mean stats) 3) " ms |"))
         (swap! lines conj (str "| Median | " (.toFixed (:median stats) 3) " ms |"))
         (swap! lines conj (str "| P95 | " (.toFixed (:p95 stats) 3) " ms |"))
@@ -354,7 +357,7 @@
           (swap! lines conj (str "| Target | " (:target-ms target) " ms |"))
           (swap! lines conj (str "| Status | " (if passes? "PASS" "FAIL") " |")))
         (swap! lines conj "")))
-    (clojure.string/join "\n" @lines)))
+    (str/join "\n" @lines)))
 
 ;; =============================================================================
 ;; Comparison

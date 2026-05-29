@@ -62,7 +62,8 @@
        (when (and js/performance (.-mark js/performance))
          (try
            (.mark js/performance mark-id)
-         (catch js/Error _e nil)))
+           ;; Best-effort Performance API instrumentation; a failed mark must never abort a benchmark.
+           (catch js/Error _e nil)))
        ;; Store in our tracking
        (swap! active-marks assoc mark-id
               {:name name
@@ -86,7 +87,8 @@
         (when (and js/performance (.-measure js/performance))
           (try
             (.measure js/performance (str name "-measure") mark-id)
-          (catch js/Error _e nil)))
+            ;; Best-effort Performance API instrumentation; a failed measure must never abort a benchmark.
+            (catch js/Error _e nil)))
 
         ;; Clear the mark
         (swap! active-marks dissoc mark-id)

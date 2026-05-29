@@ -6,7 +6,7 @@
    - Cleanup on unmount with proper ordering
    - Resource registration and tracking
    - Graceful shutdown handling"
-  (:require [clojure.core.async :refer [go chan put! <! >! close! alts! timeout promise-chan]]
+  (:require [clojure.core.async :refer [go put! <! promise-chan]]
             [domain.protocols :as p]
             [taoensso.timbre :as log]))
 

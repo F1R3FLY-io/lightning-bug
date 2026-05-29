@@ -2,7 +2,7 @@
   "Tests for the lib.lifecycle resource lifecycle management module."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures async]]
-   [clojure.core.async :refer [go <! timeout promise-chan put!]]
+   [clojure.core.async :refer [go <! promise-chan put!]]
    [lib.lifecycle :as lifecycle]
    [domain.protocols :as p]))
 
@@ -119,7 +119,7 @@
 (deftest start-resource!-starts-single-resource
   (async done
          (go
-           (let [state (atom {})
+           (let [_state (atom {})
                  resource (->TestResource :single (atom {::order (atom 0)}))]
              (lifecycle/register-resource! :single resource)
              (let [[status val] (<! (lifecycle/start-resource! :single))]

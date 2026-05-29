@@ -2,6 +2,7 @@
   "Tests for the lib.debounce coordination module."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures async]]
+   [clojure.string :as str]
    [clojure.core.async :refer [go <! timeout]]
    [lib.debounce :as debounce]))
 
@@ -326,7 +327,7 @@
 (deftest coordinator-debounced-call-works
   (async done
          (go
-           (let [coordinator (debounce/make-debounce-coordinator)
+           (let [_coordinator (debounce/make-debounce-coordinator)
                  call-count (atom 0)]
              ;; Use protocol method (assuming domain.protocols/IDebounceCoordinator)
              (debounce/debounced-call :coord-test #(swap! call-count inc) 50)
@@ -341,7 +342,7 @@
 (deftest debounced-call-handles-errors-gracefully
   (async done
          (go
-           (let [error-thrown (atom false)
+           (let [_error-thrown (atom false)
                  other-called (atom false)]
              ;; Schedule a call that throws
              (debounce/debounced-call :error-test #(throw (js/Error. "test error")) 50)

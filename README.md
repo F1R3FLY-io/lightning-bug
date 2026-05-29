@@ -26,7 +26,7 @@ To install the dependencies, run the following command:
 npm install
 ```
 
-The postinstall script (`scripts/postinstall.js`) automatically copies the WASM file to the appropriate locations in the project. These locations include `resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm`, as well as the demo and test directories.
+Copy the Tree-Sitter WASM files into place by running `npm run prepare:all` (which runs `prepare:app` and `prepare:test`). This copies `tree-sitter.wasm` and `tree-sitter-rholang.wasm` from `node_modules` into `resources/public/js/`, `resources/public/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm`, and the test directories. (There is no automatic postinstall step.)
 
 If you need to copy the file manually after installation, run the following command:
 
@@ -354,7 +354,7 @@ export interface LanguageConfig {
 }
 ```
 
-For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` during postinstall. Bundled extensions (e.g., Rholang) may use exported functions like `treeSitterRholangWasmUrl` for data URLs.
+For the pre-configured Rholang extension, the WASM and query files are copied to `resources/public/extensions/lang/rholang/tree-sitter/` by `npm run prepare:app` (and `prepare:test` for the test build). Bundled extensions (e.g., Rholang) may use exported functions like `treeSitterRholangWasmUrl` for data URLs.
 
 ### Overriding Defaults
 

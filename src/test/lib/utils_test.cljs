@@ -2,10 +2,9 @@
   "Tests for the lib.utils utility module."
   (:require
    [clojure.test :refer [deftest is testing async]]
+   [clojure.string :as str]
    [clojure.test.check.generators :as gen]
-   [clojure.test.check.properties :as prop]
-   [clojure.test.check.clojure-test :refer [defspec]]
-   [clojure.core.async :refer [go <! timeout]]
+   [clojure.core.async :refer [go <!]]
    [lib.utils :as utils]))
 
 ;; =============================================================================
@@ -161,15 +160,15 @@
     (let [db {:languages {"rholang" {:extensions [".rho" ".rhol"]}
                           "javascript" {:extensions [".js" ".mjs"]}}
               :default-language "text"}]
-      (is (= "rholang" (utils/get-lang-from-ext db ".rho")))
-      (is (= "rholang" (utils/get-lang-from-ext db ".rhol")))
-      (is (= "javascript" (utils/get-lang-from-ext db ".js"))))))
+      (is (= "rholang" (utils/get-lang-from-ext (:languages db)".rho")))
+      (is (= "rholang" (utils/get-lang-from-ext (:languages db)".rhol")))
+      (is (= "javascript" (utils/get-lang-from-ext (:languages db)".js"))))))
 
 (deftest get-lang-from-ext-returns-default-for-unknown
   (testing "get-lang-from-ext returns default for unknown extension"
     (let [db {:languages {"rholang" {:extensions [".rho"]}}
               :default-language "text"}]
-      (is (= "text" (utils/get-lang-from-ext db ".xyz"))))))
+      (is (= "text" (utils/get-lang-from-ext (:languages db)".xyz"))))))
 
 ;; =============================================================================
 ;; Untitled Name Generation Tests
@@ -188,44 +187,6 @@
       (is (= "untitled-1.rho" (utils/new-untitled-name db 1)))
       (is (= "untitled-5.rho" (utils/new-untitled-name db 5)))
       (is (= "untitled-99.rho" (utils/new-untitled-name db 99))))))
-
-;; =============================================================================
-;; Debounce Tests
-;; =============================================================================
-
-(deftest debounce-delays-execution
-  (async done
-         (go
-           (let [call-count (atom 0)
-                 debounced-fn (utils/debounce #(swap! call-count inc) 50)]
-             ;; Call multiple times rapidly
-             (debounced-fn)
-             (debounced-fn)
-             (debounced-fn)
-             ;; Should not have been called yet
-             (is (= 0 @call-count))
-             ;; Wait for debounce
-             (<! (timeout 100))
-             ;; Should have been called exactly once
-             (is (= 1 @call-count)))
-           (done))))
-
-(deftest debounce-cancels-previous-call
-  (async done
-         (go
-           (let [values (atom [])
-                 debounced-fn (utils/debounce #(swap! values conj %) 50)]
-             ;; Call with different values
-             (debounced-fn :a)
-             (<! (timeout 20))
-             (debounced-fn :b)
-             (<! (timeout 20))
-             (debounced-fn :c)
-             ;; Wait for debounce
-             (<! (timeout 100))
-             ;; Should only have the last value
-             (is (= [:c] @values)))
-           (done))))
 
 ;; =============================================================================
 ;; Promise->Chan Tests

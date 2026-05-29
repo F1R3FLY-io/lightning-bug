@@ -6,6 +6,7 @@
   (:require [clojure.test :refer [is]]
             [clojure.core.async :refer [go <! timeout promise-chan put!]]
             [clojure.spec.alpha :as s]
+            [clojure.set :as set]
             [clojure.test.check.generators :as gen]
             [datascript.core :as d]
             [lib.db :as db]))

@@ -1,10 +1,12 @@
 (ns app.fx
   "Re-Frame effects for side effects in event handlers.
 
-   Effects handle write operations to the outside world.
-   They enable testability by centralizing all side effects."
+   Effects handle write operations to the outside world. Storage effects delegate
+   to the injected repositories (see app.system) to centralize side effects and
+   enable testability via mock injection."
   (:require [re-frame.core :as rf]
-            [lib.db :as lib-db]
+            [domain.protocols :as p]
+            [app.system :as sys]
             [app.shared :refer [editor-ref-atom]]
             [taoensso.timbre :as log]))
 
@@ -15,44 +17,42 @@
 (rf/reg-fx
  :document/create
  (fn [doc]
-   (lib-db/create-documents! [(merge {:version 0 :dirty false :opened false} doc)])))
+   (p/create-document! (sys/document-repo) doc)))
 
 (rf/reg-fx
  :document/update-text
  (fn [{:keys [uri text]}]
-   (lib-db/update-document-text-by-uri! uri text)))
+   (p/update-document-text! (sys/document-repo) uri text)))
 
 (rf/reg-fx
  :document/set-active
  (fn [uri]
-   (lib-db/update-active-uri! uri)))
+   (p/set-active-document! (sys/document-repo) uri)))
 
 (rf/reg-fx
  :document/increment-version
  (fn [uri]
-   (lib-db/inc-document-version-by-uri! uri)))
+   (p/increment-version! (sys/document-repo) uri)))
 
 (rf/reg-fx
  :document/mark-opened
  (fn [uri]
-   (lib-db/document-opened-by-uri! uri)))
+   (p/mark-document-opened! (sys/document-repo) uri)))
 
 (rf/reg-fx
  :document/mark-closed
  (fn [uri]
-   (lib-db/document-closed-by-uri! uri)))
+   (p/mark-document-closed! (sys/document-repo) uri)))
 
 (rf/reg-fx
  :document/delete
  (fn [uri]
-   (when-let [id (lib-db/document-id-by-uri uri)]
-     (lib-db/delete-document-by-id! id))))
+   (p/delete-document! (sys/document-repo) uri)))
 
 (rf/reg-fx
  :document/rename
  (fn [{:keys [old-uri new-uri]}]
-   (when-let [id (lib-db/document-id-by-uri old-uri)]
-     (lib-db/update-document-uri-by-id! id new-uri))))
+   (p/rename-document! (sys/document-repo) old-uri new-uri)))
 
 ;; =============================================================================
 ;; Diagnostics Effects
@@ -61,10 +61,7 @@
 (rf/reg-fx
  :diagnostics/replace
  (fn [{:keys [uri version diagnostics]}]
-   (let [flat-diags (if (seq diagnostics)
-                      (lib-db/flatten-diags diagnostics uri version)
-                      [])]
-     (lib-db/replace-diagnostics-by-uri! uri version flat-diags))))
+   (p/replace-diagnostics! (sys/diagnostics-repo) uri version diagnostics)))
 
 ;; =============================================================================
 ;; Symbols Effects
@@ -73,10 +70,7 @@
 (rf/reg-fx
  :symbols/replace
  (fn [{:keys [uri symbols]}]
-   (let [flat-symbols (if (seq symbols)
-                        (lib-db/flatten-symbols symbols nil uri)
-                        [])]
-     (lib-db/replace-symbols! uri flat-symbols))))
+   (p/replace-symbols! (sys/symbols-repo) uri symbols)))
 
 ;; =============================================================================
 ;; Log Effects
@@ -85,10 +79,10 @@
 (rf/reg-fx
  :log/add
  (fn [log]
-   (lib-db/create-logs! [log])))
+   (p/add-log! (sys/log-repo) log)))
 
 ;; =============================================================================
-;; Editor Effects
+;; Editor Effects (JS imperative handle — not storage)
 ;; =============================================================================
 
 (rf/reg-fx
@@ -169,33 +163,3 @@
  :console/error
  (fn [message]
    (log/error message)))
-
-;; =============================================================================
-;; Timer Effects
-;; =============================================================================
-
-(rf/reg-fx
- :timer/debounced-dispatch
- (fn [{:keys [id ms dispatch]}]
-   ;; This would be managed by debounce coordinator
-   ;; For now, simple setTimeout
-   (js/setTimeout
-    #(rf/dispatch dispatch)
-    ms)))
-
-;; =============================================================================
-;; Composite Effects for Common Patterns
-;; =============================================================================
-
-(rf/reg-fx
- :editor/with-highlight
- (fn [{:keys [from to dispatch-after-ms dispatch]}]
-   (when-let [^js editor (some-> @editor-ref-atom .-current)]
-     (when (.isReady editor)
-       (.highlightRange editor (clj->js from) (clj->js to))
-       (when dispatch
-         (js/setTimeout
-          (fn []
-            (.clearHighlight editor)
-            (rf/dispatch dispatch))
-          (or dispatch-after-ms 2000)))))))

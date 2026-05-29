@@ -6,7 +6,6 @@
    [re-frame.db :as rf-db]
    [datascript.core :as d]
    [lib.db :as db]
-   [app.db :refer [default-db]]
    [app.subs]
    [test.lib.test-helpers :as h]
    [test.app.reframe-helpers :as rfh]))

@@ -28,6 +28,18 @@
 
 (defonce conn (d/create-conn schema))
 
+;; =============================================================================
+;; Query-function naming convention
+;; =============================================================================
+;; - `document-*` / single-attribute accessors return ONE attribute (or a small
+;;   fixed tuple) for a document, e.g. `document-id-by-uri`, `document-text-by-uri`.
+;; - `doc-*` / `active-uri-*` COALESCED accessors return MULTIPLE attributes in a
+;;   single DataScript query (EXP-007), e.g. `active-uri-text-lang-version`,
+;;   `doc-text-lang-version-by-uri`. Prefer these on hot paths to avoid N+1 queries.
+;; The infrastructure repositories (infrastructure.datascript-adapter) call the
+;; coalesced accessors for the hot reads; new hot-path reads should add/extend a
+;; coalesced accessor rather than chaining single-attribute ones.
+
 (s/def ::id integer?)
 (s/def ::dirty boolean?)
 (s/def ::text string?)

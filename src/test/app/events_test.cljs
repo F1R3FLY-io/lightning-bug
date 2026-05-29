@@ -1,8 +1,7 @@
 (ns test.app.events-test
   "Tests for Re-Frame event handlers in app.events."
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures async]]
-   [clojure.core.async :refer [go <!]]
+   [clojure.test :refer [deftest is testing use-fixtures]]
    [re-frame.core :as rf]
    [re-frame.db :as rf-db]
    [datascript.core :as d]
@@ -10,7 +9,6 @@
    [app.db :refer [default-db]]
    [app.events :as events]
    [app.subs]
-   [test.lib.test-helpers :as h]
    [test.app.reframe-helpers :as rfh]))
 
 ;; =============================================================================

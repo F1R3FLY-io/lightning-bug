@@ -2,9 +2,11 @@
   "Re-Frame coeffects for injecting dependencies into event handlers.
 
    Coeffects provide read-only access to the outside world during event handling.
-   They enable testability by allowing injection of mock implementations."
+   They delegate to the injected repositories (see app.system), which is the
+   dependency-injection seam that enables testability via mock implementations."
   (:require [re-frame.core :as rf]
-            [lib.db :as lib-db]
+            [domain.protocols :as p]
+            [app.system :as sys]
             [app.shared :refer [editor-ref-atom]]))
 
 ;; =============================================================================
@@ -14,37 +16,24 @@
 (rf/reg-cofx
  :document-repo/active-uri
  (fn [coeffects _]
-   (assoc coeffects :active-uri (lib-db/active-uri))))
+   (assoc coeffects :active-uri (p/get-active-uri (sys/document-repo)))))
 
 (rf/reg-cofx
  :document-repo/active-document
  (fn [coeffects _]
-   ;; EXP-007: Coalesced query - single query instead of 3 separate queries
-   (let [[uri text lang version] (lib-db/active-uri-text-lang-version)]
-     (if uri
-       (assoc coeffects :active-document
-              {:uri uri
-               :text text
-               :language lang
-               :version version})
-       (assoc coeffects :active-document nil)))))
+   ;; EXP-007: coalesced single-query read, via the document repository.
+   (assoc coeffects :active-document (p/get-active-document (sys/document-repo)))))
 
 (rf/reg-cofx
  :document-repo/documents
  (fn [coeffects _]
-   (assoc coeffects :documents (lib-db/documents))))
+   (assoc coeffects :documents (p/list-documents (sys/document-repo)))))
 
 (rf/reg-cofx
  :document-repo/document
  (fn [coeffects uri]
-   ;; EXP-007: Coalesced query - single query instead of 2 separate queries
-   (let [[text lang version] (lib-db/doc-text-lang-version-by-uri uri)]
-     (assoc coeffects :document
-            (when text
-              {:uri uri
-               :text text
-               :language lang
-               :version version})))))
+   ;; EXP-007: coalesced single-query read, via the document repository.
+   (assoc coeffects :document (p/get-document-summary (sys/document-repo) uri))))
 
 ;; =============================================================================
 ;; LSP Data Coeffects
@@ -53,22 +42,22 @@
 (rf/reg-cofx
  :lsp/diagnostics
  (fn [coeffects _]
-   (assoc coeffects :diagnostics (lib-db/diagnostics))))
+   (assoc coeffects :diagnostics (p/get-diagnostics (sys/diagnostics-repo)))))
 
 (rf/reg-cofx
  :lsp/diagnostics-by-uri
  (fn [coeffects uri]
-   (assoc coeffects :diagnostics (lib-db/diagnostics-by-uri uri))))
+   (assoc coeffects :diagnostics (p/get-diagnostics-by-uri (sys/diagnostics-repo) uri))))
 
 (rf/reg-cofx
  :lsp/symbols
  (fn [coeffects _]
-   (assoc coeffects :symbols (lib-db/symbols))))
+   (assoc coeffects :symbols (p/get-symbols (sys/symbols-repo)))))
 
 (rf/reg-cofx
  :lsp/symbols-by-uri
  (fn [coeffects uri]
-   (assoc coeffects :symbols (lib-db/symbols-by-uri uri))))
+   (assoc coeffects :symbols (p/get-symbols-by-uri (sys/symbols-repo) uri))))
 
 ;; =============================================================================
 ;; Log Coeffects
@@ -77,10 +66,10 @@
 (rf/reg-cofx
  :logs/all
  (fn [coeffects _]
-   (assoc coeffects :logs (lib-db/logs))))
+   (assoc coeffects :logs (p/get-logs (sys/log-repo)))))
 
 ;; =============================================================================
-;; Editor Reference Coeffect
+;; Editor Reference Coeffect (not storage — no repository equivalent)
 ;; =============================================================================
 
 (rf/reg-cofx

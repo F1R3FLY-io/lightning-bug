@@ -5,7 +5,7 @@
    resources with async loading and validation."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures async]]
-   [clojure.core.async :refer [go <! timeout chan put! promise-chan]]
+   [clojure.core.async :refer [go <! timeout put! promise-chan]]
    [lib.state :as state]))
 
 ;; =============================================================================

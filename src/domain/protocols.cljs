@@ -41,6 +41,10 @@
   (get-active-document [this]
     "Returns the currently active document as a map, or nil.")
 
+  (get-document-summary [this uri]
+    "Lightweight coalesced read returning {:uri :text :language :version} or nil.
+     Single-query hot path used by re-frame coeffects (EXP-007).")
+
   (list-documents [this]
     "Returns a collection of all documents as maps.")
 
@@ -145,6 +149,11 @@
   (initialized? [this language]
     "Returns true if LSP is fully initialized for the given language.")
 
+  (connect-supplier [this language url]
+    "Returns a 0-arg supplier fn (for lib.state/load-resource) that establishes the
+     connection using this client's state-atom and events. Preserves the resource-managed
+     connect flow while keeping callers free of a direct lib.lsp.client dependency.")
+
   ;; === Document Lifecycle Notifications ===
 
   (notify-did-open! [this language uri text version]
@@ -152,6 +161,9 @@
 
   (notify-did-change! [this language uri text version]
     "Sends textDocument/didChange notification.")
+
+  (notify-did-change-incremental! [this language uri changes version]
+    "Sends textDocument/didChange with incremental contentChanges (delta sync, EXP-011).")
 
   (notify-did-close! [this language uri]
     "Sends textDocument/didClose notification.")
@@ -168,7 +180,10 @@
     "Requests document symbols. Results handled asynchronously via events.")
 
   (request-shutdown! [this language]
-    "Requests graceful shutdown of the language server."))
+    "Requests graceful shutdown of the language server.")
+
+  (shutdown-all! [this]
+    "Requests shutdown of all connected languages (mirrors lib.lsp.client/request-shutdown 1-arity)."))
 
 ;; =============================================================================
 ;; Resource Lifecycle Protocol
@@ -190,22 +205,8 @@
   (restart! [this]
     "Stops and then starts the resource. Returns a channel with [:ok resource] or [:error reason]."))
 
-;; =============================================================================
-;; Event Emitter Protocol
-;; =============================================================================
-
-(defprotocol IEventEmitter
-  "Protocol for emitting and subscribing to events.
-   Provides a unified event system for cross-cutting concerns."
-
-  (emit! [this event-type data]
-    "Emits an event with the given type and data map.")
-
-  (subscribe [this]
-    "Returns an Observable or channel for receiving events.")
-
-  (get-recent-events [this n]
-    "Returns the n most recent events (for replay on late subscription)."))
+;; Removed (Phase 2): IEventEmitter — events are an RxJS ReplaySubject managed directly in
+;; lib.core/emit-event (with type-aware debounce); no adapter consumer exists.
 
 ;; =============================================================================
 ;; Debounce Coordinator Protocol
@@ -225,63 +226,12 @@
   (cancel-all [this]
     "Cancels all pending debounced calls."))
 
-;; =============================================================================
-;; Syntax Highlighter Protocol
-;; =============================================================================
-
-(defprotocol ISyntaxHighlighter
-  "Protocol for syntax highlighting operations.
-   Implementations use Tree-Sitter or fallback highlighters."
-
-  (parse [this text]
-    "Parses text and returns a syntax tree.")
-
-  (parse-incremental [this old-tree changes]
-    "Incrementally parses with changes applied to existing tree.")
-
-  (get-highlights [this tree]
-    "Returns highlight information from a syntax tree.")
-
-  (get-indentation [this tree line-number]
-    "Calculates indentation for a line based on syntax tree."))
-
-;; =============================================================================
-;; Editor Operations Protocol
-;; =============================================================================
-
-(defprotocol IEditorOperations
-  "Protocol for imperative editor operations.
-   Provides a contract for interacting with CodeMirror."
-
-  (get-text [this uri]
-    "Gets the text content for a document. Uses active if uri is nil.")
-
-  (set-text! [this text uri]
-    "Sets the text content for a document. Uses active if uri is nil.")
-
-  (get-cursor [this]
-    "Returns current cursor position as {:line :column}.")
-
-  (set-cursor! [this pos]
-    "Sets cursor position. pos should be {:line :column}.")
-
-  (get-selection [this]
-    "Returns current selection as {:from {:line :column} :to {:line :column}} or nil.")
-
-  (set-selection! [this from to]
-    "Sets selection range.")
-
-  (highlight-range! [this from to]
-    "Highlights a range in the editor.")
-
-  (clear-highlight! [this]
-    "Clears any highlighted range.")
-
-  (focus! [this]
-    "Focuses the editor.")
-
-  (is-ready? [this]
-    "Returns true if the editor is ready for operations."))
+;; Removed (Phase 2): ISyntaxHighlighter — lib.editor.syntax integrates via CodeMirror
+;; compartments/effects (EXP-005 viewport cache); a tree-returning protocol does not fit and
+;; has no consumer.
+;; Removed (Phase 2): IEditorOperations — editor imperative ops are the public JS handle
+;; (lib.core useImperativeHandle); app.fx calls it directly and tests mock the :editor/* effects.
+;; A CLJS protocol adds no testability and risks API drift.
 
 ;; =============================================================================
 ;; Log Repository Protocol
