@@ -35,6 +35,9 @@
 (def TRANSITIONS fsm/TRANSITIONS)
 (def valid-transition? fsm/valid-transition?)
 
+;; Defined near the end; forward-declared for the record (connect-supplier/connect!).
+(declare reconnect-with-backoff!)
+
 ;; =============================================================================
 ;; Pending Request Management
 ;; =============================================================================
@@ -99,7 +102,8 @@
               (swap! state-atom assoc-in [:lsp language :state] :connecting)
 
               ;; Attempt connection with timeout
-              (let [connect-ch (lsp/connect conn language config state-atom events)
+              (let [connect-ch (lsp/connect conn language config state-atom events
+                                            (fn [] (reconnect-with-backoff! this language config)))
                     timeout-ch (timeout init-timeout)
                     [result port] (alts! [connect-ch timeout-ch])]
                 (cond
@@ -141,10 +145,12 @@
   (initialized? [_this language]
     (= :initialized (get-in @state-atom [:lsp language :state])))
 
-  (connect-supplier [_this language url]
-    ;; Returns the exact resource supplier lib.core feeds to lib.state/load-resource,
-    ;; preserving the resource-managed connect flow (no state-machine adoption).
-    #(lsp/connect conn language {:url url} state-atom events))
+  (connect-supplier [this language url]
+    ;; Returns the resource supplier lib.core feeds to lib.state/load-resource. The
+    ;; reconnect-fn wires the CM's reconnect-with-backoff! so an established connection
+    ;; that drops unexpectedly is retried (active by default).
+    #(lsp/connect conn language {:url url} state-atom events
+                  (fn [] (reconnect-with-backoff! this language {:url url}))))
 
   ;; === Document Lifecycle Notifications ===
 

@@ -29,7 +29,7 @@
                                 (fn [mock]
                                   (go
                                     (try
-                                      (let [connect-ch (lsp/connect (ws/default-conn) "test" {:url "ws://test"} state events)]
+                                      (let [connect-ch (lsp/connect (ws/default-conn) "test" {:url "ws://test"} state events nil)]
                                         (let [wait-res (<! (wait-for #(some? (.-onopen (:sock mock))) 1000))]
                                           (if (= :error (first wait-res))
                                             (throw (second wait-res))

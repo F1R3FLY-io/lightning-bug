@@ -153,6 +153,8 @@
      (when (and (:ws lsp-state) (:connected? lsp-state) (:reachable? lsp-state))
        (request-shutdown lang state-atom))))
   ([lang state-atom]
+   ;; Mark a graceful shutdown so the socket's onclose does NOT auto-reconnect.
+   (swap! state-atom assoc-in [:lsp lang :shutting-down?] true)
    (send lang {:method "shutdown"
                :response-type :shutdown} state-atom)))
 
@@ -332,8 +334,10 @@
 
 (defn connect
   "Establishes a WebSocket connection to the LSP server for a specific language.
-   Sets up event handlers and initializes the LSP, resolving the promise with the WebSocket object."
-  [conn lang config state-atom events]
+   Sets up event handlers and initializes the LSP, resolving the promise with the WebSocket object.
+   `reconnect-fn` (may be nil) is invoked when an ESTABLISHED connection drops unexpectedly
+   (not on graceful shutdown, not on a failed initial connect) — wiring auto-reconnect."
+  [conn lang config state-atom events reconnect-fn]
   (go
     (try
       (let [url (:url config)
@@ -344,15 +348,24 @@
         (swap! state-atom update-in [:lsp lang] assoc
                :ws socket
                :warned-unreachable? false
+               :shutting-down? false
                :url url)
         (transition! state-atom lang :connecting)
         (set! (.-onmessage socket) #(handle-message conn lang (.-data %) state-atom events))
-        (set! (.-onclose socket) #(do
-                                    (log/trace (str "LSP WS closed for lang=" lang))
-                                    (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
-                                      (rej-fn (js/Error. (str "LSP WebSocket closed unexpectedly for language " lang))))
-                                    (swap! state-atom update :lsp dissoc lang)
-                                    (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
+        (set! (.-onclose socket)
+              #(let [was-connected? (fsm/state->connected? (get-in @state-atom [:lsp lang :state]))
+                     shutting-down? (get-in @state-atom [:lsp lang :shutting-down?])]
+                 (log/trace (str "LSP WS closed for lang=" lang))
+                 (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
+                   (rej-fn (js/Error. (str "LSP WebSocket closed unexpectedly for language " lang))))
+                 (swap! state-atom update :lsp dissoc lang)
+                 (.next events (clj->js {:type "disconnect" :data {:lang lang}}))
+                 ;; Auto-reconnect: only when an established connection dropped unexpectedly
+                 ;; (was connected, not a graceful shutdown). Active by default; the CM
+                 ;; supplies reconnect-fn = reconnect-with-backoff! (its formerly-dead path).
+                 (when (and reconnect-fn was-connected? (not shutting-down?))
+                   (log/info (str "LSP connection dropped for lang=" lang "; attempting reconnect"))
+                   (reconnect-fn))))
         (set! (.-onerror socket) #(do
                                     (log/warn (str "LSP connection error for lang=" lang "; marking unreachable: " (.-message %)))
                                     (transition! state-atom lang :error)
