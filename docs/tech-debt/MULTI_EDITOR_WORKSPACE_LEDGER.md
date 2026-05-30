@@ -191,6 +191,32 @@ clj-kondo + eastwood 0/0; committed `21909ae`, `2eec1b0`, `014e5b8`, `da079b7`).
 
 **Results:** test:debug **513/513**, clj-kondo 0/0, eastwood 0/0, test:types clean.
 
+## Phase 6 — Wire lib.lifecycle (per-instance) — DONE
+
+The 3rd dead abstraction (`lib.lifecycle`, ~311 LOC) is now per-instance AND wired:
+
+- **Per-instance registry:** every registry op (`register-resource-in!`/`start-resource!`/
+  `stop-resource!`/`start-all!`/`stop-all!`/`get-resource`/`resource-started?`/
+  `unregister-resource!`/`list-resources`/`reset-registry!`) takes an OPTIONAL leading
+  `reg-atom` (+ `shutdown-atom` where needed), threaded EXPLICITLY (async-safe across the
+  go-block parks; a dynamic var would not survive them). The no-`reg-atom` arities operate on
+  the module-global default registry, so `lifecycle_test`'s 24 register / 9 start / etc. calls
+  and the default-manager tests (which register globally then drive a manager) are unchanged.
+  `LifecycleManager` gained `registry`/`shutdown?` fields; `make-lifecycle-manager` binds the
+  GLOBAL atoms (default-manager semantics for the test-suite); new
+  `make-isolated-lifecycle-manager` gives a fresh private registry. `register-resource-in!`
+  gained a `:started?` option (register an already-running resource without an async start).
+- **Wired into the Editor:** `lib.core` builds one `make-isolated-lifecycle-manager` per editor
+  (useMemo → survives re-renders). On mount it registers the pane's running resources — `:lsp`
+  (shutdown-all!), `:editor-view` (destroy + nil the ref), `:events-sub` (unsubscribe),
+  `:emit-timers` (clear) — with priorities. The unmount effect's former hand-ordered cleanup is
+  replaced by one `stop-all-sync!` that tears them down in reverse-priority order (LSP → view →
+  sub → timers — identical to the previous order). `stop-all-sync!` (new) is a synchronous,
+  ordered cleanup-fn pass so DOM teardown is not deferred into an async go-block (avoids a
+  strict-mode remount racing the destroy).
+
+**Results:** test:debug **513/513**, clj-kondo 0/0, eastwood 0/0, test:types clean.
+
 ## Phase 7 — Public API, wire app.languages, types — DONE
 
 - Exported `createWorkspace` (wraps make-workspace) + `EditorWorkspaceProvider` from the

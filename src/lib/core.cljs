@@ -12,6 +12,7 @@
    [lib.editor.runtime :as rt :refer [emit-event clear-emit-timers! get-extensions update-editor-state]]
    [lib.editor.commands :as commands]
    [lib.lsp.connection-manager :as cm]
+   [lib.lifecycle :as lifecycle]
    [domain.protocols :as p]
    [lib.state :refer [normalize-languages normalize-editor-config validate-editor-config!]]
    [lib.utils :refer [log-error-with-cause]]
@@ -111,6 +112,9 @@
                       ;; editor's state-atom + events + workspace conn; routes all LSP
                       ;; calls through the protocol.
                       client (react/useMemo (fn [] (cm/make-connection-manager (:lsp workspace) events conn)) #js [])
+                      ;; Per-editor lifecycle manager (isolated registry, survives re-renders
+                      ;; via useMemo) — orders teardown of this pane's resources on unmount.
+                      lifecycle-mgr (react/useMemo (fn [] (lifecycle/make-isolated-lifecycle-manager)) #js [])
                       ;; Per-editor context bundling the deps the imperative handle methods need.
                       ctx (react/useMemo (fn [] {:state-atom state-atom :view-ref view-ref :events events
                                                  :client client :conn conn :workspace workspace :pane-id pane-id
@@ -207,6 +211,27 @@
                                                        (when-let [lang (db/document-language-by-uri conn uri)]
                                                          (p/request-symbols! client lang uri))))))))]
                          (set! (.-current view-ref) editor-view)
+                         ;; Phase 6: register this pane's already-running resources with the
+                         ;; per-editor lifecycle manager so they tear down in ONE ordered pass
+                         ;; on unmount (priority desc: LSP -> view -> events-sub -> emit-timers).
+                         ;; Marked :started? since each exists now.
+                         (let [reg (:registry lifecycle-mgr)
+                               sd (:shutdown? lifecycle-mgr)]
+                           (lifecycle/register-resource-in! reg sd :lsp client
+                                                            :cleanup-fn (fn [_] (p/shutdown-all! client))
+                                                            :priority 40 :started? true)
+                           (lifecycle/register-resource-in! reg sd :editor-view editor-view
+                                                            :cleanup-fn (fn [_]
+                                                                          (when-let [^js v (.-current view-ref)]
+                                                                            (.destroy v))
+                                                                          (set! (.-current view-ref) nil))
+                                                            :priority 30 :started? true)
+                           (lifecycle/register-resource-in! reg sd :events-sub sub
+                                                            :cleanup-fn (fn [^js s] (.unsubscribe s))
+                                                            :priority 20 :started? true)
+                           (lifecycle/register-resource-in! reg sd :emit-timers ::emit-timers
+                                                            :cleanup-fn (fn [_] (clear-emit-timers!))
+                                                            :priority 10 :started? true))
                          (js/setTimeout
                           (fn []
                             (emit-event events "ready" {})
@@ -221,12 +246,11 @@
                          (fn []
                            (log/info "Editor: Destroying EditorView")
                            (swap! state-atom assoc :mounted? false)
-                           (p/shutdown-all! client)
-                           (when-let [editor-view (.-current view-ref)]
-                             (.destroy editor-view))
-                           (set! (.-current view-ref) nil)
-                           (.unsubscribe sub)
-                           (clear-emit-timers!) ;; Clean up pending event timers
+                           ;; Phase 6: ordered, synchronous teardown of the registered
+                           ;; resources (LSP shutdown -> view destroy -> events unsubscribe ->
+                           ;; emit-timers clear) via the lifecycle manager, replacing the
+                           ;; former hand-ordered cleanup.
+                           (lifecycle/stop-all-sync! (:registry lifecycle-mgr))
                            (emit-event events "destroy" {})
                            (set-ready false)
                            ;; Only clear the workspace FOCUS if THIS pane held it
