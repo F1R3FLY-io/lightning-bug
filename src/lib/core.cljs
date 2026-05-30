@@ -142,20 +142,39 @@
                   ;; Phase 4: subscribe this pane to its active file's reactive change
                   ;; stream, so edits from OTHER panes on the same file apply live here
                   ;; (this pane's cursor/selection preserved via selection-mapping).
-                  ;; Re-subscribes when the pane's file changes; releases the ref-counted
-                  ;; stream on cleanup.
+                  ;; The (re)subscription is driven by a state-atom WATCH — NOT a React
+                  ;; dependency — so it tracks :active-uri changes regardless of the host
+                  ;; framework's re-render behavior. A reagent host re-renders on a
+                  ;; state-atom mutation; a plain-React host does not, and a React-dep
+                  ;; effect would then never re-subscribe when the pane switches files.
+                  ;; The watch fires on every state-atom change and re-subscribes only when
+                  ;; :active-uri actually changes. Cleanup removes the watch and releases
+                  ;; the ref-counted stream.
                   (react/useEffect
                    (fn []
-                     (if-let [au (:active-uri @state-atom)]
-                       (let [sub (doc-sync/subscribe-pane
-                                  workspace au pane-id
-                                  (fn [delta]
-                                    (doc-sync/apply-remote-delta! (.-current view-ref) delta)))]
-                         (fn []
-                           (.unsubscribe sub)
-                           (doc-sync/release-stream! workspace au)))
-                       js/undefined))
-                   #js [(:active-uri @state-atom) workspace])
+                     (let [sub-state (atom nil)
+                           resubscribe!
+                           (fn [uri]
+                             (when-let [{prev-uri :uri prev-sub :sub} @sub-state]
+                               (.unsubscribe prev-sub)
+                               (doc-sync/release-stream! workspace prev-uri))
+                             (reset! sub-state
+                                     (when uri
+                                       {:uri uri
+                                        :sub (doc-sync/subscribe-pane
+                                              workspace uri pane-id
+                                              (fn [delta]
+                                                (doc-sync/apply-remote-delta! (.-current view-ref) delta)))})))
+                           watch-key (keyword "lib.core" (str "doc-sync-" pane-id))]
+                       (resubscribe! (:active-uri @state-atom))
+                       (add-watch state-atom watch-key
+                                  (fn [_ _ old new]
+                                    (when (not= (:active-uri old) (:active-uri new))
+                                      (resubscribe! (:active-uri new)))))
+                       (fn []
+                         (remove-watch state-atom watch-key)
+                         (resubscribe! nil))))
+                   #js [workspace pane-id])
                   (react/useEffect
                    (fn []
                      (let [shutdown-all (fn []
