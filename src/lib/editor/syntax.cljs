@@ -8,7 +8,7 @@
    ["@codemirror/view" :refer [Decoration ViewPlugin]]
    ["web-tree-sitter" :as TreeSitter :refer [Language Parser Query]]
    [lib.db :as db]
-   [lib.state :refer [normalize-languages load-resource]]
+   [lib.state :refer [normalize-languages load-resource resources]]
    [lib.utils :refer [log-error-with-cause promise->chan]]
    [lib.editor.annotations :refer [external-set-annotation]]))
 
@@ -318,11 +318,12 @@
   #js [])
 
 (defn load-resource-with-validator
-  "Loads a resource and validates it with the provided predicate, logging errors if invalid."
-  [type lang-key resource-key supplier pred error-msg]
+  "Loads a resource and validates it with the provided predicate, logging errors if invalid.
+  `res-atom` is the (per-workspace) resources atom to load/cache into."
+  [res-atom type lang-key resource-key supplier pred error-msg]
   (go
     (try
-      (let [[status result] (<! (load-resource type resource-key supplier))]
+      (let [[status result] (<! (load-resource res-atom type resource-key supplier))]
         (log/trace "Loaded resource" resource-key "for" lang-key "with status" status "and type" (type result))
         (if (= :error status)
           (do
@@ -341,9 +342,12 @@
   "Initializes syntax highlighting and indentation for the editor view asynchronously.
    Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment.
    `conn` is the workspace DataScript conn (threaded explicitly so callers/tests need
-   not seed it into the state-atom)."
-  [^js view state-atom conn]
-  (go
+   not seed it into the state-atom). `res-atom` is the (per-workspace) resources atom the
+   tree-sitter grammar/queries are loaded/cached into; the 3-arity defaults it to the shared
+   global `resources` (used by the parser/syntax tests)."
+  ([^js view state-atom conn] (init-syntax view state-atom conn resources))
+  ([^js view state-atom conn res-atom]
+   (go
     (try
       (if-let [lang-key (db/document-language-by-uri conn (:active-uri @state-atom))]
         (do
@@ -402,6 +406,7 @@
                               indent-unit-str (str/join (repeat indent-size " "))
                               indent-unit-ext (.of indentUnit indent-unit-str)
                               hq-str-ch (load-resource-with-validator
+                                         res-atom
                                          :tree-sitter
                                          lang-key
                                          (keyword lang-key "highlights-query-str")
@@ -431,6 +436,7 @@
                                          string?
                                          "Failed to load highlights-query-str for ")
                               iq-str-ch (load-resource-with-validator
+                                         res-atom
                                          :tree-sitter
                                          lang-key
                                          (keyword lang-key "indents-query-str")
@@ -460,6 +466,7 @@
                                          string?
                                          "Failed to load indents-query-str for ")
                               parser-ch (load-resource-with-validator
+                                         res-atom
                                          :tree-sitter
                                          lang-key
                                          (keyword lang-key "parser")
@@ -498,6 +505,7 @@
                               hq-query-ch (if (or (= :error hq-status) (nil? highlights-query-str) (= :error lang-status))
                                             (doto (promise-chan) (put! [:ok nil]))
                                             (load-resource-with-validator
+                                             res-atom
                                              :tree-sitter
                                              lang-key
                                              (keyword lang-key "highlights-query")
@@ -519,6 +527,7 @@
                               iq-query-ch (if (or (= :error iq-status) (nil? indents-query-str) (= :error lang-status))
                                             (doto (promise-chan) (put! [:ok nil]))
                                             (load-resource-with-validator
+                                             res-atom
                                              :tree-sitter
                                              lang-key
                                              (keyword lang-key "indents-query")
@@ -539,6 +548,7 @@
                               lsf-ch (if (= :error parser-status)
                                        (doto (promise-chan) (put! [:ok nil]))
                                        (load-resource-with-validator
+                                        res-atom
                                         :tree-sitter
                                         lang-key
                                         (keyword lang-key "language-state-field")
@@ -557,6 +567,7 @@
                               hp-ch (if (or (= :error lsf-status) (= :error hq-query-status) (nil? highlights-query))
                                       (doto (promise-chan) (put! [:ok nil]))
                                       (load-resource-with-validator
+                                       res-atom
                                        :tree-sitter
                                        lang-key
                                        (keyword lang-key "highlight-plugin")
@@ -574,6 +585,7 @@
                               ie-ch (if (or (= :error lsf-status) (= :error iq-query-status) (nil? indents-query))
                                       (doto (promise-chan) (put! [:ok nil]))
                                       (load-resource-with-validator
+                                       res-atom
                                        :tree-sitter
                                        lang-key
                                        (keyword lang-key "indent-ext")
@@ -663,4 +675,4 @@
           (log-error-with-cause error-with-cause)
           (when view
             (.dispatch view #js {:effects (.reconfigure syntax-compartment (fallback-extension {}))}))
-          [:error error-with-cause])))))
+          [:error error-with-cause]))))))

@@ -452,7 +452,7 @@
                                 [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
                    syntax-ch (go
                                (try
-                                 (<! (syntax/init-syntax (.-current view-ref) state-atom conn))
+                                 (<! (syntax/init-syntax (.-current view-ref) state-atom conn (:resources workspace)))
                                  (catch :default e
                                    [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})])))
                    lsp-timeout-ms (:lsp-init-timeout-ms @state-atom 5000)

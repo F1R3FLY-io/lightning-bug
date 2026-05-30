@@ -265,7 +265,7 @@
                                                           (when (= old-uri (:active-uri @state-atom))
                                                             (do (swap! state-atom assoc :active-uri new-uri) (db/update-active-uri! conn new-uri))
                                                             (when-let [^js editor-view (.-current view-ref)]
-                                                              (if-let [res (<! (syntax/init-syntax editor-view state-atom conn))]
+                                                              (if-let [res (<! (syntax/init-syntax editor-view state-atom conn (:resources workspace)))]
                                                                 (when (= :error (first res))
                                                                   (throw (js/Error. (str "(.renameDocument this " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause (second res)})))
                                                                 (throw (js/Error. (str "(syntax/init-syntax editor-view state-atom) returned nothing in call to (.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed"))))))
