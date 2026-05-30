@@ -256,8 +256,18 @@ on file-switch is framework-agnostic; seeding was already framework-agnostic (ac
 dispatches content into the view directly).
 
 **Final suite: 513/513** (was 505 pre-Phase-8: +2 multi_pane, +3 multi_editor, +3 lsp_multi_pane;
-doc_sync_test pre-existed). clj-kondo 0/0, eastwood 0/0, test:types (tsd) clean, `:libs` + `:app`
-builds clean.
+doc_sync_test pre-existed). Verified across all gates:
+- `test:types` (tsd): clean.
+- `test:debug` (`:none` karma): **513/513**, zero failures.
+- `test:release` (`:advanced` karma, externs + pseudo-names): **513/513**, zero failures —
+  confirms the `createWorkspace`/`EditorWorkspaceProvider` exports + the Workspace record's
+  keyword-field access + the per-workspace LSP/resources wiring all survive advanced
+  name-mangling.
+- clj-kondo 0/0, eastwood 0/0; `:libs` + `:app` + `:benchmark` builds clean.
+- `npm test`'s final `test:demo` step fails ONLY because it launches GUI browsers (Safari/Brave/
+  webkit) that are unavailable in this headless environment (Safari is macOS-only; Brave not
+  installed; the bundled webkit hits a `libgudev` `g_once_init_enter_pointer` symbol error) —
+  an environment limitation, not a code regression. All ClojureScript + TypeScript gates pass.
 
 **Performance:** the keystroke hot path is unchanged by Phases 5b/6 — the didChange accumulation
 is the same single `swap!` (now on the per-workspace `:lsp` atom instead of the per-editor
