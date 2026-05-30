@@ -113,7 +113,8 @@
                       client (react/useMemo (fn [] (cm/make-connection-manager state-atom events conn)) #js [])
                       ;; Per-editor context bundling the deps the imperative handle methods need.
                       ctx (react/useMemo (fn [] {:state-atom state-atom :view-ref view-ref :events events
-                                                 :client client :conn conn :workspace workspace :pane-id pane-id}) #js [])
+                                                 :client client :conn conn :workspace workspace :pane-id pane-id
+                                                 :lsp-atom state-atom}) #js [])
                       on-content-change (:on-content-change props)
                       container-ref (react/useRef nil)]
                   (react/useImperativeHandle

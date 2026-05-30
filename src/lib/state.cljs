@@ -142,77 +142,83 @@
    {}
    langs))
 
+;; The resource fns take an OPTIONAL leading `res-atom` (a per-workspace resources atom).
+;; The no-`res-atom` arities default to the module-global `resources` shim above, so the
+;; many tests that exercise these directly (state_test) and any legacy caller keep working
+;; unchanged; production threads its workspace's `:resources` atom for isolation.
 (defn get-resource
-  "Retrieves a resource from the shared atom, or nil if not present."
-  [type lang]
-  (get-in @resources [type lang :resource]))
+  "Retrieves a resource from the resources atom (default: the shared global), or nil."
+  ([type lang] (get-resource resources type lang))
+  ([res-atom type lang] (get-in @res-atom [type lang :resource])))
 
 (defn get-resource-promise
   "Retrieves the loading promise for a resource, or nil if not loading."
-  [type lang]
-  (get-in @resources [type lang :promise]))
+  ([type lang] (get-resource-promise resources type lang))
+  ([res-atom type lang] (get-in @res-atom [type lang :promise])))
 
 (defn set-resource!
-  "Stores a loaded resource in the shared atom."
-  [type lang resource]
-  (swap! resources assoc-in [type lang :resource] resource))
+  "Stores a loaded resource in the resources atom."
+  ([type lang resource] (set-resource! resources type lang resource))
+  ([res-atom type lang resource] (swap! res-atom assoc-in [type lang :resource] resource)))
 
 (defn set-resource-promise!
-  "Stores a loading promise in the shared atom."
-  [type lang promise]
-  (swap! resources assoc-in [type lang :promise] promise))
+  "Stores a loading promise in the resources atom."
+  ([type lang promise] (set-resource-promise! resources type lang promise))
+  ([res-atom type lang promise] (swap! res-atom assoc-in [type lang :promise] promise)))
 
 (defn clear-resource-promise!
   "Clears the loading promise after resolution."
-  [type lang]
-  (swap! resources update-in [type lang] dissoc :promise))
+  ([type lang] (clear-resource-promise! resources type lang))
+  ([res-atom type lang] (swap! res-atom update-in [type lang] dissoc :promise)))
 
 (defn load-resource
   "Loads a resource asynchronously if not present, using a supplier function that returns a value, [:ok value], promise, channel, or [:error error].
   Returns a channel that puts [:ok resource] or [:error error]."
-  [type lang supplier]
-  (if-let [resource (get-resource type lang)]
-    (let [ch (promise-chan)]
-        (put! ch [:ok resource])
-        ch)
-      (if-let [p (get-resource-promise type lang)]
-        (let [ch (chan)]
-            (go
-              (let [res (<! p)]
-                (put! ch res)))
-            ch)
-          (let [p (promise-chan)]
-            (set-resource-promise! type lang p)
-            (go
-              (try
-                (let [sup (supplier)
-                      sup-res (if (satisfies? async-impl/ReadPort sup)
-                                (<! sup)
-                                sup)
-                      [status val] (cond
-                                     (and (seqable? sup-res) (#{:ok :error} (first sup-res))) sup-res
-                                     :else [:ok sup-res])
-                      res-ch (if (instance? js/Promise val)
-                               (promise->chan val)
-                               (let [ch (promise-chan)]
-                                 (put! ch [status val])
-                                 ch))
-                      res-res (<! res-ch)]
-                  (if (and (seqable? res-res) (= :error (first res-res)))
-                    (put! p res-res)
-                    (let [res (if (seqable? res-res) (second res-res) res-res)]
-                      (set-resource! type lang res)
-                      (put! p [:ok res]))))
-                (catch js/Error e
-                  (log/error "Failed to create WebSocket for lang=" lang ": " (.-message e))
-                  (put! p [:error e]))
-                (finally
-                  (clear-resource-promise! type lang))))
-            p))))
+  ([type lang supplier] (load-resource resources type lang supplier))
+  ([res-atom type lang supplier]
+   (if-let [resource (get-resource res-atom type lang)]
+     (let [ch (promise-chan)]
+       (put! ch [:ok resource])
+       ch)
+     (if-let [p (get-resource-promise res-atom type lang)]
+       (let [ch (chan)]
+         (go
+           (let [res (<! p)]
+             (put! ch res)))
+         ch)
+       (let [p (promise-chan)]
+         (set-resource-promise! res-atom type lang p)
+         (go
+           (try
+             (let [sup (supplier)
+                   sup-res (if (satisfies? async-impl/ReadPort sup)
+                             (<! sup)
+                             sup)
+                   [status val] (cond
+                                  (and (seqable? sup-res) (#{:ok :error} (first sup-res))) sup-res
+                                  :else [:ok sup-res])
+                   res-ch (if (instance? js/Promise val)
+                            (promise->chan val)
+                            (let [ch (promise-chan)]
+                              (put! ch [status val])
+                              ch))
+                   res-res (<! res-ch)]
+               (if (and (seqable? res-res) (= :error (first res-res)))
+                 (put! p res-res)
+                 (let [res (if (seqable? res-res) (second res-res) res-res)]
+                   (set-resource! res-atom type lang res)
+                   (put! p [:ok res]))))
+             (catch js/Error e
+               (log/error "Failed to create WebSocket for lang=" lang ": " (.-message e))
+               (put! p [:error e]))
+             (finally
+               (clear-resource-promise! res-atom type lang))))
+         p)))))
 
 (defn close-resource!
-  "Closes a resource for a language and removes it from the atom."
-  [type lang closer]
-  (when-let [resource (get-resource type lang)]
-    (closer resource))
-  (swap! resources update type dissoc lang))
+  "Closes a resource for a language and removes it from the resources atom."
+  ([type lang closer] (close-resource! resources type lang closer))
+  ([res-atom type lang closer]
+   (when-let [resource (get-resource res-atom type lang)]
+     (closer resource))
+   (swap! res-atom update type dissoc lang)))

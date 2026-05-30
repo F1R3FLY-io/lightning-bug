@@ -3,7 +3,7 @@
    [clojure.spec.alpha :as s]
    [clojure.string :as str]
    [lib.db :as db :refer [flatten-diags flatten-symbols close-all-opened-by-lang!]]
-   [lib.state :refer [close-resource! get-resource set-resource!]]
+   [lib.state :refer [close-resource! get-resource set-resource! resources]]
    [lib.lsp.fsm :as fsm]
    [taoensso.timbre :as log]
    [clojure.core.async :refer [go <!]]
@@ -36,7 +36,7 @@
         connected? (:connected? lsp-state false)
         warned? (:warned-unreachable? lsp-state false)]
     (if connected?
-      (when-let [ws (get-resource :lsp lang)]
+      (when-let [ws (get-resource (or (:res-atom @state-atom) resources) :lsp lang)]
         (log/trace (str "Sending raw LSP message for lang=" lang ", length=" (.-length full-msg) ":\n" full-msg))
         (.send ws full-msg))
       (when-not warned?
@@ -199,7 +199,7 @@
   (log/info "Received shutdown response for lang" lang)
   (close-all-opened-by-lang! conn lang)
   (notify-exit lang state-atom)
-  (close-resource! :lsp lang (fn [ws] (.close ws))))
+  (close-resource! (or (:res-atom @state-atom) resources) :lsp lang (fn [ws] (.close ws))))
 
 ;; Notification handlers (server -> client notifications)
 
@@ -344,7 +344,7 @@
             socket (js/WebSocket. url)]
         (log/trace "Creating WebSocket connection for lang=" lang " with url=" url)
         (set! (.-binaryType socket) "arraybuffer")
-        (set-resource! :lsp lang socket)
+        (set-resource! (or (:res-atom @state-atom) resources) :lsp lang socket)
         (swap! state-atom update-in [:lsp lang] assoc
                :ws socket
                :warned-unreachable? false

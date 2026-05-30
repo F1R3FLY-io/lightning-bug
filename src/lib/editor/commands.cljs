@@ -31,13 +31,17 @@
   "Builds the imperative #js handle for the Editor ref. ctx is the per-editor context
   {:state-atom :view-ref :events :client}; ready is the current readiness flag."
   [ctx ready]
-  (let [{:keys [state-atom view-ref events client conn]} ctx]
+  (let [{:keys [state-atom view-ref events client conn lsp-atom]} ctx]
                      #js {;; Returns the full current state (workspace, diagnostics, symbols, etc.).
                           ;; Example: (.getState editor)
                           :getState (fn []
                                       (try
                                         (log/trace "Fetching editor state")
+                                        ;; :lsp is sourced from the (per-workspace) lsp-atom
+                                        ;; so getState reflects the shared connection state
+                                        ;; regardless of which pane is queried.
                                         (clj->js (assoc @state-atom
+                                                        :lsp (:lsp @lsp-atom)
                                                         :workspace {:documents (db/documents conn)
                                                                     :activeUri (:active-uri @state-atom)}
                                                         :logs (db/logs conn)
@@ -289,7 +293,7 @@
                                                   [text lang dirty] (db/doc-text-lang-dirty-by-uri conn uri)]
                                               (log/info "Saving document:" uri)
                                               (when (and uri dirty)
-                                                (when (get-in @state-atom [:lsp lang :connected?])
+                                                (when (get-in @lsp-atom [:lsp lang :connected?])
                                                   (p/notify-did-save! client lang uri text)
                                                   (emit-event events "lsp-message" {:method "textDocument/didSave"
                                                                                     :lang lang
@@ -425,7 +429,7 @@
                                                                                              :insert text}
                                                                                :annotations (.of external-set-annotation true)}))
                                                  (log/warn "Cannot set editor text: view not ready")))
-                                             (when (and lang opened? (get-in @state-atom [:lsp lang :connected?]))
+                                             (when (and lang opened? (get-in @lsp-atom [:lsp lang :connected?]))
                                                (let [version (db/inc-document-version-by-id! conn id)]
                                                  (p/notify-did-change! client lang uri text version)
                                                  (emit-event events "lsp-message" {:method "textDocument/didChange"

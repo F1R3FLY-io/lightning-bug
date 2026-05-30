@@ -16,20 +16,35 @@
 ;; `map->Workspace` so additional fields (LSP state, etc.) can be added in later
 ;; phases without breaking existing construction sites.
 ;;   :conn        - DataScript connection (documents/projects/diagnostics/...)
-;;   :resources   - loaded language resources (grammars/parsers/LSP sockets)
+;;   :resources   - loaded language resources (tree-sitter grammars/parsers, and the
+;;                  LSP connect-dedup bookkeeping); see lib.state resource fns.
 ;;   :doc-streams - atom {uri -> {:subject rxjs.Subject :seq int :ref-count int}}
 ;;                  the per-(workspace,file) reactive change channel that keeps
 ;;                  multiple editors over the SAME file in sync (lib.workspace.doc-sync).
-(defrecord Workspace [conn resources doc-streams])
+;;   :lsp         - atom holding the per-workspace LSP connection state, shape
+;;                  {:lsp {lang {:state ... :pending ... :next-id ... :ws socket ...}}
+;;                   :pending-lsp-changes {uri [content-change ...]}}.
+;;                  ONE LSP connection per language per workspace is shared by all the
+;;                  workspace's editor panes (so a file open in two split panes yields a
+;;                  single didOpen and one monotonic didChange stream). The inner shape
+;;                  mirrors what the per-editor state-atom held under :lsp, so every
+;;                  lib.lsp.client `(get-in @atom [:lsp lang ...])` body is unchanged.
+(defrecord Workspace [conn resources doc-streams lsp])
 
 (defn make-workspace
   "Creates an ISOLATED workspace: a fresh DataScript conn + empty resources + an
   empty reactive doc-stream registry. Two editors given distinct workspaces share
   no documents, resources, or change streams."
   []
-  (map->Workspace {:conn (d/create-conn db/schema)
-                   :resources (atom {:lsp {} :tree-sitter {}})
-                   :doc-streams (atom {})}))
+  (let [resources (atom {:lsp {} :tree-sitter {}})]
+    (map->Workspace {:conn (d/create-conn db/schema)
+                     :resources resources
+                     :doc-streams (atom {})
+                     ;; The lsp atom carries a reference to THIS workspace's resources atom
+                     ;; under :res-atom, so lib.lsp.client (which only ever has the lsp atom
+                     ;; in hand, including in async WebSocket callbacks) can reach the right,
+                     ;; per-workspace socket store without threading a separate parameter.
+                     :lsp (atom {:lsp {} :res-atom resources})})))
 
 ;; Lazily-created process-default workspace. `defonce` + `delay` is what makes the
 ;; SAME conn survive React re-renders AND dev hot-reloads (`:dev/after-load`): the
@@ -59,8 +74,9 @@
   (instance? Workspace x))
 
 (defn reset-workspace!
-  "Test seam: empties a workspace's conn + resources in place, preserving the conn
-  identity (mirrors the existing `(d/reset-conn! db/conn ...)` fixture idiom)."
-  [{:keys [conn resources]}]
+  "Test seam: empties a workspace's conn + resources + LSP state in place, preserving
+  the conn identity (mirrors the existing `(d/reset-conn! db/conn ...)` fixture idiom)."
+  [{:keys [conn resources lsp]}]
   (d/reset-conn! conn (d/empty-db db/schema))
-  (reset! resources {:lsp {} :tree-sitter {}}))
+  (reset! resources {:lsp {} :tree-sitter {}})
+  (when lsp (reset! lsp {:lsp {} :res-atom resources})))
