@@ -305,3 +305,26 @@
         (is (= "original" text))
         (is (= "rholang" lang))))))
 
+(deftest projects-crud-and-linking
+  (testing "create + query projects and link documents (Phase 3: workspace projects)"
+    (let [conn (ws/default-conn)]
+      (db/create-projects! conn [{:id "proj-a" :name "Project A" :root "inmemory:///a/"}
+                                 {:id "proj-b" :root "inmemory:///b/"}])
+      (is (= 2 (count (db/projects conn))) "two projects created")
+      (is (some? (db/project-by-id conn "proj-a")) "project-by-id finds proj-a")
+      (is (nil? (db/project-by-id conn "missing")) "missing project -> nil")
+      (is (= "proj-a" (db/project-by-root conn "inmemory:///a/")) "project-by-root")
+      ;; auto-link by uri-under-root at create time
+      (db/create-documents! conn [{:uri "inmemory:///a/x.rho" :text "" :language "rholang" :version 1 :dirty false :opened false}
+                                  {:uri "inmemory:///b/y.rho" :text "" :language "rholang" :version 1 :dirty false :opened false}
+                                  {:uri "inmemory:///none.rho" :text "" :language "rholang" :version 1 :dirty false :opened false}])
+      (is (= "proj-a" (:id (db/project-of-uri conn "inmemory:///a/x.rho"))) "x.rho auto-linked to proj-a")
+      (is (= "Project A" (:name (db/project-of-uri conn "inmemory:///a/x.rho"))) "project name returned")
+      (is (= "proj-b" (:id (db/project-of-uri conn "inmemory:///b/y.rho"))) "y.rho auto-linked to proj-b")
+      (is (nil? (db/project-of-uri conn "inmemory:///none.rho")) "unrooted doc has no project")
+      (is (= ["inmemory:///a/x.rho"] (db/documents-by-project conn "proj-a")) "documents-by-project")
+      ;; explicit link of a previously-unlinked document
+      (db/link-document-to-project! conn "inmemory:///none.rho" "proj-a")
+      (is (= "proj-a" (:id (db/project-of-uri conn "inmemory:///none.rho"))) "explicit link works")
+      (is (= 2 (count (db/documents-by-project conn "proj-a"))) "proj-a now has 2 docs"))))
+

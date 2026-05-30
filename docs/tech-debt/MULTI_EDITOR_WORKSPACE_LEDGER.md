@@ -87,3 +87,20 @@ workspace can show different files), while the workspace keeps a single FOCUS fo
 
 **Results:** test:debug 501/501, clj-kondo 0/0, eastwood 0/0, test:types clean. No dead
 code introduced (`active-version`/`active-uri-text-lang` retain db_query_test coverage).
+
+## Phase 3 — Projects + files model — DONE
+
+**Goal:** a workspace groups its files into projects ("workspaces with multiple projects
+and files").
+
+- New schema: `:project/id` (unique-identity), `:project/root` (unique-identity),
+  `:project/name`, and `:document/project` (ref). Added `::project` spec + `valid-project?`.
+- Accessors (conn-first): `create-projects!`, `projects`, `project-by-id`,
+  `project-by-root`, `project-for-uri` (longest-root-prefix match), `documents-by-project`,
+  `project-of-uri` (→ {:id :name :root}), `link-document-to-project!`.
+- `create-documents!` auto-links a new document to a project: an explicit `:project` id
+  wins, else the project whose `:project/root` is a prefix of the uri. No projects ⇒ no
+  link (backward-compatible; existing callers unchanged).
+- New test `db_test/projects-crud-and-linking` (create/query/auto-link/explicit-link).
+
+**Results:** test:debug **502/502**, clj-kondo 0/0, eastwood 0/0, test:types clean.

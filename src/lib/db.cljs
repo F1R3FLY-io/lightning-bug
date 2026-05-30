@@ -1,6 +1,7 @@
 (ns lib.db
   (:require
    [clojure.spec.alpha :as s]
+   [clojure.string :as str]
    [taoensso.timbre :as log]
    [datascript.core :as d]))
 
@@ -24,7 +25,16 @@
              :document/language {:db/index true}
              :document/version {:db/index true}
              :document/opened {:db/index true}
+             ;; Projects group files within a workspace. A document optionally belongs
+             ;; to one project (by uri-under-root or explicit assignment).
+             :document/project {:db/valueType :db.type/ref :db/cardinality :db.cardinality/one :db/index true}
+             :project/id {:db/unique :db.unique/identity}
+             :project/root {:db/unique :db.unique/identity}
              :workspace/active-uri {:db/unique :db.unique/identity}})
+
+;; Forward declarations: create-documents! auto-links a new document to a project,
+;; but the project accessors are defined later in this namespace.
+(declare project-by-id project-for-uri)
 
 ;; NOTE: there is intentionally NO module-global conn (multi-editor-workspace
 ;; refactor). Each workspace (lib.workspace/Workspace) owns its own DataScript conn;
@@ -82,6 +92,15 @@
   (s/and
    (s/keys :req [:workspace/active-uri])
    #(= :active-uri (:type %))))
+
+(s/def :project/id string?)
+(s/def :project/name string?)
+(s/def :project/root string?)
+(s/def ::project
+  (s/and
+   (s/keys :req [:project/id :project/root]
+           :opt [:project/name])
+   #(= :project (:type %))))
 
 (s/def :diagnostic/message string?)
 (s/def :diagnostic/severity pos-int?)
@@ -152,6 +171,9 @@
 
 (defn valid-symbol? [data]
   (valid? ::symbol data))
+
+(defn valid-project? [data]
+  (valid? ::project data))
 
 (defn create-logs!
   [conn logs]
@@ -753,13 +775,17 @@
 (defn create-documents!
   [conn docs]
   (let [tx (map (fn [doc]
-                  {:document/uri (:uri doc)
-                   :document/text (:text doc)
-                   :document/language (:language doc)
-                   :document/version (:version doc)
-                   :document/dirty (:dirty doc)
-                   :document/opened (:opened doc)
-                   :type :document}) docs)]
+                  ;; Link the document to a project: explicit :project id wins, else the
+                  ;; project whose :project/root is a prefix of the uri (nil if no projects).
+                  (let [pid (or (:project doc) (project-for-uri conn (:uri doc)))]
+                    (cond-> {:document/uri (:uri doc)
+                             :document/text (:text doc)
+                             :document/language (:language doc)
+                             :document/version (:version doc)
+                             :document/dirty (:dirty doc)
+                             :document/opened (:opened doc)
+                             :type :document}
+                      (and pid (project-by-id conn pid)) (assoc :document/project [:project/id pid])))) docs)]
     (when DEBUG
       (doseq [entity tx]
         (when-not (valid-document? entity)
@@ -1005,4 +1031,104 @@
     (when (seq prev-eids)
       (let [tx (mapv (fn [eid] [:db/retractEntity eid]) prev-eids)]
         (log/trace "Retracting active-uri on destroy:" tx)
+        (d/transact! conn tx)))))
+
+;; =============================================================================
+;; Projects — a workspace groups its files into projects
+;; =============================================================================
+
+(defn create-projects!
+  "Creates project entities. Each project map: {:id <string> :root <uri-prefix string>
+   :name <string?>}. :id and :root are unique-identity."
+  [conn projects]
+  (let [tx (map (fn [p]
+                  (cond-> {:project/id (:id p)
+                           :project/root (:root p)
+                           :type :project}
+                    (:name p) (assoc :project/name (:name p))))
+                projects)]
+    (when DEBUG
+      (doseq [entity tx]
+        (when-not (valid-project? entity)
+          (log/warn "Invalid project entity:" (s/explain-str ::project entity)))))
+    (log/trace "Executing transaction:" tx)
+    (d/transact! conn tx)))
+
+(defn projects
+  "Returns all projects as maps {:id :name :root} (name is \"\" when unset)."
+  [conn]
+  (d/q '[:find ?id ?name ?root
+         :keys id name root
+         :where [?e :project/id ?id]
+                [?e :project/root ?root]
+                [(get-else $ ?e :project/name "") ?name]]
+       @conn))
+
+(defn project-by-id
+  "Returns the entity id of the project with the given :project/id, or nil."
+  [conn id]
+  (when DEBUG
+    (when-not (s/valid? :project/id id)
+      (log/warn (s/explain-str :project/id id))))
+  (d/q '[:find ?e .
+         :in $ ?id
+         :where [?e :project/id ?id]]
+       @conn id))
+
+(defn project-by-root
+  "Returns the :project/id of the project whose :project/root equals root, or nil."
+  [conn root]
+  (d/q '[:find ?id .
+         :in $ ?root
+         :where [?e :project/root ?root]
+                [?e :project/id ?id]]
+       @conn root))
+
+(defn project-for-uri
+  "Returns the :project/id of the project whose :project/root is the LONGEST prefix
+   of uri, or nil if no project root matches."
+  [conn uri]
+  (when uri
+    (let [roots (d/q '[:find ?id ?root
+                       :where [?e :project/id ?id]
+                              [?e :project/root ?root]]
+                     @conn)]
+      (->> roots
+           (filter (fn [[_ root]] (str/starts-with? uri root)))
+           (sort-by (fn [[_ root]] (- (count root))))
+           ffirst))))
+
+(defn documents-by-project
+  "Returns the uris of documents belonging to the given :project/id."
+  [conn project-id]
+  (d/q '[:find [?uri ...]
+         :in $ ?pid
+         :where [?p :project/id ?pid]
+                [?e :document/project ?p]
+                [?e :document/uri ?uri]]
+       @conn project-id))
+
+(defn project-of-uri
+  "Returns the project {:id :name :root} a document belongs to, or nil."
+  [conn uri]
+  (when DEBUG
+    (when-not (s/valid? :document/uri uri)
+      (log/warn (s/explain-str :document/uri uri))))
+  (when-let [[id name root] (d/q '[:find [?id ?name ?root]
+                                   :in $ ?uri
+                                   :where [?d :document/uri ?uri]
+                                          [?d :document/project ?p]
+                                          [?p :project/id ?id]
+                                          [?p :project/root ?root]
+                                          [(get-else $ ?p :project/name "") ?name]]
+                                 @conn uri)]
+    {:id id :name name :root root}))
+
+(defn link-document-to-project!
+  "Associates an existing document (by uri) with a project (by :project/id)."
+  [conn uri project-id]
+  (when-let [doc-id (document-id-by-uri conn uri)]
+    (when (project-by-id conn project-id)
+      (let [tx [[:db/add doc-id :document/project [:project/id project-id]]]]
+        (log/trace "Executing transaction:" tx)
         (d/transact! conn tx)))))
