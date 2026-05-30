@@ -10,6 +10,7 @@
   IMPORTANT: `lib.db` must NEVER require `lib.workspace` (it would create a cycle).
   `lib.db` functions receive a bare `conn`, never a `Workspace`."
   (:require [datascript.core :as d]
+            ["rxjs" :refer [Subject]]
             [lib.db :as db]))
 
 ;; A Workspace bundles the shared, per-instance state. Constructed via
@@ -29,7 +30,12 @@
 ;;                  single didOpen and one monotonic didChange stream). The inner shape
 ;;                  mirrors what the per-editor state-atom held under :lsp, so every
 ;;                  lib.lsp.client `(get-in @atom [:lsp lang ...])` body is unchanged.
-(defrecord Workspace [conn resources doc-streams lsp])
+;;   :lsp-events  - rxjs Subject onto which the (single, per-workspace) LSP connection emits
+;;                  INBOUND server events (diagnostics/symbols/log/lsp-error/lsp-message).
+;;                  Every editor pane subscribes and forwards to its OWN per-pane events
+;;                  subject, so diagnostics/symbols reach ALL panes viewing the file — not
+;;                  just the one whose ConnectionManager happened to open the socket.
+(defrecord Workspace [conn resources doc-streams lsp lsp-events])
 
 (defn make-workspace
   "Creates an ISOLATED workspace: a fresh DataScript conn + empty resources + an
@@ -44,7 +50,8 @@
                      ;; under :res-atom, so lib.lsp.client (which only ever has the lsp atom
                      ;; in hand, including in async WebSocket callbacks) can reach the right,
                      ;; per-workspace socket store without threading a separate parameter.
-                     :lsp (atom {:lsp {} :res-atom resources})})))
+                     :lsp (atom {:lsp {} :res-atom resources})
+                     :lsp-events (Subject.)})))
 
 ;; Lazily-created process-default workspace. `defonce` + `delay` is what makes the
 ;; SAME conn survive React re-renders AND dev hot-reloads (`:dev/after-load`): the

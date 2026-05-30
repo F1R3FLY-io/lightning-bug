@@ -19,7 +19,7 @@
    [lib.workspace :as ws]
    [lib.state :as state :refer [resources get-resource]]
    [lib.editor.syntax :as syntax]
-   [test.lib.mock-lsp :refer [with-mock-lsp get-sent-methods get-sent-messages]]))
+   [test.lib.mock-lsp :refer [with-mock-lsp get-sent-methods get-sent-messages trigger-diagnostic!]]))
 
 (use-fixtures :each
   {:before (fn []
@@ -161,5 +161,50 @@
                                   "ws2 holds no LSP socket")
                               (unmount! pane)
                               [:ok true]))))) ]
+          (is (= :ok (first res)) "mock-lsp body completed without error")
+          (done))))))
+
+(deftest split-pane-diagnostics-reach-both-panes
+  (testing "a server diagnostic for the shared file reaches BOTH panes' event streams (inbound fan-out)"
+    (async done
+      (go
+        (let [res (<! (with-mock-lsp
+                        (fn [mock]
+                          (go
+                            (let [workspace (createWorkspace)
+                                  pane-a (mount-editor! workspace lsp-langs)
+                                  pane-b (mount-editor! workspace lsp-langs)
+                                  uri "inmemory:///diag-split.txt"
+                                  diags-a (atom 0)
+                                  diags-b (atom 0)
+                                  count-diag (fn [a]
+                                               (fn [e]
+                                                 (let [m (js->clj e :keywordize-keys true)]
+                                                   (when (and (= "diagnostics" (:type m)) (= uri (:uri m)))
+                                                     (swap! a inc)))))]
+                              (<! (timeout 200))
+                              (let [ea @(:ref-atom pane-a)
+                                    eb @(:ref-atom pane-b)]
+                                (.subscribe (.getEvents ea) (count-diag diags-a))
+                                (.subscribe (.getEvents eb) (count-diag diags-b))
+                                (.openDocument ea uri "hello" "text")
+                                (<! (timeout 300))
+                                ((:trigger-open mock))
+                                (<! (timeout 400))
+                                (.activateDocument eb uri)            ; B splits onto the same file
+                                (<! (timeout 400))
+                                ;; server publishes a diagnostic for the shared file
+                                (trigger-diagnostic! mock uri
+                                                     [{:range {:start {:line 0 :character 0}
+                                                               :end {:line 0 :character 1}}
+                                                       :message "boom"
+                                                       :severity 1}])
+                                (<! (timeout 200))
+                                (is (pos? @diags-a) "pane A received the diagnostics event")
+                                (is (pos? @diags-b)
+                                    "pane B ALSO received the diagnostics event (workspace LSP event fan-out)")
+                                (unmount! pane-a)
+                                (unmount! pane-b)
+                                [:ok true]))))))]
           (is (= :ok (first res)) "mock-lsp body completed without error")
           (done))))))

@@ -761,10 +761,15 @@
   (when DEBUG
     (when-not (s/valid? :workspace/active-uri uri)
       (log/warn (s/explain-str :workspace/active-uri uri))))
-  (let [prev-eids (d/q '[:find [?e ...] :where [?e :workspace/active-uri _]] @conn)
-        retracts (for [item prev-eids] [:db/retractEntity item])
+  (let [;; Retract only OTHER active-uri entities (those holding a DIFFERENT uri). A blanket
+        ;; retract is wrong here: :workspace/active-uri is :db.unique/identity, so the `add`
+        ;; below upserts onto the existing entity for `uri`; retracting that same entity would
+        ;; then clear the focus we just set. This manifested when a 2nd pane re-activated the
+        ;; already-focused file (split panes) — it silently blanked :workspace/active-uri.
+        prev (d/q '[:find ?e ?u :where [?e :workspace/active-uri ?u]] @conn)
+        retracts (for [[e u] prev :when (not= u uri)] [:db/retractEntity e])
         add {:workspace/active-uri uri :type :active-uri}
-        tx (conj retracts add)]
+        tx (conj (vec retracts) add)]
     (when DEBUG
       (doseq [entity (filter map? tx)]
         (when-not (valid-active-uri? entity)

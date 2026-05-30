@@ -111,7 +111,10 @@
                       ;; Per-editor LSP client (ILspClient). Constructed once over this
                       ;; editor's state-atom + events + workspace conn; routes all LSP
                       ;; calls through the protocol.
-                      client (react/useMemo (fn [] (cm/make-connection-manager (:lsp workspace) events conn)) #js [])
+                      ;; The CM emits INBOUND LSP server events to the WORKSPACE-level
+                      ;; :lsp-events subject (not this pane's events), so every pane can fan
+                      ;; them out to its own view — see the forwarder + diagnostics guard below.
+                      client (react/useMemo (fn [] (cm/make-connection-manager (:lsp workspace) (:lsp-events workspace) conn)) #js [])
                       ;; Per-editor lifecycle manager (isolated registry, survives re-renders
                       ;; via useMemo) — orders teardown of this pane's resources on unmount.
                       lifecycle-mgr (react/useMemo (fn [] (lifecycle/make-isolated-lifecycle-manager)) #js [])
@@ -203,13 +206,25 @@
                                              (fn [evt-js]
                                                (let [evt (js->clj evt-js :keywordize-keys true)
                                                      type (:type evt)]
-                                                 (when (= type "diagnostics")
+                                                 ;; Apply diagnostics to THIS view only when they are for the
+                                                 ;; file this pane is showing (events now fan out to all panes
+                                                 ;; via the workspace :lsp-events subject, so a pane on another
+                                                 ;; file must ignore them).
+                                                 (when (and (= type "diagnostics")
+                                                            (= (:uri evt) (:active-uri @state-atom)))
                                                    (let [diags (:data evt)]
                                                      (log/trace "Updating diagnostics in view for uri:" (:uri evt))
                                                      (.dispatch editor-view #js {:effects #js [(.of set-diagnostic-effect (clj->js diags))]})
                                                      (let [uri (:uri evt)]
                                                        (when-let [lang (db/document-language-by-uri conn uri)]
-                                                         (p/request-symbols! client lang uri))))))))]
+                                                         (p/request-symbols! client lang uri))))))))
+                             ;; Forward the workspace's INBOUND LSP events to this pane's own
+                             ;; events subject, so (a) editor.getEvents() consumers still see
+                             ;; diagnostics/symbols/log/lsp-error and (b) the `sub` above can
+                             ;; apply diagnostics to this pane's view — for EVERY pane on the
+                             ;; file, not just the one that opened the socket.
+                             lsp-events-sub (.subscribe (:lsp-events workspace)
+                                                        (fn [evt-js] (.next events evt-js)))]
                          (set! (.-current view-ref) editor-view)
                          ;; Phase 6: register this pane's already-running resources with the
                          ;; per-editor lifecycle manager so they tear down in ONE ordered pass
@@ -229,6 +244,9 @@
                            (lifecycle/register-resource-in! reg sd :events-sub sub
                                                             :cleanup-fn (fn [^js s] (.unsubscribe s))
                                                             :priority 20 :started? true)
+                           (lifecycle/register-resource-in! reg sd :lsp-events-sub lsp-events-sub
+                                                            :cleanup-fn (fn [^js s] (.unsubscribe s))
+                                                            :priority 15 :started? true)
                            (lifecycle/register-resource-in! reg sd :emit-timers ::emit-timers
                                                             :cleanup-fn (fn [_] (clear-emit-timers!))
                                                             :priority 10 :started? true))
