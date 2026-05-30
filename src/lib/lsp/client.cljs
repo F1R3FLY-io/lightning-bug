@@ -4,6 +4,7 @@
    [clojure.string :as str]
    [lib.db :as db :refer [flatten-diags flatten-symbols close-all-opened-by-lang!]]
    [lib.state :refer [close-resource! get-resource set-resource!]]
+   [lib.lsp.fsm :as fsm]
    [taoensso.timbre :as log]
    [clojure.core.async :refer [go <!]]
    [lib.utils :refer [promise->chan]]))
@@ -65,6 +66,17 @@
                {:type response-type :uri extra-uri}
                response-type)))
     (send-raw lang full-msg state-atom)))
+
+(defn transition!
+  "Drives the LSP connection state machine: sets [:lsp lang :state] to `next`
+  (the SINGLE source of truth, validated against lib.lsp.fsm) and refreshes the
+  derived boolean flags (:connected?/:initialized?/:connecting?/:reachable?) so the
+  ConnectionManager's keyword-based predicates AND legacy flag readers stay in sync."
+  [state-atom lang next]
+  (let [current (get-in @state-atom [:lsp lang :state] :disconnected)]
+    (when-not (fsm/valid-transition? current next)
+      (log/debug "LSP state transition" current "->" next "for" lang "(outside declared TRANSITIONS)"))
+    (swap! state-atom update-in [:lsp lang] merge {:state next} (fsm/state->flags next))))
 
 ;; Sending functions (client -> server)
 
@@ -165,7 +177,7 @@
     (log/debug "LSP textDocumentSync kind for lang" lang ":" sync-kind "(incremental:" incremental? ")")
     (swap! state-atom assoc-in [:lsp lang :incremental-sync?] incremental?))
   (notify-initialized lang state-atom)
-  (swap! state-atom assoc-in [:lsp lang :initialized?] true)
+  (transition! state-atom lang :initialized)
   (when-let [res-fn (get-in @state-atom [:lsp lang :promise-res-fn])]
     (res-fn)
     (swap! state-atom update-in [:lsp lang] dissoc :promise-res-fn :promise-rej-fn))
@@ -331,12 +343,9 @@
         (set-resource! :lsp lang socket)
         (swap! state-atom update-in [:lsp lang] assoc
                :ws socket
-               :initialized? false
-               :connected? false
-               :reachable? false
-               :connecting? true
                :warned-unreachable? false
                :url url)
+        (transition! state-atom lang :connecting)
         (set! (.-onmessage socket) #(handle-message conn lang (.-data %) state-atom events))
         (set! (.-onclose socket) #(do
                                     (log/trace (str "LSP WS closed for lang=" lang))
@@ -346,22 +355,20 @@
                                     (.next events (clj->js {:type "disconnect" :data {:lang lang}}))))
         (set! (.-onerror socket) #(do
                                     (log/warn (str "LSP connection error for lang=" lang "; marking unreachable: " (.-message %)))
-                                    (swap! state-atom update-in [:lsp lang] assoc
-                                           :connected? false
-                                           :reachable? false
-                                           :connecting? false)
+                                    (transition! state-atom lang :error)
                                     (.next events (clj->js {:type "lsp-error" :data {:message "WebSocket connection error" :lang lang}}))
                                     (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]
                                       (rej-fn (js/Error. (str "LSP connection error for lang=" lang ": " (.-message %)))))
                                     (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn)))
         (set! (.-onopen socket) #(do
                                    (log/info (str "LSP WS open for lang=" lang))
-                                   (swap! state-atom update-in [:lsp lang] assoc
-                                          :connected? true
-                                          :reachable? true
-                                          :connecting? false
-                                          :warned-unreachable? false)
+                                   (transition! state-atom lang :connected)
+                                   (swap! state-atom assoc-in [:lsp lang :warned-unreachable?] false)
                                    (.next events (clj->js {:type "connect" :data {:lang lang}}))
+                                   ;; Enter :initializing BEFORE sending initialize, so a
+                                   ;; synchronous server response (e.g. mock) lands on
+                                   ;; :initializing -> :initialized rather than being overwritten.
+                                   (transition! state-atom lang :initializing)
                                    (request-initialize lang state-atom)))
         (let [init-promise (js/Promise. (fn [res rej]
                                           (swap! state-atom assoc-in [:lsp lang :promise-res-fn] res)

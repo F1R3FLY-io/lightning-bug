@@ -9,6 +9,7 @@
   (:require [clojure.core.async :refer [go put! <! alts! timeout promise-chan]]
             [domain.protocols :as p]
             [lib.lsp.client :as lsp]
+            [lib.lsp.fsm :as fsm]
             [taoensso.timbre :as log]))
 
 ;; =============================================================================
@@ -25,33 +26,14 @@
    :reconnect-backoff-factor 2})   ; Exponential backoff multiplier
 
 ;; =============================================================================
-;; Connection State Machine
+;; Connection State Machine — extracted to lib.lsp.fsm (the single source of truth,
+;; also used by lib.lsp.client). Re-exported here so existing callers/tests that
+;; reference cm/STATES, cm/TRANSITIONS, cm/valid-transition? keep working.
 ;; =============================================================================
 
-(def STATES
-  "Valid connection states."
-  #{:disconnected
-    :connecting
-    :connected
-    :initializing
-    :initialized
-    :disconnecting
-    :error})
-
-(def TRANSITIONS
-  "Valid state transitions."
-  {:disconnected #{:connecting}
-   :connecting #{:connected :error :disconnected}
-   :connected #{:initializing :disconnecting :error}
-   :initializing #{:initialized :error :disconnected}
-   :initialized #{:disconnecting :error :disconnected}
-   :disconnecting #{:disconnected}
-   :error #{:disconnected :connecting}})
-
-(defn valid-transition?
-  "Returns true if the transition from current to next state is valid."
-  [current next]
-  (contains? (get TRANSITIONS current #{}) next))
+(def STATES fsm/STATES)
+(def TRANSITIONS fsm/TRANSITIONS)
+(def valid-transition? fsm/valid-transition?)
 
 ;; =============================================================================
 ;; Pending Request Management
