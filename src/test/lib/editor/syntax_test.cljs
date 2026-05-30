@@ -197,6 +197,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "test.rho" :text "content" :language "rholang" :version 1 :dirty true :opened false}])
                                (db/update-active-uri! (ws/default-conn) "test.rho")
+                               (swap! state-atom assoc :active-uri "test.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -232,6 +233,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "demo.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "demo.rho")
+                               (swap! state-atom assoc :active-uri "demo.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -264,6 +266,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.rho")
+                               (swap! state-atom assoc :active-uri "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -295,6 +298,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.rho")
+                               (swap! state-atom assoc :active-uri "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -330,6 +334,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "{ Nil }" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.rho")
+                               (swap! state-atom assoc :active-uri "file.rho")
                                (let [state (.create EditorState #js {:doc "{ Nil }" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]

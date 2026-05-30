@@ -62,3 +62,28 @@ React re-renders and dev hot-reload.
 
 **Hot-reload invariant upheld:** `default-workspace` is `defonce`+`delay`; no-prop editors
 resolve to that shared instance (never a per-instance fallback) → documents survive reloads.
+
+## Phase 2 — Per-pane :active-uri (the spine) — DONE
+
+**Goal:** make "which file this editor shows" per-pane (so multiple editors in one
+workspace can show different files), while the workspace keeps a single FOCUS for the app.
+
+- Added `:active-uri` to the per-editor `state-atom`. The conn's `:workspace/active-uri`
+  is RETAINED as the workspace focus (read by the demo via `app.subs`/`app.cofx`/the
+  repository's `get-active-*`).
+- Editor-local code now reads the pane's `:active-uri`: the keystroke updateListener,
+  the imperative handle methods (`normalize-uri` now takes `state-atom`; `getState`,
+  `getText`, cursor/selection events, `active-uri?` checks), `syntax/init-syntax`, and the
+  core DataScript→view sync effect. `activate-document` and `renameDocument` set BOTH the
+  pane `:active-uri` and the workspace focus, so **single-editor behavior is identical**.
+- Unmount clears the workspace focus only if THIS pane held it (`(= (:active-uri @state-atom)
+  (db/active-uri conn))`) — multi-pane safe.
+- **Hot-path improvement:** the per-keystroke listener now reads `(:active-uri @state-atom)`
+  (a cheap atom lookup) instead of `(db/active-uri conn)` (a DataScript query every
+  keystroke). Strictly less work; no benchmark re-run needed (and the unpinned suite's
+  ±70% noise couldn't show it anyway).
+- Tests: syntax tests that staged an active document via the conn now also seed the pane's
+  `:active-uri` (the per-pane equivalent of "the active document").
+
+**Results:** test:debug 501/501, clj-kondo 0/0, eastwood 0/0, test:types clean. No dead
+code introduced (`active-version`/`active-uri-text-lang` retain db_query_test coverage).

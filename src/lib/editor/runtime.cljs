@@ -164,7 +164,7 @@
   (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              ;; EXP-009 Phase 3: Cache URI once per handler invocation
-                             (let [uri (db/active-uri conn)]
+                             (let [uri (:active-uri @state-atom)]
                                (when (or (.-docChanged u) (.-selectionSet u))
                                  ;; EXP-009 Phase 4: Pass cached URI to update-editor-state
                                  (update-editor-state (.-state u) state-atom events uri))
@@ -257,7 +257,7 @@
                                        (debounce/debounced-call
                                         :lsp-did-change
                                         (fn []
-                                          (let [[uri text lang] (db/active-uri-text-lang conn)]
+                                          (let [uri (:active-uri @state-atom) [text lang] (when uri (db/doc-text-lang-by-uri conn uri))]
                                             (when (and uri text lang)
                                               (let [version (db/inc-document-version-by-uri! conn uri)
                                                     changes (get-in @state-atom [:pending-lsp-changes uri])
@@ -406,10 +406,10 @@
      (go
        (try
          (log/trace "Activating document:" uri)
-         (let [old-lang (db/active-lang conn)]
-           (when (not= uri (db/active-uri conn))
+         (let [old-lang (db/document-language-by-uri conn (:active-uri @state-atom))]
+           (when (not= uri (:active-uri @state-atom))
              (log/debug "Updating active URI for document with old-lang:" old-lang)
-             (db/update-active-uri! conn uri))
+             (do (swap! state-atom assoc :active-uri uri) (db/update-active-uri! conn uri)))
            (let [[text new-lang] (db/doc-text-lang-by-uri conn uri)]
              (log/debug "New language for activation:" new-lang)
              (when-let [view (.-current view-ref)]

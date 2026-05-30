@@ -345,7 +345,7 @@
   [^js view state-atom conn]
   (go
     (try
-      (if-let [lang-key (db/active-lang conn)]
+      (if-let [lang-key (db/document-language-by-uri conn (:active-uri @state-atom))]
         (do
           (log/info "Initializing syntax for language:" lang-key)
           (let [langs (:languages @state-atom)]

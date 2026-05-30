@@ -53,6 +53,10 @@
     {:mounted? true
      :cursor {:line 1 :column 1}
      :selection nil
+     ;; PER-PANE active document: which file THIS editor instance shows. Distinct
+     ;; from the workspace FOCUS (conn :workspace/active-uri), which the demo/app
+     ;; reads; activate-document sets both, so single-editor behavior is unchanged.
+     :active-uri nil
      :search-term ""
      :lsp {}
      :lsp-document-opened {}  ; EXP-010: Cache {uri -> true} for documents opened with LSP
@@ -105,21 +109,23 @@
                    #js [@state-atom (.-current view-ref) ready])
                   (react/useEffect
                    (fn []
-                     (when-let [^js editor-view (.-current view-ref)]
-                       (let [^js editor-state (.-state editor-view)
-                             current-doc (str (.-doc editor-state))
-                             active-text (db/active-text conn)]
-                         (when (not= active-text current-doc)
-                           (log/debug "Updating view content to match db for active uri")
-                           (.dispatch editor-view #js {:changes #js {:from 0
-                                                                     :to (count current-doc)
-                                                                     :insert active-text}})
-                           (emit-event events "content-change" {:content active-text
-                                                                :uri (db/active-uri conn)})
-                           (when on-content-change
-                             (on-content-change active-text)))))
+                     (when-let [au (:active-uri @state-atom)]
+                       (when-let [^js editor-view (.-current view-ref)]
+                         (let [^js editor-state (.-state editor-view)
+                               current-doc (str (.-doc editor-state))
+                               active-text (db/document-text-by-uri conn au)]
+                           (when (and active-text (not= active-text current-doc))
+                             (log/debug "Updating view content to match db for active uri")
+                             (.dispatch editor-view #js {:changes #js {:from 0
+                                                                       :to (count current-doc)
+                                                                       :insert active-text}})
+                             (emit-event events "content-change" {:content active-text
+                                                                  :uri au})
+                             (when on-content-change
+                               (on-content-change active-text))))))
                      js/undefined)
-                   #js [(db/active-text conn)])
+                   #js [(:active-uri @state-atom)
+                        (when-let [au (:active-uri @state-atom)] (db/document-text-by-uri conn au))])
                   (react/useEffect
                    (fn []
                      (let [shutdown-all (fn []
@@ -156,7 +162,7 @@
                             (emit-event events "ready" {})
                             (set-ready true))
                           0)
-                         (update-editor-state editor-state state-atom events (db/active-uri conn))
+                         (update-editor-state editor-state state-atom events (:active-uri @state-atom))
                          (fn []
                            (log/info "Editor: Destroying EditorView")
                            (swap! state-atom assoc :mounted? false)
@@ -168,7 +174,10 @@
                            (clear-emit-timers!) ;; Clean up pending event timers
                            (emit-event events "destroy" {})
                            (set-ready false)
-                           (db/reset-active-uri! conn)))
+                           ;; Only clear the workspace FOCUS if THIS pane held it
+                           ;; (another pane may be the focused one in a shared workspace).
+                           (when (= (:active-uri @state-atom) (db/active-uri conn))
+                             (db/reset-active-uri! conn))))
                        (catch js/Error error
                          (emit-event events "error" {:message (.-message error)
                                                      :operation "initEditorView"})

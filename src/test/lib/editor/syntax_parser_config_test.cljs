@@ -57,6 +57,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.test")
+                               (swap! state-atom assoc :active-uri "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -93,6 +94,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.test")
+                               (swap! state-atom assoc :active-uri "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -130,6 +132,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.test")
+                               (swap! state-atom assoc :active-uri "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -159,6 +162,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.rho")
+                               (swap! state-atom assoc :active-uri "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -188,6 +192,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.test")
+                               (swap! state-atom assoc :active-uri "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -218,6 +223,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "test"
                                (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.test")
+                               (swap! state-atom assoc :active-uri "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -247,6 +253,7 @@
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
                                (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "file.rho")
+                               (swap! state-atom assoc :active-uri "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -366,6 +373,7 @@
                                ;; Setup for rholang first
                                (db/create-documents! (ws/default-conn) [{:uri "test.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
                                (db/update-active-uri! (ws/default-conn) "test.rho")
+                               (swap! state-atom assoc :active-uri "test.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
                                      result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
@@ -374,6 +382,7 @@
                                  ;; Now switch to plaintext (no parser)
                                  (db/create-documents! (ws/default-conn) [{:uri "test.txt" :text "plain text" :language "plaintext" :version 1 :dirty false :opened true}])
                                  (db/update-active-uri! (ws/default-conn) "test.txt")
+                               (swap! state-atom assoc :active-uri "test.txt")
                                  (let [result2 (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                    (is (= :ok (first result2)) "Plaintext initialization successful")
                                    (is (= :no-tree-sitter (second result2)) "Plaintext uses fallback (no tree-sitter)"))
