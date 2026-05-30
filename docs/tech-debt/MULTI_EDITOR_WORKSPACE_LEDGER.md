@@ -232,3 +232,45 @@ The 3rd dead abstraction (`lib.lifecycle`, ~311 LOC) is now per-instance AND wir
   from its registry — `app.languages` is the demo's language source of truth, not dead.
 
 **Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean, app build clean.
+
+## Phase 8 — Tests, verification, close-out — DONE
+
+**New integration tests (all via real mounted `<Editor>`s + real CodeMirror views):**
+- `multi_pane_test`: split-panes-sync-live (A's user edit propagates live to B; B's caret
+  rebases 5→9, never resets; no echo back to A) and split-panes-sync-bidirectional (A↔B).
+- `multi_editor_test`: shared-default-workspace, shared-explicit-workspace (distinct from the
+  default), and distinct-workspaces-are-isolated (distinct conns; same URI = independent docs).
+- `workspace/lsp_multi_pane_test`: split-pane-lsp-single-connection-and-didopen (one connection
+  + one didOpen for two panes; 2nd pane sees connected), split-pane edits from BOTH panes send
+  monotonic didChange, and cross-workspace LSP isolation.
+- `workspace/doc_sync_test` (Phase 4): ref-counting, echo-suppression + seq ordering, apply-remote-delta.
+
+**Backward-compat:** the entire pre-existing suite passes unchanged through the default
+Workspace — the strongest proof that single-`<Editor>` behavior is byte-equivalent to the old
+module-global behavior.
+
+**Correctness fix found + fixed during Phase 8:** the per-pane doc-stream (re)subscription was
+re-keyed off a React effect dependency on `:active-uri`, which only re-evaluates on a re-render
+(fine under reagent, not under plain React). Replaced with a state-atom WATCH so re-subscription
+on file-switch is framework-agnostic; seeding was already framework-agnostic (activate-document
+dispatches content into the view directly).
+
+**Final suite: 513/513** (was 505 pre-Phase-8: +2 multi_pane, +3 multi_editor, +3 lsp_multi_pane;
+doc_sync_test pre-existed). clj-kondo 0/0, eastwood 0/0, test:types (tsd) clean, `:libs` + `:app`
+builds clean.
+
+**Performance:** the keystroke hot path is unchanged by Phases 5b/6 — the didChange accumulation
+is the same single `swap!` (now on the per-workspace `:lsp` atom instead of the per-editor
+state-atom), and lifecycle registration happens once at mount, not per-keystroke. EXP-007 / EXP-009
+/ EXP-010 / EXP-011 invariants preserved (no per-keystroke DataScript query; idle-deferred DB sync;
+incremental ranges from the origin transaction). Benchmark-gated (`benchmark:gate`, +150%
+catastrophic-only threshold given unpinned CPU noise).
+
+## Status — COMPLETE
+
+All eight phases are done. The library is now a true instantiable multi-editor Workspace system:
+isolatable Workspaces, live same-file cross-pane sync without echo or cursor clobbering, one
+coherent per-workspace/per-file LSP layer with resilience on by default, all three formerly-dead
+abstractions wired, and the picked engineering gaps (CI benchmark gate, demo dep-sync check, Karma
+WASM guard) closed. No module-global singletons remain for editor state; the only module cell is
+the `defonce` default Workspace (the deliberate hot-reload anchor).

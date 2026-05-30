@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Instantiable multi-editor Workspaces.** New `createWorkspace()` and
+  `EditorWorkspaceProvider` exports, plus `workspace` and `uri` props on `<Editor>`. Multiple
+  editors can share one Workspace (its open documents, projects, loaded grammars/parsers, and
+  LSP connections) or use fully isolated Workspaces. An `<Editor>` with no `workspace` prop
+  resolves to a shared process-default Workspace (a `defonce` delay) that survives React
+  re-renders and dev hot-reloads. (`lib.workspace`.)
+- **Reactive same-file sync for split panes.** When two or more editors in one Workspace show
+  the SAME file, edits propagate live between them (RxJS), Google-Docs-style, with each pane
+  keeping its own cursor/selection/scroll (selection-mapping + echo suppression). Editing the
+  same file in different panes also produces a single coalesced backend sync. (`lib.workspace.doc-sync`.)
+- **Projects model.** `lib.db` gains projects (`:project/id`, `:project/root`, `:project/name`,
+  and a `:document/project` ref); documents map to a project by longest-URI-under-root, with
+  `create-projects!`/`project-for-uri`/`documents-by-project`/`project-of-uri`.
+- Types (`types/lib.d.ts`): `createWorkspace`, `EditorWorkspaceProvider`, an opaque `Workspace`
+  handle, and `workspace?`/`uri?` on `EditorProps`. The former state-shape `Workspace` (the
+  `getState().workspace` payload) is renamed `WorkspaceSnapshot`.
 - `app.system`: a dependency-injection container holding the DataScript-backed
   repositories, injectable in tests via `set-system!`/`reset-system!` (delivers the
   testability the `app.cofx`/`app.fx` docstrings always promised).
@@ -19,6 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Eliminated the module-global singletons in favor of per-Workspace instances.** The global
+  `lib.db/conn`, `lib.state/resources` (tree-sitter parsers + LSP sockets), the LSP connection
+  state, and the runtime `pending-idle-syncs`/`pending-lsp-changes` are now owned by an
+  instantiable `Workspace`. The `conn` is threaded explicitly through all `lib.db` functions
+  (the global `defonce conn` is removed); resources and LSP state are per-Workspace, so two
+  Workspaces are fully isolated. Single-`<Editor>` behavior is unchanged (verified by the full
+  pre-existing suite passing via the default Workspace).
+- **One LSP connection per language per Workspace.** Split panes over one file share a single
+  `didOpen` and a single monotonic `didChange` stream (one coalesced producer per file); edits
+  made in ANY pane reach the language server. LSP auto-reconnect with exponential backoff is
+  active by default (graceful shutdown suppresses it).
+- **Wired the three formerly dead abstractions:** the `lib.lsp` keyword finite-state machine
+  (`lib.lsp.fsm`) is now the single source of truth for connection state; `app.languages` is
+  the demo's language registry/source-of-truth; and `lib.lifecycle` (now per-instance) performs
+  the per-editor ordered resource teardown on unmount.
 - Completed the hexagonal architecture migration: `app.cofx`/`app.fx` and `lib.core`'s
   ~16 LSP call sites now go through `domain.protocols` (`IDocumentRepository`,
   `ILspClient`) via dependency injection; `lib.lsp.connection-manager/ConnectionManager`
