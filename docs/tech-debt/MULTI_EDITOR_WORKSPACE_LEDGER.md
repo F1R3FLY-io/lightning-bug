@@ -131,7 +131,7 @@ own cursor; edits still persist to the backend exactly as before.
 **Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean.
 Single-editor hot path unchanged (has-peers? gate); benchmark unaffected (single-editor).
 
-## Phase 5 — LSP: one FSM state model + resilience — DONE (5a, 5c); per-workspace move documented (5b)
+## Phase 5 — LSP: one FSM state model + resilience + per-workspace move — DONE (5a, 5b, 5c)
 
 **Goal:** wire the dead ConnectionManager state-machine, make reconnect active by default,
 and (5b) move LSP connection ownership per-workspace so split panes share one didOpen.
@@ -148,24 +148,48 @@ and (5b) move LSP connection ownership per-workspace so split panes share one di
   connect-supplier + connect! → **reconnect is active by default**. Graceful shutdown sets
   `[:lsp lang :shutting-down?]` to suppress it; failed initial connects don't storm.
 
-**5b — per-workspace/per-file LSP (REMAINING; documented scope boundary, not a silent skip):**
-Today LSP state is per-editor (`state-atom [:lsp lang]`) while the socket is shared
-(`lib.state/resources`, currently global). For a SINGLE editor this is correct (all tests
-green). For SPLIT PANES on the same file it is suboptimal: pane B's per-editor LSP state
-doesn't see pane A's connection, so B can't send LSP and B's view wouldn't get live
-diagnostics. The correct fix is to make the LSP **connection + state + events** workspace-
-level: one ConnectionManager per language per workspace (over a workspace `:lsp` atom +
-`:resources`), with a workspace LSP **events** subject that panes subscribe to and forward
-to their own `events` (preserving `editor.getEvents()`), and `getState` reading the
-workspace `:lsp`. This is a large cross-cutting refactor (resource-model + LSP event-routing
-+ getState shape) with high risk to the intricate LSP test contracts, and the core reactive
-**content** sync (Phase 4) does not depend on it. Deferred to a focused follow-up to avoid
-destabilizing the green LSP layer mid-effort. (Also: `cleanup-stale-requests!`/
-`start-cleanup-task!`/`with-timeout` remain callable + tested but not auto-started in
-production — auto-start is constrained by a client→CM cycle and the module-global
-`cleanup-intervals`; low value given reconnect is wired.)
+**5b — per-workspace/per-file LSP (DONE):** LSP connection state + sockets moved
+per-workspace across 8 individually-gated sub-steps (each: tree compiles, full suite green,
+clj-kondo + eastwood 0/0; committed `21909ae`, `2eec1b0`, `014e5b8`, `da079b7`).
 
-**Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean.
+- **Workspace `:lsp` atom** (steps 1–4): the `Workspace` record gained an `:lsp` field —
+  `{:lsp {lang {…:state…:ws…}} :pending-lsp-changes {uri […]} :res-atom <resources-atom>}` —
+  anchored on the `defonce` delay (hot-reload safe). `make-workspace`/`reset-workspace!`
+  manage it. `lib.state`'s 7 resource fns gained an OPTIONAL leading `res-atom` arity
+  (defaulting to the module-global `resources` shim → zero churn for the ~30 `state_test`
+  calls). `lib.lsp.client`'s 3 socket sites use `(or (:res-atom @state-atom) resources)` —
+  the workspace store in production, global fallback for direct-call tests; this is
+  **async-safe** because the atom is threaded into every client fn (including the WebSocket
+  `onmessage`/`onclose` handlers), whereas a `binding` dynamic var would NOT survive those
+  async callbacks (the chosen alternative to the originally-proposed dyn-var design).
+  `getState` sources `:lsp` from a ctx `:lsp-atom`.
+- **The repoint** (step 5): the Editor's `ConnectionManager` is built over `(:lsp workspace)`;
+  `get-extensions`/`activate-document`/`ensure-lsp-document-opened` derive `lsp-atom` +
+  `res-atom` from the `workspace` they receive. **One LSP connection per language per
+  workspace** is shared by all panes. Single-editor behaviour is byte-identical (one editor ↔
+  one workspace ↔ one `:lsp` atom).
+- **Single-producer didChange** (step 5): the didChange accumulator moved to the per-workspace
+  `:lsp` atom and the flush debounce is keyed `[:lsp-did-change uri]` (per file, workspace-
+  shared, on the module-global debounce registry) — so edits to one file from ANY pane
+  coalesce into ONE debounced didChange with ONE monotonic version (the conn counter; the
+  prior constant `:lsp-did-change` key was also a latent cross-file stomp). The 2nd pane's
+  hot-path `[:lsp-document-opened uri]` cache is populated at `ensure-lsp-document-opened`'s
+  success exit, so a pane that activates an already-open file can send its OWN keystroke
+  didChanges (previously only the opener pane could → edits in the 2nd pane never reached the
+  server). EXP-010 (no per-keystroke DataScript query) + EXP-011 (idle DB sync, incremental
+  ranges computed from the origin pane's transaction) preserved.
+- **Per-workspace tree-sitter** (step 6): `init-syntax` + `load-resource-with-validator` gained
+  an optional `res-atom` (3-arity defaults to global → tests unchanged); the two production
+  callers thread `(:resources workspace)`. Grammars/queries/parsers now cache per-workspace.
+- **Tests** (step 7): `lsp_multi_pane_test` — one-connection/one-didOpen for two panes,
+  edits-from-both-panes-send-monotonic-didchange (proves the 2nd pane can now drive
+  didChange), cross-workspace LSP isolation.
+- Out of scope (noted, not silent): the demo app's `:lsp/connected?` re-frame sub reads the
+  demo app-db (not the editor) and has no writer — left as-is. `cleanup-stale-requests!`/
+  `start-cleanup-task!`/`with-timeout` remain callable + tested but not auto-started in
+  production — low value given reconnect is wired.
+
+**Results:** test:debug **513/513**, clj-kondo 0/0, eastwood 0/0, test:types clean.
 
 ## Phase 7 — Public API, wire app.languages, types — DONE
 
