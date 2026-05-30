@@ -86,4 +86,10 @@
   [{:keys [conn resources lsp]}]
   (d/reset-conn! conn (d/empty-db db/schema))
   (reset! resources {:lsp {} :tree-sitter {}})
-  (when lsp (reset! lsp {:lsp {} :res-atom resources})))
+  (when lsp
+    ;; Clear any running per-language auto-cleanup intervals (CM/start-auto-cleanup!) before
+    ;; wiping the LSP state, so they don't outlive the reset as orphaned timers.
+    (doseq [[_lang entry] (:lsp @lsp)]
+      (when-let [id (:cleanup-interval-id entry)]
+        (js/clearInterval id)))
+    (reset! lsp {:lsp {} :res-atom resources})))

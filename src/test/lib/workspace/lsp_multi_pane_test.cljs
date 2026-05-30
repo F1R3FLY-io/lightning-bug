@@ -86,6 +86,10 @@
                                 (is (get-in (js->clj (.getState eb) :keywordize-keys true)
                                             [:lsp :text :connected?])
                                     "pane B sees the shared connection as connected")
+                                ;; resilience active by default: the per-workspace stale-request
+                                ;; cleanup task was started on connect
+                                (is (some? (get-in @(:lsp workspace) [:lsp "text" :cleanup-interval-id]))
+                                    "auto stale-request cleanup task started on connect")
                                 (unmount! pane-a)
                                 (unmount! pane-b)
                                 [:ok true]))))))]

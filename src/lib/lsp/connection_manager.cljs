@@ -74,6 +74,37 @@
           (when on-timeout
             (on-timeout lang id request-info)))))))
 
+(defn start-auto-cleanup!
+  "Starts a SELF-TERMINATING periodic cleanup of stale pending LSP requests for `lang`.
+  Unlike `start-cleanup-task!` (which keys a module-global by lang and so can't distinguish
+  two workspaces using the same language), this stores its interval id in the per-workspace
+  LSP `state-atom` at [:lsp lang :cleanup-interval-id], making it per-workspace. The interval
+  clears ITSELF once the connection reaches a terminal state (:disconnected/:error), so no
+  client->CM stop call is needed (which would introduce a dependency cycle). Idempotent: a
+  second call while a task is already running for the lang is a no-op. This is what makes
+  stale-request cleanup ACTIVE BY DEFAULT alongside auto-reconnect."
+  [state-atom lang interval-ms]
+  (when-not (get-in @state-atom [:lsp lang :cleanup-interval-id])
+    (let [id-atom (atom nil)            ; closure-captured id so we can self-clear even if
+                                        ; the state-atom is reset out from under us (tests)
+          stop! (fn []
+                  (when-let [id @id-atom] (js/clearInterval id))
+                  (reset! id-atom nil)
+                  (swap! state-atom update-in [:lsp lang] dissoc :cleanup-interval-id)
+                  (log/trace "Auto-cleanup self-terminated for lang" lang))
+          interval-id (js/setInterval
+                       (fn []
+                         (let [state (get-in @state-atom [:lsp lang :state] :disconnected)]
+                           (if (contains? #{:disconnected :error} state)
+                             (stop!)
+                             (cleanup-stale-requests! state-atom lang
+                                                      (fn [l id _]
+                                                        (log/warn "LSP request timed out for lang" l "id" id))))))
+                       interval-ms)]
+      (reset! id-atom interval-id)
+      (swap! state-atom assoc-in [:lsp lang :cleanup-interval-id] interval-id)
+      (log/trace "Started self-terminating auto-cleanup for lang" lang "every" interval-ms "ms"))))
+
 ;; =============================================================================
 ;; Connection Manager Record
 ;; =============================================================================
@@ -104,6 +135,7 @@
               ;; Attempt connection with timeout
               (let [connect-ch (lsp/connect conn language config state-atom events
                                             (fn [] (reconnect-with-backoff! this language config)))
+                    _ (start-auto-cleanup! state-atom language (:cleanup-interval-ms (:config this)))
                     timeout-ch (timeout init-timeout)
                     [result port] (alts! [connect-ch timeout-ch])]
                 (cond
@@ -149,8 +181,11 @@
     ;; Returns the resource supplier lib.core feeds to lib.state/load-resource. The
     ;; reconnect-fn wires the CM's reconnect-with-backoff! so an established connection
     ;; that drops unexpectedly is retried (active by default).
-    #(lsp/connect conn language {:url url} state-atom events
-                  (fn [] (reconnect-with-backoff! this language {:url url}))))
+    #(let [ch (lsp/connect conn language {:url url} state-atom events
+                           (fn [] (reconnect-with-backoff! this language {:url url})))]
+       ;; Resilience active by default: start the self-terminating stale-request cleanup.
+       (start-auto-cleanup! state-atom language (:cleanup-interval-ms config))
+       ch))
 
   ;; === Document Lifecycle Notifications ===
 
