@@ -276,11 +276,41 @@ state-atom), and lifecycle registration happens once at mount, not per-keystroke
 incremental ranges from the origin transaction). Benchmark-gated (`benchmark:gate`, +150%
 catastrophic-only threshold given unpinned CPU noise).
 
+## Post-claim verification — gaps found + fixed (514/514)
+
+A re-audit (prompted by "did you ACTUALLY complete everything?") surfaced three real items the
+initial Phase-5b tests had missed, since they only checked the OUTBOUND LSP path (didChange):
+
+1. **Inbound LSP events reached only one pane.** The CM was built with the per-pane `events`
+   subject, so diagnostics/symbols only updated the pane that opened the socket. The Phase-5b
+   design called for a workspace LSP events subject; it was missing. Fixed: `Workspace`
+   gained `:lsp-events` (rxjs Subject); the CM emits inbound events there; each pane forwards
+   to its own `events` (getEvents() intact) and applies diagnostics to its view only when the
+   event uri matches the file IT shows. New test `split-pane-diagnostics-reach-both-panes`.
+2. **`update-active-uri!` cleared the workspace focus on same-file split.** It blanket-retracted
+   all `:workspace/active-uri` entities then re-added; because the attr is `:db.unique/identity`
+   the add upserts onto the existing entity which the retract then removes — blanking the focus
+   whenever a 2nd pane re-activated the already-focused file, which (via
+   `handle-publish-diagnostics`'s `(= uri active-uri)` guard) dropped diagnostics entirely.
+   Fixed: retract only STALE (different-uri) focus entities.
+3. **Stale-request cleanup was not auto-started** (Phase 5 had called for it). Fixed:
+   `CM/start-auto-cleanup!` — a self-terminating, per-workspace cleanup started from the connect
+   path; no client→CM cycle (it self-clears on disconnect via a closure-captured interval id).
+   New assertion proves it starts on connect.
+
+Remaining (pre-existing, OUT OF SCOPE of this workstream, disclosed not hidden): the demo's
+`:lsp/connected?` re-frame sub (`app.subs`) is fully orphaned — nothing writes the app-db
+`[:lsp lang :connected?]` it reads, and no view subscribes to it. It is pre-existing demo dead
+code, NOT one of the three named dead abstractions (which are all wired), and wiring it would mean
+inventing demo behavior. Flagged for the maintainer to wire or remove.
+
 ## Status — COMPLETE
 
 All eight phases are done. The library is now a true instantiable multi-editor Workspace system:
-isolatable Workspaces, live same-file cross-pane sync without echo or cursor clobbering, one
-coherent per-workspace/per-file LSP layer with resilience on by default, all three formerly-dead
-abstractions wired, and the picked engineering gaps (CI benchmark gate, demo dep-sync check, Karma
-WASM guard) closed. No module-global singletons remain for editor state; the only module cell is
-the `defonce` default Workspace (the deliberate hot-reload anchor).
+isolatable Workspaces, live same-file cross-pane sync without echo or cursor clobbering (text AND
+LSP diagnostics fan out to every pane on a file), one coherent per-workspace/per-file LSP layer
+with reconnect + stale-request cleanup on by default, all three formerly-dead abstractions wired,
+and the picked engineering gaps (CI benchmark gate, demo dep-sync check, Karma WASM guard) closed.
+No module-global singletons remain for editor state; the only module cell is the `defonce` default
+Workspace (the deliberate hot-reload anchor). Final: **514/514** test:debug, clj-kondo/eastwood 0/0,
+tsd clean.
