@@ -2,7 +2,9 @@
  :builds {:libs {:target :esm
                  :output-dir "dist/libs"
                  :modules {:lib.core {:entries [lib.core]
-                                      :exports {Editor lib.core/Editor}}
+                                      :exports {Editor lib.core/Editor
+                                                createWorkspace lib.core/createWorkspace
+                                                EditorWorkspaceProvider lib.core/EditorWorkspaceProvider}}
                            :ext.lang.rholang {:entries [ext.lang.rholang]
                                               :depends-on #{:lib.core}
                                               :exports {RholangExtension ext.lang.rholang/RholangExtension}}

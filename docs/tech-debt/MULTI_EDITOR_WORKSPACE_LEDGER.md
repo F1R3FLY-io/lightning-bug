@@ -130,3 +130,55 @@ own cursor; edits still persist to the backend exactly as before.
 
 **Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean.
 Single-editor hot path unchanged (has-peers? gate); benchmark unaffected (single-editor).
+
+## Phase 5 — LSP: one FSM state model + resilience — DONE (5a, 5c); per-workspace move documented (5b)
+
+**Goal:** wire the dead ConnectionManager state-machine, make reconnect active by default,
+and (5b) move LSP connection ownership per-workspace so split panes share one didOpen.
+
+- **5a (DONE):** Extracted `lib.lsp.fsm` (STATES/TRANSITIONS/valid-transition? + pure
+  state->connected?/initialized?/flags). `lib.lsp.client` drives `[:lsp lang :state]` via a
+  `transition!` helper at every connection transition, deriving the legacy boolean flags
+  from `:state`. So `:state` is the single source of truth and the CM's keyword predicates
+  (connected?/initialized?/connect!) are LIVE; both the boolean- and keyword-asserting test
+  contracts pass. connection_manager re-exports STATES/TRANSITIONS/valid-transition? as aliases.
+- **5c (DONE):** `connect` takes a `reconnect-fn` invoked when an ESTABLISHED connection
+  drops unexpectedly (was connected, not graceful shutdown, not a failed initial connect).
+  The CM supplies `reconnect-fn = reconnect-with-backoff!` (its formerly-dead path) via
+  connect-supplier + connect! → **reconnect is active by default**. Graceful shutdown sets
+  `[:lsp lang :shutting-down?]` to suppress it; failed initial connects don't storm.
+
+**5b — per-workspace/per-file LSP (REMAINING; documented scope boundary, not a silent skip):**
+Today LSP state is per-editor (`state-atom [:lsp lang]`) while the socket is shared
+(`lib.state/resources`, currently global). For a SINGLE editor this is correct (all tests
+green). For SPLIT PANES on the same file it is suboptimal: pane B's per-editor LSP state
+doesn't see pane A's connection, so B can't send LSP and B's view wouldn't get live
+diagnostics. The correct fix is to make the LSP **connection + state + events** workspace-
+level: one ConnectionManager per language per workspace (over a workspace `:lsp` atom +
+`:resources`), with a workspace LSP **events** subject that panes subscribe to and forward
+to their own `events` (preserving `editor.getEvents()`), and `getState` reading the
+workspace `:lsp`. This is a large cross-cutting refactor (resource-model + LSP event-routing
++ getState shape) with high risk to the intricate LSP test contracts, and the core reactive
+**content** sync (Phase 4) does not depend on it. Deferred to a focused follow-up to avoid
+destabilizing the green LSP layer mid-effort. (Also: `cleanup-stale-requests!`/
+`start-cleanup-task!`/`with-timeout` remain callable + tested but not auto-started in
+production — auto-start is constrained by a client→CM cycle and the module-global
+`cleanup-intervals`; low value given reconnect is wired.)
+
+**Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean.
+
+## Phase 7 — Public API, wire app.languages, types — DONE
+
+- Exported `createWorkspace` (wraps make-workspace) + `EditorWorkspaceProvider` from the
+  `:lib.core` ESM module (shadow-cljs `:exports` + `^:export`).
+- `<Editor>` props: `workspace` (resolved prop → React context → shared default) and `uri`
+  (activates that document on mount — declarative split-pane file selection). Both read off
+  raw js-props and stripped before config validation.
+- `types/lib.d.ts`: renamed the state-shape `Workspace` → `WorkspaceSnapshot`; added the
+  opaque `Workspace` handle, `createWorkspace()`, `EditorWorkspaceProvider`, and
+  `workspace?`/`uri?` on `EditorProps`. `tsd` passes.
+- **Wired `app.languages`** (3rd dead abstraction): `app.db` registers the demo's languages
+  via `app.languages/register-language` + `set-default-lang` and builds the initial app-db
+  from its registry — `app.languages` is the demo's language source of truth, not dead.
+
+**Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean, app build clean.

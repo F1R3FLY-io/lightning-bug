@@ -36,6 +36,15 @@
                        #js {:value (.-value js-props)}
                        (.-children js-props)))
 
+(defn ^:export createWorkspace
+  "Creates a new ISOLATED workspace (its own documents/projects/loaded resources/reactive
+  change streams). Pass it to one or more <Editor> instances — via the `workspace` prop or
+  <EditorWorkspaceProvider value={ws}> — so they share state (open files propagate between
+  editors on the same file). Omit it and editors use a shared default workspace.
+  Hold the result somewhere stable (a module binding / defonce) so it survives hot reloads."
+  []
+  (ws/make-workspace))
+
 (defn- default-state
   "Computes the initial editor state from converted CLJS props.
   Ensures language keys are strings and falls back to 'text' if no language is provided."
@@ -81,6 +90,7 @@
               ;; default-workspace. useMemo over [prop-ws ctx-ws] keeps identity
               ;; stable across re-renders.
               (let [prop-ws (.-workspace js-props)
+                    prop-uri (.-uri js-props)
                     ctx-ws (react/useContext workspace-context)
                     workspace (react/useMemo
                                (fn [] (ws/ensure-workspace (or prop-ws ctx-ws)))
@@ -183,6 +193,11 @@
                             (set-ready true))
                           0)
                          (update-editor-state editor-state state-atom events (:active-uri @state-atom))
+                         ;; If a `uri` prop was given, activate that document on mount (it must
+                         ;; already exist in the workspace) — declarative file selection for
+                         ;; split-pane setups. Editors without :uri are driven via the handle.
+                         (when prop-uri
+                           (rt/activate-document prop-uri state-atom view-ref events client conn))
                          (fn []
                            (log/info "Editor: Destroying EditorView")
                            (swap! state-atom assoc :mounted? false)

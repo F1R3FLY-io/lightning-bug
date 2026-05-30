@@ -41,14 +41,22 @@ export interface Document {
 }
 
 /**
- * Represents the editor workspace.
+ * Snapshot of the editor's workspace state, as returned by getState().
  */
-export interface Workspace {
+export interface WorkspaceSnapshot {
   /** Map of URIs to document states. */
   documents: Document[];
   /** Currently active document URI (or null). */
   activeUri: string | null;
 }
+
+/**
+ * Opaque handle to an instantiable Workspace (created via createWorkspace()). Pass it to
+ * one or more <Editor> instances (the `workspace` prop, or <EditorWorkspaceProvider>) so
+ * they share documents/projects/loaded resources; editors over the same file sync live.
+ * Hold it somewhere stable (a module binding / defonce) so it survives hot reloads.
+ */
+export type Workspace = unknown;
 
 /**
  * Represents a diagnostic entry from LSP.
@@ -103,8 +111,8 @@ export interface Symbol {
  * Internal state of the editor, accessible via getState().
  */
 export interface EditorState {
-  /** Workspace containing open documents and active URI. */
-  workspace: Workspace;
+  /** Workspace snapshot containing open documents and active URI. */
+  workspace: WorkspaceSnapshot;
   /** Current cursor position (1-based). */
   cursor: Position;
   /** Current selection range and text (or null if none). */
@@ -187,6 +195,10 @@ export interface EditorProps {
   defaultProtocol?: string;
   /** Callback for content changes. */
   onContentChange?: (text: string) => void;
+  /** Shared workspace handle (from createWorkspace()). Omit to use the default workspace. */
+  workspace?: Workspace;
+  /** Document URI this editor pane shows (for split-pane / multi-file setups). */
+  uri?: string;
 }
 
 /**
@@ -426,3 +438,17 @@ export interface EditorRef {
  * The Lightning Bug Editor component.
  */
 export const Editor: React.ForwardRefExoticComponent<EditorProps & React.RefAttributes<EditorRef>>;
+
+/**
+ * Creates a new isolated Workspace. Pass it to one or more <Editor> instances (via the
+ * `workspace` prop or <EditorWorkspaceProvider>) so they share documents/projects/resources
+ * and editors over the same file sync live. Omit to use the shared default workspace.
+ * Hold the result somewhere stable (a module binding) so it survives hot reloads.
+ */
+export function createWorkspace(): Workspace;
+
+/**
+ * React context provider that shares a Workspace with all descendant <Editor> instances
+ * that don't specify their own `workspace` prop.
+ */
+export const EditorWorkspaceProvider: React.FC<{ value: Workspace; children?: React.ReactNode }>;
