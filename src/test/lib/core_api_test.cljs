@@ -14,6 +14,7 @@
    ["react" :as react]
    [ext.lang.rholang :refer [language-config]]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.utils :as lib-utils]
    [test.lib.mock-lsp :refer [with-mock-lsp]]
    [test.lib.utils :refer [wait-for wait-for-ready wait-for-event wait-for-uri wait-for-opened-uri
@@ -749,8 +750,8 @@
                                    (<! (timeout 100))
                                    ;; Mock diags/symbols
                                    (let [db (editor->db editor)
-                                         test-id (db/document-id-by-uri "inmemory://test.txt")
-                                         other-id (db/document-id-by-uri "inmemory://other.txt")
+                                         test-id (db/document-id-by-uri (ws/default-conn) "inmemory://test.txt")
+                                         other-id (db/document-id-by-uri (ws/default-conn) "inmemory://other.txt")
                                          diag-tx [{:db/id -1 :diagnostic/document test-id :diagnostic/message "diag1" :diagnostic/severity 1 :diagnostic/start-line 0 :diagnostic/start-char 0 :diagnostic/end-line 0 :diagnostic/end-char 4 :type :diagnostic}
                                                   {:db/id -2 :diagnostic/document other-id :diagnostic/message "diag2" :diagnostic/severity 2 :diagnostic/start-line 0 :diagnostic/start-char 0 :diagnostic/end-line 0 :diagnostic/end-char 5 :type :diagnostic}]
                                          sym-tx [{:db/id -3 :symbol/document test-id :symbol/name "sym1" :symbol/kind 1 :symbol/start-line 0 :symbol/start-char 0 :symbol/end-line 0 :symbol/end-char 4 :symbol/selection-start-line 0 :symbol/selection-start-char 0 :symbol/selection-end-line 0 :symbol/selection-end-char 4 :type :symbol}

@@ -1,7 +1,7 @@
 (ns app.core
   (:require
    ["react-dom/client" :as rd]
-   [lib.db :as lib-db :refer [conn]]
+   [lib.workspace :as ws]
    [app.events :as e]
    [app.system :as sys]
    [app.subs] ;; Registers subscriptions on load.
@@ -47,7 +47,7 @@
   (log/set-min-level! :trace)
   (log/info "Initializing app")
   (rf/dispatch-sync [::e/initialize])
-  (rp/connect! conn) ;; Connect before mount to ensure subs work.
+  (rp/connect! (:conn @ws/default-workspace)) ;; Connect before mount to ensure subs work.
   (sys/init!) ;; Instantiate repositories before any event can dispatch.
   (mount-root) ;; Mount after connect.
   (rfsk/enable)) ;; Enable re-frisk for app-db inspection.
@@ -56,6 +56,6 @@
   "Reload hook for hot-reloading: re-connects Posh and re-renders the root (reuses existing React root)."
   []
   (log/debug "Hot reload triggered: re-connecting Posh and updating UI")
-  (rp/connect! conn)
+  (rp/connect! (:conn @ws/default-workspace))
   (sys/init!)
   (mount-root))

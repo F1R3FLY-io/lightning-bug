@@ -2,7 +2,9 @@
   "DataScript-backed implementations of domain repository protocols.
 
    This adapter wraps the existing lib.db functionality, providing a clean
-   interface that conforms to the domain protocols."
+   interface that conforms to the domain protocols. Each repository record holds
+   the workspace `conn` it operates on (multi-editor-workspace refactor: lib.db is
+   no longer a global singleton), so the methods destructure `conn` from the record."
   (:require [domain.protocols :as p]
             [lib.db :as db]))
 
@@ -10,17 +12,17 @@
 ;; Document Repository Implementation
 ;; =============================================================================
 
-(defrecord DataScriptDocumentRepository []
+(defrecord DataScriptDocumentRepository [conn]
   p/IDocumentRepository
 
   ;; === Query Operations ===
 
-  (get-document [_this uri]
-    (let [[text lang] (db/doc-text-lang-by-uri uri)]
+  (get-document [{:keys [conn]} uri]
+    (let [[text lang] (db/doc-text-lang-by-uri conn uri)]
       (when text
-        (let [[_ version] (db/document-id-version-by-uri uri)
-              [_ _ dirty] (db/doc-text-lang-dirty-by-uri uri)
-              opened (db/document-opened-by-uri? uri)]
+        (let [[_ version] (db/document-id-version-by-uri conn uri)
+              [_ _ dirty] (db/doc-text-lang-dirty-by-uri conn uri)
+              opened (db/document-opened-by-uri? conn uri)]
           {:uri uri
            :text text
            :language lang
@@ -28,144 +30,144 @@
            :dirty dirty
            :opened opened}))))
 
-  (get-document-text [_this uri]
-    (db/document-text-by-uri uri))
+  (get-document-text [{:keys [conn]} uri]
+    (db/document-text-by-uri conn uri))
 
-  (get-document-language [_this uri]
-    (db/document-language-by-uri uri))
+  (get-document-language [{:keys [conn]} uri]
+    (db/document-language-by-uri conn uri))
 
-  (get-document-version [_this uri]
-    (let [[_ version] (db/document-id-version-by-uri uri)]
+  (get-document-version [{:keys [conn]} uri]
+    (let [[_ version] (db/document-id-version-by-uri conn uri)]
       version))
 
-  (get-active-uri [_this]
-    (db/active-uri))
+  (get-active-uri [{:keys [conn]}]
+    (db/active-uri conn))
 
-  (get-active-document [_this]
+  (get-active-document [{:keys [conn]}]
     ;; EXP-007: single coalesced query (preserves the cofx hot-path perf).
-    (let [[uri text lang version] (db/active-uri-text-lang-version)]
+    (let [[uri text lang version] (db/active-uri-text-lang-version conn)]
       (when uri
         {:uri uri :text text :language lang :version version})))
 
-  (get-document-summary [_this uri]
+  (get-document-summary [{:keys [conn]} uri]
     ;; EXP-007: single coalesced query for the :document-repo/document coeffect.
-    (let [[text lang version] (db/doc-text-lang-version-by-uri uri)]
+    (let [[text lang version] (db/doc-text-lang-version-by-uri conn uri)]
       (when text
         {:uri uri :text text :language lang :version version})))
 
-  (list-documents [_this]
-    (db/documents))
+  (list-documents [{:keys [conn]}]
+    (db/documents conn))
 
-  (document-opened? [_this uri]
-    (db/document-opened-by-uri? uri))
+  (document-opened? [{:keys [conn]} uri]
+    (db/document-opened-by-uri? conn uri))
 
-  (list-opened-documents-by-language [_this language]
-    (db/opened-uris-by-lang language))
+  (list-opened-documents-by-language [{:keys [conn]} language]
+    (db/opened-uris-by-lang conn language))
 
   ;; === Mutation Operations ===
 
-  (create-document! [_this doc]
-    (db/create-documents! [(merge {:version 0 :dirty false :opened false} doc)])
-    (db/document-id-by-uri (:uri doc)))
+  (create-document! [{:keys [conn]} doc]
+    (db/create-documents! conn [(merge {:version 0 :dirty false :opened false} doc)])
+    (db/document-id-by-uri conn (:uri doc)))
 
-  (update-document-text! [_this uri text]
-    (db/update-document-text-by-uri! uri text))
+  (update-document-text! [{:keys [conn]} uri text]
+    (db/update-document-text-by-uri! conn uri text))
 
-  (update-document-language! [_this uri language]
-    (when-let [id (db/document-id-by-uri uri)]
-      (db/update-document-uri-language-by-id! id uri language)))
+  (update-document-language! [{:keys [conn]} uri language]
+    (when-let [id (db/document-id-by-uri conn uri)]
+      (db/update-document-uri-language-by-id! conn id uri language)))
 
-  (increment-version! [_this uri]
-    (db/inc-document-version-by-uri! uri))
+  (increment-version! [{:keys [conn]} uri]
+    (db/inc-document-version-by-uri! conn uri))
 
-  (mark-document-opened! [_this uri]
-    (db/document-opened-by-uri! uri))
+  (mark-document-opened! [{:keys [conn]} uri]
+    (db/document-opened-by-uri! conn uri))
 
-  (mark-document-closed! [_this uri]
-    (db/document-closed-by-uri! uri))
+  (mark-document-closed! [{:keys [conn]} uri]
+    (db/document-closed-by-uri! conn uri))
 
-  (set-active-document! [_this uri]
-    (db/update-active-uri! uri))
+  (set-active-document! [{:keys [conn]} uri]
+    (db/update-active-uri! conn uri))
 
-  (delete-document! [_this uri]
-    (when-let [id (db/document-id-by-uri uri)]
-      (db/delete-document-by-id! id)))
+  (delete-document! [{:keys [conn]} uri]
+    (when-let [id (db/document-id-by-uri conn uri)]
+      (db/delete-document-by-id! conn id)))
 
-  (rename-document! [_this old-uri new-uri]
-    (when-let [id (db/document-id-by-uri old-uri)]
-      (db/update-document-uri-by-id! id new-uri))))
+  (rename-document! [{:keys [conn]} old-uri new-uri]
+    (when-let [id (db/document-id-by-uri conn old-uri)]
+      (db/update-document-uri-by-id! conn id new-uri))))
 
 ;; =============================================================================
 ;; Diagnostics Repository Implementation
 ;; =============================================================================
 
-(defrecord DataScriptDiagnosticsRepository []
+(defrecord DataScriptDiagnosticsRepository [conn]
   p/IDiagnosticsRepository
 
-  (get-diagnostics [_this]
-    (db/diagnostics))
+  (get-diagnostics [{:keys [conn]}]
+    (db/diagnostics conn))
 
-  (get-diagnostics-by-uri [_this uri]
-    (db/diagnostics-by-uri uri))
+  (get-diagnostics-by-uri [{:keys [conn]} uri]
+    (db/diagnostics-by-uri conn uri))
 
-  (replace-diagnostics! [_this uri version diagnostics]
+  (replace-diagnostics! [{:keys [conn]} uri version diagnostics]
     (let [flat-diags (if (seq diagnostics)
                        (db/flatten-diags diagnostics uri version)
                        [])]
-      (db/replace-diagnostics-by-uri! uri version flat-diags))))
+      (db/replace-diagnostics-by-uri! conn uri version flat-diags))))
 
 ;; =============================================================================
 ;; Symbols Repository Implementation
 ;; =============================================================================
 
-(defrecord DataScriptSymbolsRepository []
+(defrecord DataScriptSymbolsRepository [conn]
   p/ISymbolsRepository
 
-  (get-symbols [_this]
-    (db/symbols))
+  (get-symbols [{:keys [conn]}]
+    (db/symbols conn))
 
-  (get-symbols-by-uri [_this uri]
-    (db/symbols-by-uri uri))
+  (get-symbols-by-uri [{:keys [conn]} uri]
+    (db/symbols-by-uri conn uri))
 
-  (replace-symbols! [_this uri symbols]
+  (replace-symbols! [{:keys [conn]} uri symbols]
     (let [flat-symbols (if (seq symbols)
                          (db/flatten-symbols symbols nil uri)
                          [])]
-      (db/replace-symbols! uri flat-symbols))))
+      (db/replace-symbols! conn uri flat-symbols))))
 
 ;; =============================================================================
 ;; Log Repository Implementation
 ;; =============================================================================
 
-(defrecord DataScriptLogRepository []
+(defrecord DataScriptLogRepository [conn]
   p/ILogRepository
 
-  (get-logs [_this]
-    (db/logs))
+  (get-logs [{:keys [conn]}]
+    (db/logs conn))
 
-  (add-log! [_this log]
-    (db/create-logs! [log])))
+  (add-log! [{:keys [conn]} log]
+    (db/create-logs! conn [log])))
 
 ;; =============================================================================
 ;; Factory Functions
 ;; =============================================================================
 
 (defn make-document-repository
-  "Creates a DataScript-backed document repository."
-  []
-  (->DataScriptDocumentRepository))
+  "Creates a DataScript-backed document repository over the given workspace conn."
+  [conn]
+  (->DataScriptDocumentRepository conn))
 
 (defn make-diagnostics-repository
-  "Creates a DataScript-backed diagnostics repository."
-  []
-  (->DataScriptDiagnosticsRepository))
+  "Creates a DataScript-backed diagnostics repository over the given workspace conn."
+  [conn]
+  (->DataScriptDiagnosticsRepository conn))
 
 (defn make-symbols-repository
-  "Creates a DataScript-backed symbols repository."
-  []
-  (->DataScriptSymbolsRepository))
+  "Creates a DataScript-backed symbols repository over the given workspace conn."
+  [conn]
+  (->DataScriptSymbolsRepository conn))
 
 (defn make-log-repository
-  "Creates a DataScript-backed log repository."
-  []
-  (->DataScriptLogRepository))
+  "Creates a DataScript-backed log repository over the given workspace conn."
+  [conn]
+  (->DataScriptLogRepository conn))

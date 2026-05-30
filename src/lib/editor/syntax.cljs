@@ -339,11 +339,13 @@
 
 (defn init-syntax
   "Initializes syntax highlighting and indentation for the editor view asynchronously.
-   Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment."
-  [^js view state-atom]
+   Loads Tree-Sitter grammar and queries, configures extensions, and reconfigures the compartment.
+   `conn` is the workspace DataScript conn (threaded explicitly so callers/tests need
+   not seed it into the state-atom)."
+  [^js view state-atom conn]
   (go
     (try
-      (if-let [lang-key (db/active-lang)]
+      (if-let [lang-key (db/active-lang conn)]
         (do
           (log/info "Initializing syntax for language:" lang-key)
           (let [langs (:languages @state-atom)]

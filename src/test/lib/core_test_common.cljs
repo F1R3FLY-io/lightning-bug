@@ -6,9 +6,8 @@
    [reagent.core :as r]
    ["react" :as react]
    ["react-dom/client" :as rdclient]
-   [datascript.core :as d]
    [lib.core :refer [Editor]]
-   [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.editor.syntax :as syntax]
    [lib.state :refer [resources]]
    [test.lib.utils :refer [editor->highlight-range!]]))
@@ -24,7 +23,7 @@
              (reset! resources {:lsp {} :tree-sitter {}})
              @syntax/ts-init-promise
              (reset! syntax/languages {})
-             (d/reset-conn! db/conn (d/empty-db db/schema)))})
+             (ws/reset-workspace! @ws/default-workspace))})
 
 (defn flush-render []
   (r/flush))

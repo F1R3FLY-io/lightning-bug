@@ -7,18 +7,18 @@
    [clojure.test.check :as tc]
    [clojure.test.check.generators :as gen]
    [clojure.test.check.properties :as prop]
-   [datascript.core :as d]
    [reagent.core :as r]
    ["rxjs" :as rxjs]
    [lib.db :as db :refer [flatten-symbols create-documents! replace-symbols!]]
    [lib.lsp.client :as lsp]
+   [lib.workspace :as ws]
    [lib.utils :as lib-utils]
    [test.lib.mock-lsp :refer [parse-message with-mock-lsp]]
    [test.lib.utils :refer [wait-for]]
    [lib.state :refer [set-resource!]]))
 
 (use-fixtures :each
-  {:before #(d/reset-conn! db/conn (d/empty-db db/schema))})
+  {:before #(ws/reset-workspace! @ws/default-workspace)})
 
 (deftest connect-mock-websocket
   (async done
@@ -29,7 +29,7 @@
                                 (fn [mock]
                                   (go
                                     (try
-                                      (let [connect-ch (lsp/connect "test" {:url "ws://test"} state events)]
+                                      (let [connect-ch (lsp/connect (ws/default-conn) "test" {:url "ws://test"} state events)]
                                         (let [wait-res (<! (wait-for #(some? (.-onopen (:sock mock))) 1000))]
                                           (if (= :error (first wait-res))
                                             (throw (second wait-res))
@@ -89,15 +89,15 @@
                                                   :character 3}}}]}]
         uri "test-uri"
         flat-symbols (flatten-symbols syms nil uri)]
-    (create-documents! [{:uri uri
+    (create-documents! (ws/default-conn) [{:uri uri
                          :text ""
                          :language "test"
                          :version 1
                          :dirty false
                          :opened true}])
-    (replace-symbols! uri flat-symbols)
+    (replace-symbols! (ws/default-conn) uri flat-symbols)
     (is (= 2 (count flat-symbols)))
-    (let [syms (db/symbols)
+    (let [syms (db/symbols (ws/default-conn))
           root (first (filter #(= "root" (:name %)) syms))
           child (first (filter #(= "child" (:name %)) syms))]
       (is (= uri (:uri root)) "URI added to root")
@@ -231,7 +231,7 @@
                          :result #js {:capabilities #js {}}}
         response (js/JSON.stringify response-js)
         full (str "Content-Length: " (.-length response) "\r\n\r\n" response)]
-    (lsp/handle-message "test-lang" full state events)
+    (lsp/handle-message (ws/default-conn) "test-lang" full state events)
     (is (empty? (get-in @state [:lsp "test-lang" :pending])) "Pending cleared")
     (is (true? (get-in @state [:lsp "test-lang" :initialized?])) "Initialized set")))
 
@@ -250,15 +250,15 @@
                      :params diag-params-js}
         diag-msg (js/JSON.stringify diag-js)
         full (str "Content-Length: " (.-length diag-msg) "\r\n\r\n" diag-msg)]
-    (db/create-documents! [{:uri "test-uri"
+    (db/create-documents! (ws/default-conn) [{:uri "test-uri"
                             :text ""
                             :language "test-lang"
                             :version 1
                             :dirty false
                             :opened true}])
-    (db/update-active-uri! "test-uri")
-    (lsp/handle-message "test-lang" full state events)
-    (let [diags (db/diagnostics)]
+    (db/update-active-uri! (ws/default-conn) "test-uri")
+    (lsp/handle-message (ws/default-conn) "test-lang" full state events)
+    (let [diags (db/diagnostics (ws/default-conn))]
       (is (= 1 (count diags)) "Transacted diagnostic")
       (is (= "test" (:message (first diags))) "Message matches")
       (is (= "test-uri" (:uri (first diags))) "URI added"))))
@@ -270,8 +270,8 @@
         log-js #js {:jsonrpc "2.0" :method "window/logMessage" :params log-params-js}
         log-msg (js/JSON.stringify log-js)
         full (str "Content-Length: " (.-length log-msg) "\r\n\r\n" log-msg)]
-    (lsp/handle-message "test-lang" full state events)
-    (let [logs (db/logs)]
+    (lsp/handle-message (ws/default-conn) "test-lang" full state events)
+    (let [logs (db/logs (ws/default-conn))]
       (is (= 1 (count logs)) "Transacted log")
       (is (= "test log" (:message (first logs))) "Log message matches"))))
 
@@ -311,9 +311,9 @@
                  :dirty false
                  :opened true
                  :type :document}]
-        _ (create-documents! doc-tx)]
-    (lsp/handle-message "test-lang" full state events)
-    (let [syms (db/symbols)]
+        _ (create-documents! (ws/default-conn) doc-tx)]
+    (lsp/handle-message (ws/default-conn) "test-lang" full state events)
+    (let [syms (db/symbols (ws/default-conn))]
       (is (= 2 (count syms)) "Transacted flattened symbols")
       (let [root (first (filter #(= "root" (:name %)) syms))
             child (first (filter #(= "child" (:name %)) syms))]
@@ -339,7 +339,7 @@
         response (js/JSON.stringify response-js)
         full (str "Content-Length: " (.-length response) "\r\n\r\n" response)]
     (with-redefs [lsp/send (fn [_ _ _])] ; Mock send-initialized
-      (lsp/handle-message "test-lang" full state events))
+      (lsp/handle-message (ws/default-conn) "test-lang" full state events))
     (is (true? (get-in @state [:lsp "test-lang" :initialized?])) "Initialized flag set")
     (is (empty? (get-in @state [:lsp "test-lang" :pending])) "Pending cleared")))
 
@@ -359,10 +359,10 @@
                  :version 1
                  :dirty false
                  :opened true}]
-        _ (create-documents! doc-tx)]
-    (db/update-active-uri! "test-uri")
-    (lsp/handle-publish-diagnostics "test" params state events)
-    (let [diags (db/diagnostics)]
+        _ (create-documents! (ws/default-conn) doc-tx)]
+    (db/update-active-uri! (ws/default-conn) "test-uri")
+    (lsp/handle-publish-diagnostics (ws/default-conn) "test" params state events)
+    (let [diags (db/diagnostics (ws/default-conn))]
       (is (= 1 (count diags)) "Diagnostic transacted")
       (is (= "err" (:message (first diags))) "Message matches")
       (is (= "test-uri" (:uri (first diags))) "URI added"))))
@@ -432,7 +432,7 @@
                                (set! (.-close ws) (fn [] (reset! closed true)))
                                (with-redefs [lsp/send (fn [_lang msg _state-atom]
                                                         (swap! sent conj msg))]
-                                 (lsp/handle-message "test-lang" full state events))
+                                 (lsp/handle-message (ws/default-conn) "test-lang" full state events))
                                (<! (timeout 100))
                                (is (= 1 (count @sent)) "Sent exit after shutdown")
                                (is (= "exit" (:method (first @sent))) "Exit notification sent")
@@ -516,14 +516,14 @@
           response3 (js/JSON.stringify response3-js)
           full3 (str "Content-Length: " (.-length response3) "\r\n\r\n" response3)]
       ;; Create document for symbol response
-      (db/create-documents! [{:uri "test-uri"
+      (db/create-documents! (ws/default-conn) [{:uri "test-uri"
                               :text ""
                               :language "test-lang"
                               :version 1
                               :dirty false
                               :opened true}])
       ;; Handle response 3 first
-      (lsp/handle-message "test-lang" full3 state events)
+      (lsp/handle-message (ws/default-conn) "test-lang" full3 state events)
       ;; Request 3 should be removed, but 1 and 2 should remain
       (is (not (contains? (get-in @state [:lsp "test-lang" :pending]) 3))
           "Request 3 should be cleared")
@@ -542,7 +542,7 @@
           unknown-msg (js/JSON.stringify unknown-js)
           full (str "Content-Length: " (.-length unknown-msg) "\r\n\r\n" unknown-msg)]
       ;; Should not throw
-      (lsp/handle-message "test-lang" full state events)
+      (lsp/handle-message (ws/default-conn) "test-lang" full state events)
       ;; State should be unchanged
       (is (empty? (get-in @state [:lsp "test-lang" :pending]))
           "Pending should remain empty"))))
@@ -558,7 +558,7 @@
           error-msg (js/JSON.stringify error-js)
           full (str "Content-Length: " (.-length error-msg) "\r\n\r\n" error-msg)]
       ;; Should not throw
-      (lsp/handle-message "test-lang" full state events)
+      (lsp/handle-message (ws/default-conn) "test-lang" full state events)
       ;; Pending should be cleared even for error
       (is (empty? (get-in @state [:lsp "test-lang" :pending]))
           "Pending should be cleared on error response"))))
@@ -572,14 +572,14 @@
                               :result nil}
           null-result-msg (js/JSON.stringify null-result-js)
           full (str "Content-Length: " (.-length null-result-msg) "\r\n\r\n" null-result-msg)]
-      (db/create-documents! [{:uri "test-uri"
+      (db/create-documents! (ws/default-conn) [{:uri "test-uri"
                               :text ""
                               :language "test-lang"
                               :version 1
                               :dirty false
                               :opened true}])
       ;; Should not throw
-      (lsp/handle-message "test-lang" full state events)
+      (lsp/handle-message (ws/default-conn) "test-lang" full state events)
       ;; Pending should be cleared
       (is (empty? (get-in @state [:lsp "test-lang" :pending]))
           "Pending should be cleared on null result"))))
@@ -606,14 +606,14 @@
                        :params diag-params-js}
           diag-msg (js/JSON.stringify diag-js)
           full (str "Content-Length: " (.-length diag-msg) "\r\n\r\n" diag-msg)]
-      (db/create-documents! [{:uri "test-uri"
+      (db/create-documents! (ws/default-conn) [{:uri "test-uri"
                               :text ""
                               :language "test-lang"
                               :version 1
                               :dirty false
                               :opened true}])
-      (db/update-active-uri! "test-uri")
-      (lsp/handle-message "test-lang" full state events)
-      (let [diags (db/diagnostics-by-uri "test-uri")]
+      (db/update-active-uri! (ws/default-conn) "test-uri")
+      (lsp/handle-message (ws/default-conn) "test-lang" full state events)
+      (let [diags (db/diagnostics-by-uri (ws/default-conn) "test-uri")]
         (is (= 3 (count diags)) "All three diagnostics stored")
         (is (= #{1 2 3} (set (map :severity diags))) "All severities present")))))

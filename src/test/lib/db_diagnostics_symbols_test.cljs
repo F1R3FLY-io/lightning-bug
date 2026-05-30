@@ -2,12 +2,12 @@
   "Tests for the lib.db diagnostics, symbols, and log layers (split from db_test)."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [datascript.core :as d]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [test.lib.test-helpers :as h]))
 
 (use-fixtures :each
-  {:before #(d/reset-conn! db/conn (d/empty-db db/schema))})
+  {:before #(ws/reset-workspace! @ws/default-workspace)})
 
 ;; =============================================================================
 ;; Diagnostic Tests
@@ -48,15 +48,15 @@
 (deftest replace-diagnostics-by-uri!-replaces-all
   (testing "Replacing diagnostics clears old and adds new"
     (h/create-test-document! {:uri "file:///test.rho"})
-    (db/replace-diagnostics-by-uri! "file:///test.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///test.rho" nil
                                     [{:message "old error"
                                       :severity 1
                                       :startLine 0
                                       :startChar 0
                                       :endLine 0
                                       :endChar 5}])
-    (is (= 1 (count (db/diagnostics-by-uri "file:///test.rho"))))
-    (db/replace-diagnostics-by-uri! "file:///test.rho" nil
+    (is (= 1 (count (db/diagnostics-by-uri (ws/default-conn) "file:///test.rho"))))
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///test.rho" nil
                                     [{:message "new error 1"
                                       :severity 1
                                       :startLine 0
@@ -69,7 +69,7 @@
                                       :startChar 0
                                       :endLine 1
                                       :endChar 3}])
-    (let [diags (db/diagnostics-by-uri "file:///test.rho")]
+    (let [diags (db/diagnostics-by-uri (ws/default-conn) "file:///test.rho")]
       (is (= 2 (count diags)))
       (is (some #(= "new error 1" (:message %)) diags))
       (is (some #(= "new error 2" (:message %)) diags))
@@ -78,37 +78,37 @@
 (deftest replace-diagnostics-by-uri!-with-empty-clears-all
   (testing "Replacing with empty list clears all diagnostics"
     (h/create-test-document! {:uri "file:///test.rho"})
-    (db/replace-diagnostics-by-uri! "file:///test.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///test.rho" nil
                                     [{:message "error"
                                       :severity 1
                                       :startLine 0
                                       :startChar 0
                                       :endLine 0
                                       :endChar 5}])
-    (is (= 1 (count (db/diagnostics-by-uri "file:///test.rho"))))
-    (db/replace-diagnostics-by-uri! "file:///test.rho" nil [])
-    (is (empty? (db/diagnostics-by-uri "file:///test.rho")))))
+    (is (= 1 (count (db/diagnostics-by-uri (ws/default-conn) "file:///test.rho"))))
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///test.rho" nil [])
+    (is (empty? (db/diagnostics-by-uri (ws/default-conn) "file:///test.rho")))))
 
 (deftest diagnostics-by-uri-filters-by-uri
   (testing "diagnostics-by-uri returns only diagnostics for specified URI"
     (h/create-test-document! {:uri "file:///a.rho"})
     (h/create-test-document! {:uri "file:///b.rho"})
-    (db/replace-diagnostics-by-uri! "file:///a.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///a.rho" nil
                                     [{:message "error in a"
                                       :severity 1
                                       :startLine 0
                                       :startChar 0
                                       :endLine 0
                                       :endChar 5}])
-    (db/replace-diagnostics-by-uri! "file:///b.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///b.rho" nil
                                     [{:message "error in b"
                                       :severity 1
                                       :startLine 0
                                       :startChar 0
                                       :endLine 0
                                       :endChar 5}])
-    (let [diags-a (db/diagnostics-by-uri "file:///a.rho")
-          diags-b (db/diagnostics-by-uri "file:///b.rho")]
+    (let [diags-a (db/diagnostics-by-uri (ws/default-conn) "file:///a.rho")
+          diags-b (db/diagnostics-by-uri (ws/default-conn) "file:///b.rho")]
       (is (= 1 (count diags-a)))
       (is (= "error in a" (:message (first diags-a))))
       (is (= 1 (count diags-b)))
@@ -118,15 +118,15 @@
   (testing "diagnostics returns all diagnostics across documents"
     (h/create-test-document! {:uri "file:///a.rho"})
     (h/create-test-document! {:uri "file:///b.rho"})
-    (db/replace-diagnostics-by-uri! "file:///a.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///a.rho" nil
                                     [{:message "error 1" :severity 1
                                       :startLine 0 :startChar 0
                                       :endLine 0 :endChar 5}])
-    (db/replace-diagnostics-by-uri! "file:///b.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///b.rho" nil
                                     [{:message "error 2" :severity 1
                                       :startLine 0 :startChar 0
                                       :endLine 0 :endChar 5}])
-    (let [all-diags (db/diagnostics)]
+    (let [all-diags (db/diagnostics (ws/default-conn))]
       (is (= 2 (count all-diags)))
       (is (some #(= "error 1" (:message %)) all-diags))
       (is (some #(= "error 2" (:message %)) all-diags)))))
@@ -230,8 +230,8 @@
                          :selectionRange {:start {:line 0 :character 4}
                                           :end {:line 0 :character 11}}}]
                        nil "file:///test.rho")]
-      (db/replace-symbols! "file:///test.rho" old-symbols))
-    (is (= 1 (count (db/symbols-by-uri "file:///test.rho"))))
+      (db/replace-symbols! (ws/default-conn) "file:///test.rho" old-symbols))
+    (is (= 1 (count (db/symbols-by-uri (ws/default-conn) "file:///test.rho"))))
     (let [new-symbols (db/flatten-symbols
                        [{:name "newFunc1"
                          :kind 12
@@ -246,8 +246,8 @@
                          :selectionRange {:start {:line 6 :character 4}
                                           :end {:line 6 :character 12}}}]
                        nil "file:///test.rho")]
-      (db/replace-symbols! "file:///test.rho" new-symbols))
-    (let [syms (db/symbols-by-uri "file:///test.rho")]
+      (db/replace-symbols! (ws/default-conn) "file:///test.rho" new-symbols))
+    (let [syms (db/symbols-by-uri (ws/default-conn) "file:///test.rho")]
       (is (= 2 (count syms)))
       (is (some #(= "newFunc1" (:name %)) syms))
       (is (some #(= "newFunc2" (:name %)) syms))
@@ -257,7 +257,7 @@
   (testing "symbols-by-uri returns only symbols for specified URI"
     (h/create-test-document! {:uri "file:///a.rho"})
     (h/create-test-document! {:uri "file:///b.rho"})
-    (db/replace-symbols! "file:///a.rho"
+    (db/replace-symbols! (ws/default-conn) "file:///a.rho"
                          (db/flatten-symbols
                           [{:name "funcA"
                             :kind 12
@@ -266,7 +266,7 @@
                             :selectionRange {:start {:line 0 :character 4}
                                              :end {:line 0 :character 9}}}]
                           nil "file:///a.rho"))
-    (db/replace-symbols! "file:///b.rho"
+    (db/replace-symbols! (ws/default-conn) "file:///b.rho"
                          (db/flatten-symbols
                           [{:name "funcB"
                             :kind 12
@@ -275,8 +275,8 @@
                             :selectionRange {:start {:line 0 :character 4}
                                              :end {:line 0 :character 9}}}]
                           nil "file:///b.rho"))
-    (let [syms-a (db/symbols-by-uri "file:///a.rho")
-          syms-b (db/symbols-by-uri "file:///b.rho")]
+    (let [syms-a (db/symbols-by-uri (ws/default-conn) "file:///a.rho")
+          syms-b (db/symbols-by-uri (ws/default-conn) "file:///b.rho")]
       (is (= 1 (count syms-a)))
       (is (= "funcA" (:name (first syms-a))))
       (is (= 1 (count syms-b)))
@@ -288,9 +288,9 @@
 
 (deftest create-logs!-adds-logs
   (testing "Creating logs"
-    (db/create-logs! [{:message "Log message 1" :lang "rholang"}
+    (db/create-logs! (ws/default-conn) [{:message "Log message 1" :lang "rholang"}
                       {:message "Log message 2" :lang "text"}])
-    (let [logs (db/logs)]
+    (let [logs (db/logs (ws/default-conn))]
       (is (= 2 (count logs)))
       (is (some #(= "Log message 1" (:message %)) logs))
       (is (some #(= "Log message 2" (:message %)) logs)))))

@@ -1,5 +1,25 @@
+import { existsSync } from 'fs';
+
 export default async function (config) {
   const karmaFile = process.env.KARMA_FILE || 'target/karma-test.js';
+
+  // Fail fast (with a clear message) if the runtime-fetched test artifacts are
+  // missing. These are copied by `npm run prepare:test`; without them the browser
+  // silently 404s on tree-sitter.wasm / grammar queries and tests degrade in
+  // confusing ways (audit finding). A loud error here points straight at the fix.
+  const requiredArtifacts = [
+    'resources/public/js/test/js/tree-sitter.wasm',
+    'resources/public/js/test/extensions/lang/rholang/tree-sitter/tree-sitter-rholang.wasm',
+    'resources/public/js/test/extensions/lang/rholang/tree-sitter/queries'
+  ];
+  const missing = requiredArtifacts.filter((p) => !existsSync(p));
+  if (missing.length > 0) {
+    throw new Error(
+      'Missing test artifacts (run `npm run prepare:test` first):\n  ' +
+      missing.join('\n  ')
+    );
+  }
+
   await Promise.all([
     import('karma-cljs-test'),
     import('karma-chrome-launcher'),

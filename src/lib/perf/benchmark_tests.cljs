@@ -20,6 +20,7 @@
    [lib.perf.bench-runner :as runner]
    [lib.perf.stats :as stats]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.query-cache :as qc]
    [lib.debounce :as debounce]
    [lib.editor.syntax :as syntax]
@@ -30,6 +31,11 @@
 ;; =============================================================================
 ;; Sample Data Generation
 ;; =============================================================================
+
+;; Benchmarks run against the shared default workspace; resolve its conn ONCE (like
+;; production, which captures conn lexically via ctx/closures) so the timed loops
+;; measure the query itself, not per-call workspace resolution.
+(def ^:private conn (ws/default-conn))
 
 (defn generate-rholang-code
   "Generates synthetic Rholang code with the specified number of lines."
@@ -62,7 +68,7 @@
   (qc/invalidate-all!)
 
   ;; Create test documents
-  (db/create-documents!
+  (db/create-documents! conn
    [{:uri "file:///test/large.rho"
      :text @sample-1k-lines
      :language "rholang"
@@ -77,7 +83,7 @@
      :opened true}])
 
   ;; Create test diagnostics
-  (let [doc-id (db/document-id-by-uri "file:///test/large.rho")
+  (let [doc-id (db/document-id-by-uri conn "file:///test/large.rho")
         test-diags (for [i (range 50)]
                      {:message (str "Test diagnostic " i)
                       :severity (inc (mod i 4))
@@ -86,10 +92,10 @@
                       :endLine i
                       :endChar 10})]
     (when doc-id
-      (db/replace-diagnostics-by-uri! "file:///test/large.rho" 1 test-diags)))
+      (db/replace-diagnostics-by-uri! conn "file:///test/large.rho" 1 test-diags)))
 
   ;; Create test symbols
-  (let [doc-id (db/document-id-by-uri "file:///test/large.rho")
+  (let [doc-id (db/document-id-by-uri conn "file:///test/large.rho")
         test-symbols (for [i (range 100)]
                        {:symbol/name (str "symbol_" i)
                         :symbol/kind (inc (mod i 25))
@@ -102,10 +108,10 @@
                         :symbol/selection-end-line (* i 10)
                         :symbol/selection-end-char 10})]
     (when doc-id
-      (db/replace-symbols! "file:///test/large.rho" test-symbols)))
+      (db/replace-symbols! conn "file:///test/large.rho" test-symbols)))
 
   ;; EXP-007: Set active URI for coalesced query benchmarks
-  (db/update-active-uri! "file:///test/large.rho"))
+  (db/update-active-uri! conn "file:///test/large.rho"))
 
 ;; =============================================================================
 ;; Benchmark Definitions
@@ -119,32 +125,32 @@
 (defn datascript-diagnostics-by-uri-benchmark
   "Benchmarks DataScript diagnostics-by-uri query."
   []
-  (db/diagnostics-by-uri "file:///test/large.rho"))
+  (db/diagnostics-by-uri conn "file:///test/large.rho"))
 
 (defn datascript-symbols-by-uri-benchmark
   "Benchmarks DataScript symbols-by-uri query."
   []
-  (db/symbols-by-uri "file:///test/large.rho"))
+  (db/symbols-by-uri conn "file:///test/large.rho"))
 
 (defn datascript-all-diagnostics-benchmark
   "Benchmarks DataScript all diagnostics query (uses or-join)."
   []
-  (db/diagnostics))
+  (db/diagnostics conn))
 
 (defn datascript-all-symbols-benchmark
   "Benchmarks DataScript all symbols query (uses or-join)."
   []
-  (db/symbols))
+  (db/symbols conn))
 
 (defn datascript-document-lookup-benchmark
   "Benchmarks simple document lookup by URI."
   []
-  (db/document-id-by-uri "file:///test/large.rho"))
+  (db/document-id-by-uri conn "file:///test/large.rho"))
 
 (defn datascript-active-uri-benchmark
   "Benchmarks active URI query."
   []
-  (db/active-uri))
+  (db/active-uri conn))
 
 (defn diagnostic-transform-benchmark
   "Benchmarks diagnostic flattening/transformation."
@@ -187,21 +193,21 @@
   []
   ;; Call multiple times to exercise cache
   (dotimes [_ 5]
-    (db/active-uri)))
+    (db/active-uri conn)))
 
 (defn query-cache-diagnostics-benchmark
   "Benchmarks diagnostics-by-uri with cache."
   []
   ;; Call multiple times to exercise cache
   (dotimes [_ 3]
-    (db/diagnostics-by-uri "file:///test/large.rho")))
+    (db/diagnostics-by-uri conn "file:///test/large.rho")))
 
 (defn query-cache-symbols-benchmark
   "Benchmarks symbols-by-uri with cache."
   []
   ;; Call multiple times to exercise cache
   (dotimes [_ 3]
-    (db/symbols-by-uri "file:///test/large.rho")))
+    (db/symbols-by-uri conn "file:///test/large.rho")))
 
 (defn query-cache-mixed-workload-benchmark
   "Benchmarks a realistic mixed workload of cached queries.
@@ -209,10 +215,10 @@
    fetching diagnostics, and fetching symbols."
   []
   ;; Simulate a typical editor event cycle
-  (let [uri (db/active-uri)]
+  (let [uri (db/active-uri conn)]
     (when uri
-      (db/diagnostics-by-uri uri)
-      (db/symbols-by-uri uri))))
+      (db/diagnostics-by-uri conn uri)
+      (db/symbols-by-uri conn uri))))
 
 ;; =============================================================================
 ;; Query Coalescence Benchmarks (EXP-007)
@@ -222,44 +228,44 @@
   "Benchmarks coalesced active-uri-version query (single query for uri+version).
    EXP-007: Compare with sequential active-uri + active-version."
   []
-  (db/active-uri-version))
+  (db/active-uri-version conn))
 
 (defn coalesced-active-uri-text-lang-version-benchmark
   "Benchmarks coalesced active-uri-text-lang-version query.
    EXP-007: Compare with sequential queries for active document context."
   []
-  (db/active-uri-text-lang-version))
+  (db/active-uri-text-lang-version conn))
 
 (defn coalesced-doc-text-lang-version-benchmark
   "Benchmarks coalesced doc-text-lang-version-by-uri query.
    EXP-007: Compare with sequential doc-text-lang + doc-id-version queries."
   []
-  (db/doc-text-lang-version-by-uri "file:///test/large.rho"))
+  (db/doc-text-lang-version-by-uri conn "file:///test/large.rho"))
 
 (defn sequential-active-uri-version-benchmark
   "Benchmarks sequential active-uri + active-version queries (baseline for EXP-007).
    This simulates the old pattern before coalescence."
   []
-  (let [uri (db/active-uri)
-        version (db/active-version)]
+  (let [uri (db/active-uri conn)
+        version (db/active-version conn)]
     [uri version]))
 
 (defn sequential-active-document-benchmark
   "Benchmarks sequential queries for active document context (baseline for EXP-007).
    Simulates the old coeffect pattern: active-uri -> doc-text-lang -> doc-id-version."
   []
-  (let [uri (db/active-uri)]
+  (let [uri (db/active-uri conn)]
     (when uri
-      (let [[text lang] (db/doc-text-lang-by-uri uri)
-            [_ version] (db/document-id-version-by-uri uri)]
+      (let [[text lang] (db/doc-text-lang-by-uri conn uri)
+            [_ version] (db/document-id-version-by-uri conn uri)]
         {:uri uri :text text :language lang :version version}))))
 
 (defn sequential-document-lookup-benchmark
   "Benchmarks sequential queries for document lookup (baseline for EXP-007).
    Simulates the old coeffect pattern: doc-text-lang + doc-id-version."
   []
-  (let [[text lang] (db/doc-text-lang-by-uri "file:///test/large.rho")
-        [_ version] (db/document-id-version-by-uri "file:///test/large.rho")]
+  (let [[text lang] (db/doc-text-lang-by-uri conn "file:///test/large.rho")
+        [_ version] (db/document-id-version-by-uri conn "file:///test/large.rho")]
     {:text text :language lang :version version}))
 
 ;; =============================================================================
@@ -465,7 +471,7 @@
                         (swap! langs-atom dissoc "rholang"))
 
                       (go
-                        (let [result (<! (syntax/init-syntax nil mock-state))]
+                        (let [result (<! (syntax/init-syntax nil mock-state conn))]
                           (resolve result))))
                     ;; WASM not available, skip benchmark
                     (do
@@ -522,7 +528,7 @@
                           (let [doc-content @sample-10k-lines
                                 ;; Create a test document in the database for scroll benchmark
                                 scroll-uri "file:///benchmark/scroll.rho"
-                                _ (db/create-documents!
+                                _ (db/create-documents! conn
                                    [{:uri scroll-uri
                                      :text doc-content
                                      :language "rholang"
@@ -530,7 +536,7 @@
                                      :dirty false
                                      :opened true}])
                                 ;; Set it as the active document
-                                _ (db/update-active-uri! scroll-uri)
+                                _ (db/update-active-uri! conn scroll-uri)
                                 ;; Create editor state with syntax compartment for reconfiguration
                                 state (.create EditorState #js {:doc doc-content
                                                                 :extensions #js [(.of syntax/syntax-compartment #js [])]})
@@ -545,7 +551,7 @@
                                                                            :indent-size 2}}
                                                     :tree-sitter-wasm "/js/tree-sitter.wasm"})]
                               (go
-                                (let [result (<! (syntax/init-syntax view mock-state))]
+                                (let [result (<! (syntax/init-syntax view mock-state conn))]
                                   (js/console.log "[ScrollBench] Syntax init result:" (clj->js result))
                                   ;; Wait for syntax to be fully applied
                                   (<! (timeout 500))

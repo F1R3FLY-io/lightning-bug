@@ -66,6 +66,105 @@ jobs:
       - name: Run type tests
         run: npm run test:types
 
+      - name: Check demo dependency drift
+        run: npm run check:demo-deps
+
+  benchmark:
+    # Regression gate for the keystroke/query hot paths (EXP-001..011). Runs the
+    # benchmark suite on BOTH the base branch and the PR head on the SAME runner,
+    # then fails only on a statistically significant regression beyond a generous
+    # threshold (unpinned CI is noisy; this catches algorithmic blowups, not noise).
+    # Authoritative, pinned numbers remain a manual `npm run benchmark:prepare` step.
+    name: Benchmark regression gate
+    timeout-minutes: 30
+    needs: [lint-and-test-types]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CHROME_BIN: /usr/bin/google-chrome-stable
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Checkout base branch into ./base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          fetch-depth: 0
+          path: base
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: 'https://npm.pkg.github.com'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '23'
+
+      - name: Set up Clojure
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+
+      - name: Cache clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+            .cpcache
+          key: cljdeps-${{ hashFiles('deps.edn') }}
+          restore-keys: cljdeps-
+
+      - name: Install Chrome
+        run: node scripts/install-browser.js chrome
+
+      - name: Benchmark base branch
+        working-directory: base
+        run: |
+          npm install
+          npm run prepare:all
+          npm run benchmark:build
+          node scripts/run-benchmark.js --quick --output ../baseline.json
+
+      - name: Benchmark PR head
+        run: |
+          npm install
+          npm run prepare:all
+          npm run benchmark:build
+          node scripts/run-benchmark.js --quick --output experiment.json
+
+      - name: Compare and gate
+        # Threshold is +150% (2.5x), not tighter: measured per-metric noise between
+        # two runs of IDENTICAL code on the same machine is ~±70% (unpinned CPU).
+        # So this gate only catches CATASTROPHIC, clearly-algorithmic regressions
+        # (O(n)->O(n^2) etc.); authoritative perf validation is a manual pinned run
+        # (`npm run benchmark:prepare` + compare). The full report is posted regardless.
+        run: |
+          node scripts/compare-benchmarks.js baseline.json experiment.json --output bench-report.md --gate-regression 150
+          cat bench-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: |
+            baseline.json
+            experiment.json
+            bench-report.md
+
   test:
     timeout-minutes: 20
     needs: [lint-and-test-types]
@@ -240,7 +339,7 @@ jobs:
             dist/**
             types/**
             resources/public/extensions/**
-            scripts/postinstall.js
+            scripts/utils.js
 
   release:
     timeout-minutes: 15

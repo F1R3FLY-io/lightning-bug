@@ -5,6 +5,7 @@
    [clojure.core.async :refer [go <! timeout]]
    [reagent.core :as r]
    [lib.lsp.connection-manager :as cm]
+   [lib.workspace :as ws]
    [lib.lsp.client :as lsp]
    [domain.protocols :as p]))
 
@@ -129,7 +130,7 @@
   (testing "Creating a connection manager"
     (let [state-atom (r/atom {})
           events (js/Object.)  ; Mock RxJS Subject
-          manager (cm/make-connection-manager state-atom events)]
+          manager (cm/make-connection-manager state-atom events (ws/default-conn))]
       (is (some? manager))
       (is (satisfies? p/ILspClient manager)))))
 
@@ -139,7 +140,7 @@
           events (js/Object.)
           config {:request-timeout-ms 30000
                   :init-timeout-ms 15000}
-          manager (cm/make-connection-manager state-atom events config)]
+          manager (cm/make-connection-manager state-atom events (ws/default-conn) config)]
       (is (some? manager))
       (is (= 30000 (get-in manager [:config :request-timeout-ms])))
       (is (= 15000 (get-in manager [:config :init-timeout-ms]))))))
@@ -151,33 +152,33 @@
 (deftest connection-manager-connected?-checks-state
   (testing "connected? returns true for appropriate states"
     (let [state-atom (r/atom {:lsp {"test" {:state :initialized}}})
-          manager (cm/make-connection-manager state-atom nil)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
       (is (true? (p/connected? manager "test")))))
 
   (testing "connected? returns true for initializing state"
     (let [state-atom (r/atom {:lsp {"test" {:state :initializing}}})
-          manager (cm/make-connection-manager state-atom nil)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
       (is (true? (p/connected? manager "test")))))
 
   (testing "connected? returns false for disconnected state"
     (let [state-atom (r/atom {:lsp {"test" {:state :disconnected}}})
-          manager (cm/make-connection-manager state-atom nil)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
       (is (false? (p/connected? manager "test")))))
 
   (testing "connected? returns false for missing language"
     (let [state-atom (r/atom {})
-          manager (cm/make-connection-manager state-atom nil)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
       (is (false? (p/connected? manager "nonexistent"))))))
 
 (deftest connection-manager-initialized?-checks-state
   (testing "initialized? returns true only for initialized state"
     (let [state-atom (r/atom {:lsp {"test" {:state :initialized}}})
-          manager (cm/make-connection-manager state-atom nil)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
       (is (true? (p/initialized? manager "test")))))
 
   (testing "initialized? returns false for other states"
     (let [state-atom (r/atom {:lsp {"test" {:state :connecting}}})
-          manager (cm/make-connection-manager state-atom nil)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
       (is (false? (p/initialized? manager "test"))))))
 
 ;; =============================================================================
@@ -308,21 +309,21 @@
   (testing "connect-supplier returns a 0-arg fn that calls lsp/connect with this client's state-atom + events"
     (let [state-atom (r/atom {})
           events (js/Object.)
-          manager (cm/make-connection-manager state-atom events)
+          manager (cm/make-connection-manager state-atom events (ws/default-conn))
           captured (atom nil)]
-      (with-redefs [lsp/connect (fn [lang config sa ev]
-                                  (reset! captured {:lang lang :config config :sa sa :ev ev})
+      (with-redefs [lsp/connect (fn [conn lang config sa ev]
+                                  (reset! captured {:conn conn :lang lang :config config :sa sa :ev ev})
                                   :connect-ch)]
         (let [supplier (p/connect-supplier manager "rholang" "ws://localhost:1234")]
           (is (fn? supplier))
           (is (= :connect-ch (supplier)))
-          (is (= {:lang "rholang" :config {:url "ws://localhost:1234"} :sa state-atom :ev events}
+          (is (= {:conn (ws/default-conn) :lang "rholang" :config {:url "ws://localhost:1234"} :sa state-atom :ev events}
                  @captured)))))))
 
 (deftest notify-did-change-incremental!-delegates
   (testing "notify-did-change-incremental! passes through to lsp with the client's state-atom"
     (let [state-atom (r/atom {})
-          manager (cm/make-connection-manager state-atom nil)
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))
           captured (atom nil)]
       (with-redefs [lsp/notify-did-change-incremental
                     (fn [lang uri changes version sa] (reset! captured [lang uri changes version sa]))]
@@ -332,7 +333,7 @@
 (deftest shutdown-all!-uses-1-arity
   (testing "shutdown-all! calls lsp/request-shutdown with only the state-atom (1-arity = all languages)"
     (let [state-atom (r/atom {:lsp {"a" {} "b" {}}})
-          manager (cm/make-connection-manager state-atom nil)
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))
           captured (atom nil)]
       (with-redefs [lsp/request-shutdown (fn ([sa] (reset! captured [sa]))
                                            ([lang sa] (reset! captured [lang sa])))]
@@ -342,7 +343,7 @@
 (deftest request-shutdown!-is-thin-pass-through
   (testing "request-shutdown! delegates with [language state-atom] and does NOT run the state machine"
     (let [state-atom (r/atom {:lsp {"rholang" {:state :initialized}}})
-          manager (cm/make-connection-manager state-atom nil)
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))
           captured (atom nil)]
       (with-redefs [lsp/request-shutdown (fn ([sa] (reset! captured [sa]))
                                            ([lang sa] (reset! captured [lang sa])))]
@@ -354,7 +355,7 @@
 (deftest request-symbols!-is-unguarded-pass-through
   (testing "request-symbols! delegates even when not initialized (matches lib.core's live behavior)"
     (let [state-atom (r/atom {:lsp {"rholang" {:state :disconnected}}})
-          manager (cm/make-connection-manager state-atom nil)
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))
           captured (atom nil)]
       (with-redefs [lsp/request-document-symbol (fn [& args] (reset! captured (vec args)))]
         (p/request-symbols! manager "rholang" "file:///a.rho")

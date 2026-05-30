@@ -2,12 +2,17 @@
   (:require
    [clojure.string :as str]
    [re-frame.core :as rf]
-   [lib.db :as lib-db]))
+   [lib.db :as lib-db]
+   [lib.workspace :as ws]))
+
+;; The demo is single-workspace: all subs read the default workspace's conn.
+;; (lib.db is no longer a global singleton — multi-editor-workspace refactor.)
+(defn- conn [] (:conn @ws/default-workspace))
 
 (rf/reg-sub
  :workspace/files
  (fn [_ _]
-   (let [docs (lib-db/documents)]
+   (let [docs (lib-db/documents (conn))]
      (into {} (map (fn [doc]
                      (let [name (last (str/split (:uri doc) #"/"))]
                        [(:uri doc) (assoc doc :name name)])) docs)))))
@@ -15,12 +20,12 @@
 (rf/reg-sub
  :workspace/active-file
  (fn [_ _]
-   (lib-db/active-uri)))
+   (lib-db/active-uri (conn))))
 
 (rf/reg-sub
  :active-lang
  (fn [_ _]
-   (lib-db/active-lang)))
+   (lib-db/active-lang (conn))))
 
 (rf/reg-sub
  :languages
@@ -35,18 +40,18 @@
 (rf/reg-sub
  :active-name
  (fn [_ _]
-   (when-let [uri (lib-db/active-uri)]
+   (when-let [uri (lib-db/active-uri (conn))]
      (last (str/split uri #"/")))))
 
 (rf/reg-sub
  :active-content
  (fn [_ _]
-   (lib-db/active-text)))
+   (lib-db/active-text (conn))))
 
 (rf/reg-sub
  :lsp/connected?
  (fn [db _]
-   (let [lang (or (lib-db/active-lang) "text")]
+   (let [lang (or (lib-db/active-lang (conn)) "text")]
      (get-in db [:lsp lang :connected?]))))
 
 (rf/reg-sub
@@ -57,7 +62,7 @@
 (rf/reg-sub
  :filtered-logs
  (fn [_ [_ term]]
-   (filter #(str/includes? (:message %) term) (lib-db/logs))))
+   (filter #(str/includes? (:message %) term) (lib-db/logs (conn)))))
 
 (rf/reg-sub
  :status
@@ -92,17 +97,17 @@
 (rf/reg-sub
  :lsp/diagnostics
  (fn [_ _]
-   (lib-db/diagnostics)))
+   (lib-db/diagnostics (conn))))
 
 (rf/reg-sub
  :lsp/symbols
  (fn [_ _]
-   (lib-db/symbols)))
+   (lib-db/symbols (conn))))
 
 (rf/reg-sub
  :logs
  (fn [_ _]
-   (lib-db/logs)))
+   (lib-db/logs (conn))))
 
 (rf/reg-sub
  :logs-visible?

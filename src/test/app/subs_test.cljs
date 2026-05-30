@@ -4,8 +4,8 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [re-frame.core :as rf]
    [re-frame.db :as rf-db]
-   [datascript.core :as d]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [app.subs]
    [test.lib.test-helpers :as h]
    [test.app.reframe-helpers :as rfh]))
@@ -16,7 +16,7 @@
 
 (use-fixtures :each
   {:before (fn []
-             (d/reset-conn! db/conn (d/empty-db db/schema))
+             (ws/reset-workspace! @ws/default-workspace)
              (rfh/reset-app-db!))})
 
 ;; =============================================================================
@@ -53,7 +53,7 @@
 (deftest workspace-active-file-returns-uri
   (testing ":workspace/active-file returns the active document URI"
     (h/create-test-document! {:uri "file:///test.rho"})
-    (db/update-active-uri! "file:///test.rho")
+    (db/update-active-uri! (ws/default-conn) "file:///test.rho")
     (is (= "file:///test.rho" @(rf/subscribe [:workspace/active-file])))))
 
 (deftest workspace-active-file-returns-nil-when-none
@@ -68,7 +68,7 @@
   (testing ":active-lang returns the language of active document"
     (h/create-test-document! {:uri "file:///test.rho"
                               :language "rholang"})
-    (db/update-active-uri! "file:///test.rho")
+    (db/update-active-uri! (ws/default-conn) "file:///test.rho")
     (is (= "rholang" @(rf/subscribe [:active-lang])))))
 
 (deftest active-lang-returns-nil-when-no-active
@@ -93,7 +93,7 @@
 (deftest active-name-returns-filename
   (testing ":active-name extracts filename from active URI"
     (h/create-test-document! {:uri "file:///path/to/myfile.rho"})
-    (db/update-active-uri! "file:///path/to/myfile.rho")
+    (db/update-active-uri! (ws/default-conn) "file:///path/to/myfile.rho")
     (is (= "myfile.rho" @(rf/subscribe [:active-name])))))
 
 (deftest active-name-returns-nil-when-no-active
@@ -104,7 +104,7 @@
   (testing ":active-content returns the text of active document"
     (h/create-test-document! {:uri "file:///test.rho"
                               :text "document content here"})
-    (db/update-active-uri! "file:///test.rho")
+    (db/update-active-uri! (ws/default-conn) "file:///test.rho")
     (is (= "document content here" @(rf/subscribe [:active-content])))))
 
 (deftest active-content-returns-nil-when-no-active
@@ -119,7 +119,7 @@
   (testing ":lsp/connected? returns connection status for active language"
     (h/create-test-document! {:uri "file:///test.rho"
                               :language "rholang"})
-    (db/update-active-uri! "file:///test.rho")
+    (db/update-active-uri! (ws/default-conn) "file:///test.rho")
     (swap! rf-db/app-db assoc-in [:lsp "rholang" :connected?] true)
     (is (true? @(rf/subscribe [:lsp/connected?])))
     (swap! rf-db/app-db assoc-in [:lsp "rholang" :connected?] false)
@@ -133,7 +133,7 @@
 (deftest lsp-diagnostics-returns-all
   (testing ":lsp/diagnostics returns all diagnostics"
     (h/create-test-document! {:uri "file:///test.rho"})
-    (db/replace-diagnostics-by-uri! "file:///test.rho" nil
+    (db/replace-diagnostics-by-uri! (ws/default-conn) "file:///test.rho" nil
                                     [{:message "Error 1"
                                       :severity 1
                                       :startLine 0
@@ -160,7 +160,7 @@
                      :selectionRange {:start {:line 0 :character 4}
                                       :end {:line 0 :character 9}}}]
                    nil "file:///test.rho")]
-      (db/replace-symbols! "file:///test.rho" symbols))
+      (db/replace-symbols! (ws/default-conn) "file:///test.rho" symbols))
     (let [syms @(rf/subscribe [:lsp/symbols])]
       (is (= 1 (count syms))))))
 
@@ -186,14 +186,14 @@
 
 (deftest logs-returns-all-logs
   (testing ":logs returns all log entries"
-    (db/create-logs! [{:message "Log 1" :lang "rholang"}
+    (db/create-logs! (ws/default-conn) [{:message "Log 1" :lang "rholang"}
                       {:message "Log 2" :lang "text"}])
     (let [logs @(rf/subscribe [:logs])]
       (is (= 2 (count logs))))))
 
 (deftest filtered-logs-filters-by-term
   (testing ":filtered-logs filters logs by search term"
-    (db/create-logs! [{:message "Error in processing" :lang "rholang"}
+    (db/create-logs! (ws/default-conn) [{:message "Error in processing" :lang "rholang"}
                       {:message "Info message" :lang "rholang"}
                       {:message "Another error occurred" :lang "text"}])
     (let [filtered @(rf/subscribe [:filtered-logs "error"])]

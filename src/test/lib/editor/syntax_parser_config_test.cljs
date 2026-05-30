@@ -2,9 +2,9 @@
   (:require
    [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.test :refer [deftest is async use-fixtures]]
-   [datascript.core :as d]
    [taoensso.timbre :as log :include-macros true]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.editor.syntax :as syntax]
    [lib.state :as state]
    [clojure.string :as str]
@@ -20,7 +20,7 @@
   {:before (fn []
              (reset! syntax/languages {})
              (reset! state/resources {:lsp {} :tree-sitter {}})
-             (d/reset-conn! db/conn (d/empty-db db/schema)))})
+             (ws/reset-workspace! @ws/default-workspace))})
 
 (defn slurp
   "Reads the contents of a file into a string."
@@ -55,11 +55,11 @@
                                                                          :indents-query indents-str
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
-                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.test")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Parser instance used successfully")
@@ -91,11 +91,11 @@
                                                                          :indents-query indents-str
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
-                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.test")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Sync parser function used successfully")
@@ -128,11 +128,11 @@
                                                                          :indents-query indents-str
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
-                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.test")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Async parser function used successfully")
@@ -157,11 +157,11 @@
                                                                             :indents-query-path indentsQueryUrl
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Package data URI wasm used successfully")
@@ -186,11 +186,11 @@
                                                                          :indents-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/indents.scm")
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
-                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.test")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Grammar WASM as function used successfully")
@@ -216,11 +216,11 @@
                                                                          :indents-query-path (fn [] "/extensions/lang/rholang/tree-sitter/queries/indents.scm")
                                                                          :extensions [".test"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "test"
-                               (db/create-documents! [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.test")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.test" :text "let x = 1" :language "test" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.test")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Highlights query as function used successfully")
@@ -245,11 +245,11 @@
                                                                             :indents-query-path indentsQueryUrl
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? result) "Initialization completed")
                                  (is (= :ok (first result)) "Successful initialization")
                                  (is (= :success (second result)) "Embedded WASM and queries loaded successfully")
@@ -364,17 +364,17 @@
                                ;; Clear languages cache
                                (reset! syntax/languages {})
                                ;; Setup for rholang first
-                               (db/create-documents! [{:uri "test.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "test.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "test.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "test.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (= :ok (first result)) "Rholang initialization successful")
                                  (is (some? (get @syntax/languages "rholang")) "Rholang cached")
                                  ;; Now switch to plaintext (no parser)
-                                 (db/create-documents! [{:uri "test.txt" :text "plain text" :language "plaintext" :version 1 :dirty false :opened true}])
-                                 (db/update-active-uri! "test.txt")
-                                 (let [result2 (<! (syntax/init-syntax view state-atom))]
+                                 (db/create-documents! (ws/default-conn) [{:uri "test.txt" :text "plain text" :language "plaintext" :version 1 :dirty false :opened true}])
+                                 (db/update-active-uri! (ws/default-conn) "test.txt")
+                                 (let [result2 (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                    (is (= :ok (first result2)) "Plaintext initialization successful")
                                    (is (= :no-tree-sitter (second result2)) "Plaintext uses fallback (no tree-sitter)"))
                                  (.destroy view)))

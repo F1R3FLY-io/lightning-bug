@@ -173,17 +173,17 @@
 
 (defn handle-document-symbol-response
   "Handles the LSP document symbol response, updating the database with symbols."
-  [lang uri result _state-atom events]
+  [conn lang uri result _state-atom events]
   (let [hier-symbols result
         flat-symbols (flatten-symbols hier-symbols nil uri)]
-    (db/replace-symbols! uri flat-symbols)
+    (db/replace-symbols! conn uri flat-symbols)
     (.next events (clj->js {:type "symbols" :data flat-symbols :lang lang}))))
 
 (defn handle-shutdown-response
   "Handles the LSP shutdown response, closing all open documents and notifying exit."
-  [lang _result state-atom _events]
+  [conn lang _result state-atom _events]
   (log/info "Received shutdown response for lang" lang)
-  (close-all-opened-by-lang! lang)
+  (close-all-opened-by-lang! conn lang)
   (notify-exit lang state-atom)
   (close-resource! :lsp lang (fn [ws] (.close ws))))
 
@@ -191,23 +191,23 @@
 
 (defn handle-log-message
   "Handles LSP log messages, storing them in the database and emitting an event."
-  [lang params _state-atom events]
+  [conn lang params _state-atom events]
   (let [log-entry (assoc params :lang lang)]
-    (db/create-logs! [log-entry])
+    (db/create-logs! conn [log-entry])
     (.next events (clj->js {:type "log" :data log-entry :lang lang}))))
 
 (defn handle-publish-diagnostics
   "Handles LSP diagnostics notifications, updating the database and emitting an event."
-  [lang params _state-atom events]
+  [conn lang params _state-atom events]
   (let [uri (:uri params)
         version (:version params)
         diags (:diagnostics params)
         flat-diags (flatten-diags diags uri version)
         ;; EXP-007: Coalesced query - single query instead of 2 separate queries
-        [active-uri active-version] (db/active-uri-version)]
+        [active-uri active-version] (db/active-uri-version conn)]
     (when (and (= uri active-uri)
                (or (nil? version) (= version active-version)))
-      (db/replace-diagnostics-by-uri! uri version flat-diags)
+      (db/replace-diagnostics-by-uri! conn uri version flat-diags)
       (.next events (clj->js {:type "diagnostics"
                               :data flat-diags
                               :lang lang
@@ -231,7 +231,7 @@
 
 (defn handle-message
   "Parses and handles incoming LSP messages, dispatching to appropriate handlers."
-  [lang msg state-atom events]
+  [conn lang msg state-atom events]
   (try
     (let [text (get-text msg)
           header-end (.indexOf text "\r\n\r\n")]
@@ -275,7 +275,7 @@
                         (let [method (:method parsed)
                               handler (get server-request-handlers method)]
                           (if handler
-                            (handler lang (:params parsed) state-atom events)
+                            (handler conn lang (:params parsed) state-atom events)
                             (do
                               (log/error (str "No handler for server request=" method ", lang=" lang))
                               (send lang {:jsonrpc "2.0"
@@ -286,7 +286,7 @@
                         (let [method (:method parsed)
                               handler (get server-notification-handlers method)]
                           (if handler
-                            (handler lang (:params parsed) state-atom events)
+                            (handler conn lang (:params parsed) state-atom events)
                             (if (str/starts-with? method "$/")
                               (log/warn (str "Optional server notification handler missing for method=" method ", lang=" lang))
                               (log/error (str "Required server notification handler missing for method=" method ", lang=" lang)))))
@@ -309,8 +309,8 @@
                                       (swap! state-atom update-in [:lsp lang] dissoc :promise-rej-fn :promise-res-fn))))
                                 (case pending-type
                                   :initialize (handle-initialize-response lang (:result parsed) state-atom events)
-                                  :document-symbol (handle-document-symbol-response lang pending-uri (:result parsed) state-atom events)
-                                  :shutdown (handle-shutdown-response lang (:result parsed) state-atom events)
+                                  :document-symbol (handle-document-symbol-response conn lang pending-uri (:result parsed) state-atom events)
+                                  :shutdown (handle-shutdown-response conn lang (:result parsed) state-atom events)
                                   (log/warn (str "Unhandled response type for lang=" lang ":" pending-type)))))
                             (log/warn (str "Received response for unknown id=" id ", lang=" lang)))))))))
               (catch js/Error e
@@ -321,7 +321,7 @@
 (defn connect
   "Establishes a WebSocket connection to the LSP server for a specific language.
    Sets up event handlers and initializes the LSP, resolving the promise with the WebSocket object."
-  [lang config state-atom events]
+  [conn lang config state-atom events]
   (go
     (try
       (let [url (:url config)
@@ -337,7 +337,7 @@
                :connecting? true
                :warned-unreachable? false
                :url url)
-        (set! (.-onmessage socket) #(handle-message lang (.-data %) state-atom events))
+        (set! (.-onmessage socket) #(handle-message conn lang (.-data %) state-atom events))
         (set! (.-onclose socket) #(do
                                     (log/trace (str "LSP WS closed for lang=" lang))
                                     (when-let [rej-fn (get-in @state-atom [:lsp lang :promise-rej-fn])]

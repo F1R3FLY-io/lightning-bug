@@ -6,18 +6,18 @@
    in-memory conn, and lock in the EXP-007 coalesced single-query hot reads."
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
-   [datascript.core :as d]
    [domain.protocols :as p]
    [infrastructure.datascript-adapter :as ds]
-   [lib.db :as db]))
+   [lib.db :as db]
+   [lib.workspace :as ws]))
 
 (use-fixtures :each
-  {:before #(d/reset-conn! db/conn (d/empty-db db/schema))})
+  {:before #(ws/reset-workspace! @ws/default-workspace)})
 
-(def doc-repo (ds/make-document-repository))
-(def diag-repo (ds/make-diagnostics-repository))
-(def sym-repo (ds/make-symbols-repository))
-(def log-repo (ds/make-log-repository))
+(def doc-repo (ds/make-document-repository (ws/default-conn)))
+(def diag-repo (ds/make-diagnostics-repository (ws/default-conn)))
+(def sym-repo (ds/make-symbols-repository (ws/default-conn)))
+(def log-repo (ds/make-log-repository (ws/default-conn)))
 
 ;; =============================================================================
 ;; Document Repository
@@ -27,7 +27,7 @@
   (testing "create-document! merges {:version 0 :dirty false :opened false} and returns the entity id"
     (let [id (p/create-document! doc-repo {:uri "file:///a.rho" :text "x" :language "rholang"})]
       (is (some? id))
-      (is (= id (db/document-id-by-uri "file:///a.rho")))
+      (is (= id (db/document-id-by-uri (ws/default-conn) "file:///a.rho")))
       (is (zero? (p/get-document-version doc-repo "file:///a.rho")))
       (is (false? (p/document-opened? doc-repo "file:///a.rho"))))))
 
@@ -89,10 +89,10 @@
     (p/mark-document-closed! doc-repo "file:///a.rho")
     (is (false? (p/document-opened? doc-repo "file:///a.rho")))
     (p/rename-document! doc-repo "file:///a.rho" "file:///renamed.rho")
-    (is (some? (db/document-id-by-uri "file:///renamed.rho")))
-    (is (nil? (db/document-id-by-uri "file:///a.rho")))
+    (is (some? (db/document-id-by-uri (ws/default-conn) "file:///renamed.rho")))
+    (is (nil? (db/document-id-by-uri (ws/default-conn) "file:///a.rho")))
     (p/delete-document! doc-repo "file:///renamed.rho")
-    (is (nil? (db/document-id-by-uri "file:///renamed.rho")))))
+    (is (nil? (db/document-id-by-uri (ws/default-conn) "file:///renamed.rho")))))
 
 ;; =============================================================================
 ;; Diagnostics Repository

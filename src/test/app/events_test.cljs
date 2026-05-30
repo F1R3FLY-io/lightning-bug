@@ -4,8 +4,7 @@
    [clojure.test :refer [deftest is testing use-fixtures]]
    [re-frame.core :as rf]
    [re-frame.db :as rf-db]
-   [datascript.core :as d]
-   [lib.db :as db]
+   [lib.workspace :as ws]
    [app.db :refer [default-db]]
    [app.events :as events]
    [app.subs]
@@ -17,7 +16,7 @@
 
 (use-fixtures :each
   {:before (fn []
-             (d/reset-conn! db/conn (d/empty-db db/schema))
+             (ws/reset-workspace! @ws/default-workspace)
              (rfh/reset-app-db!)
              (rfh/reset-captured-effects!))
    :after (fn []

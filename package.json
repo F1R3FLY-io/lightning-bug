@@ -89,7 +89,9 @@
     "benchmark:setup": "./scripts/benchmark-setup.sh --status",
     "benchmark:prepare": "sudo ./scripts/benchmark-setup.sh --prepare",
     "benchmark:restore": "sudo ./scripts/benchmark-setup.sh --restore",
-    "compare-benchmarks": "node scripts/compare-benchmarks.js"
+    "compare-benchmarks": "node scripts/compare-benchmarks.js",
+    "benchmark:gate": "node scripts/compare-benchmarks.js docs/benchmarks/results/baseline.json docs/benchmarks/results/experiment.json --gate-regression 150",
+    "check:demo-deps": "node scripts/check-demo-deps.js"
   },
   "main": "dist/libs/lib.core.js",
   "module": "dist/libs/lib.core.js",

@@ -8,8 +8,8 @@
    [clojure.core.async :refer [go <! timeout promise-chan put!]]
    [re-frame.core :as rf]
    [reagent.core :as r]
-   [datascript.core :as d]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.lsp.connection-manager :as cm]
    [app.subs]
    [test.lib.test-helpers :as h]
@@ -22,7 +22,7 @@
 
 (use-fixtures :each
   {:before (fn []
-             (d/reset-conn! db/conn (d/empty-db db/schema))
+             (ws/reset-workspace! @ws/default-workspace)
              (rfh/reset-app-db!)
              (mock-lsp/reset-mock!)
              (cm/stop-all-cleanup-tasks!))
@@ -60,7 +60,7 @@
 (deftest connection-manager-tracks-state
   (testing "Connection manager tracks connection state correctly"
     (let [state-atom (r/atom {:lsp {"rholang" {:state :initialized}}})]
-      (let [manager (cm/make-connection-manager state-atom nil)]
+      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
         ;; Should report as connected when initialized
         (is (true? (cm/connected? manager "rholang")))
         (is (true? (cm/initialized? manager "rholang")))
@@ -70,7 +70,7 @@
 (deftest connection-manager-handles-disconnected-state
   (testing "Connection manager reports disconnected correctly"
     (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})]
-      (let [manager (cm/make-connection-manager state-atom nil)]
+      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
         (is (false? (cm/connected? manager "rholang")))
         (is (false? (cm/initialized? manager "rholang")))))))
 
@@ -183,14 +183,14 @@
   (testing "Receiving diagnostics notification updates database"
     (let [uri "file:///test/diag.rho"]
       (h/create-test-document! {:uri uri :text "content"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Simulate receiving diagnostics from LSP
       (let [lsp-diagnostics [{:range {:start {:line 0 :character 0}
                                       :end {:line 0 :character 5}}
                               :severity 1
                               :message "Error message"}]]
-        (db/replace-diagnostics-by-uri! uri nil
+        (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                          (map (fn [d]
                                                 {:message (:message d)
                                                  :severity (:severity d)
@@ -208,10 +208,10 @@
   (testing "New diagnostics notification replaces previous"
     (let [uri "file:///test/replace-diag.rho"]
       (h/create-test-document! {:uri uri :text "content"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; First batch
-      (db/replace-diagnostics-by-uri! uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                        [{:message "Error 1"
                                          :severity 1
                                          :startLine 0
@@ -227,7 +227,7 @@
       (is (= 2 (count @(rf/subscribe [:lsp/diagnostics]))))
 
       ;; Second batch replaces first
-      (db/replace-diagnostics-by-uri! uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                        [{:message "New Error"
                                          :severity 1
                                          :startLine 2
@@ -245,7 +245,7 @@
   (testing "Receiving symbol response updates database"
     (let [uri "file:///test/symbols.rho"]
       (h/create-test-document! {:uri uri :text "contract Test { }"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Simulate receiving symbols from LSP
       (let [lsp-symbols [{:name "Test"
@@ -255,7 +255,7 @@
                           :selectionRange {:start {:line 0 :character 9}
                                            :end {:line 0 :character 13}}}]
             flattened (db/flatten-symbols lsp-symbols nil uri)]
-        (db/replace-symbols! uri flattened))
+        (db/replace-symbols! (ws/default-conn) uri flattened))
 
       (let [syms @(rf/subscribe [:lsp/symbols])]
         (is (= 1 (count syms)))
@@ -265,7 +265,7 @@
   (testing "Nested symbols in response are flattened correctly"
     (let [uri "file:///test/nested-symbols.rho"]
       (h/create-test-document! {:uri uri :text "contract Outer { contract Inner {} }"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Nested symbol structure
       (let [lsp-symbols [{:name "Outer"
@@ -281,7 +281,7 @@
                                       :selectionRange {:start {:line 0 :character 26}
                                                        :end {:line 0 :character 31}}}]}]
             flattened (db/flatten-symbols lsp-symbols nil uri)]
-        (db/replace-symbols! uri flattened))
+        (db/replace-symbols! (ws/default-conn) uri flattened))
 
       (let [syms @(rf/subscribe [:lsp/symbols])]
         (is (= 2 (count syms)))
@@ -310,7 +310,7 @@
     (let [state-atom (reagent.core/atom {})
           custom-config {:request-timeout-ms 60000
                          :init-timeout-ms 30000}
-          manager (cm/make-connection-manager state-atom nil custom-config)]
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn) custom-config)]
       (is (some? manager))
       (is (= 60000 (get-in manager [:config :request-timeout-ms])))
       (is (= 30000 (get-in manager [:config :init-timeout-ms]))))))
@@ -368,7 +368,7 @@
     (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :initialized}
                                                "javascript" {:state :connecting}
                                                "text" {:state :disconnected}}})]
-      (let [manager (cm/make-connection-manager state-atom nil)]
+      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
         (is (true? (cm/initialized? manager "rholang")))
         (is (true? (cm/connected? manager "rholang")))
 
@@ -391,13 +391,13 @@
                                 :opened true})
 
       ;; Simulate document edit
-      (db/update-document-text-by-uri! uri "modified")
-      (db/increment-document-version-by-uri! uri)
+      (db/update-document-text-by-uri! (ws/default-conn) uri "modified")
+      (db/increment-document-version-by-uri! (ws/default-conn) uri)
 
       ;; Verify state for potential LSP notification
-      (is (= "modified" (db/document-text-by-uri uri)))
-      (is (= 2 (db/document-version-by-uri uri)))
-      (is (true? (db/document-dirty-by-uri uri))))))
+      (is (= "modified" (db/document-text-by-uri (ws/default-conn) uri)))
+      (is (= 2 (db/document-version-by-uri (ws/default-conn) uri)))
+      (is (true? (db/document-dirty-by-uri (ws/default-conn) uri))))))
 
 (deftest opened-documents-per-language-tracked
   (testing "Opened documents are tracked per language"
@@ -406,8 +406,8 @@
     (h/create-test-document! {:uri "file:///rho3.rho" :language "rholang" :opened false})
     (h/create-test-document! {:uri "file:///text1.txt" :language "text" :opened true})
 
-    (let [rholang-opened (db/opened-uris-by-lang "rholang")
-          text-opened (db/opened-uris-by-lang "text")]
+    (let [rholang-opened (db/opened-uris-by-lang (ws/default-conn) "rholang")
+          text-opened (db/opened-uris-by-lang (ws/default-conn) "text")]
       (is (= 2 (count rholang-opened)))
       (is (contains? (set rholang-opened) "file:///rho1.rho"))
       (is (contains? (set rholang-opened) "file:///rho2.rho"))
@@ -449,7 +449,7 @@
                                 :language "rholang"
                                 :version 1
                                 :opened true})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify initial state (no diagnostics)
       (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))))
@@ -467,7 +467,7 @@
                                                       :severity 2
                                                       :message "Missing closing parenthesis"}]}}]
         ;; Process diagnostics as the LSP client would
-        (db/replace-diagnostics-by-uri!
+        (db/replace-diagnostics-by-uri! (ws/default-conn)
          uri
          nil
          (map (fn [d]
@@ -487,8 +487,8 @@
         (is (some #(= "Unexpected end of input" (:message %)) diags)))
 
       ;; Step 4: Fix the code and receive empty diagnostics
-      (db/update-document-text-by-uri! uri "new x in { x!(\"Hello\") }")
-      (db/replace-diagnostics-by-uri! uri nil [])
+      (db/update-document-text-by-uri! (ws/default-conn) uri "new x in { x!(\"Hello\") }")
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil [])
 
       ;; Step 5: Verify diagnostics cleared
       (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))) "Diagnostics cleared after fix"))))
@@ -502,7 +502,7 @@
                                 :language "rholang"
                                 :version 1
                                 :opened true})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Step 2: Simulate LSP documentSymbol response (nested structure)
       (let [lsp-response {:jsonrpc "2.0"
@@ -529,7 +529,7 @@
             flattened (db/flatten-symbols (:result lsp-response) nil uri)]
 
         ;; Step 4: Store in DB
-        (db/replace-symbols! uri flattened)
+        (db/replace-symbols! (ws/default-conn) uri flattened)
 
         ;; Step 5: Verify via subscription
         (let [syms @(rf/subscribe [:lsp/symbols])]
@@ -560,35 +560,35 @@
                                        :version 1
                                        :dirty false
                                        :opened true})
-             (db/update-active-uri! uri)
+             (db/update-active-uri! (ws/default-conn) uri)
 
              ;; Verify initial state
-             (is (= 1 (db/document-version-by-uri uri)))
-             (is (false? (db/document-dirty-by-uri uri)))
+             (is (= 1 (db/document-version-by-uri (ws/default-conn) uri)))
+             (is (false? (db/document-dirty-by-uri (ws/default-conn) uri)))
 
              ;; Step 2: Simulate user edit
-             (db/update-document-text-by-uri! uri "modified content")
+             (db/update-document-text-by-uri! (ws/default-conn) uri "modified content")
 
              ;; Step 3: Verify state after edit
-             (is (= "modified content" (db/document-text-by-uri uri)))
-             (is (true? (db/document-dirty-by-uri uri)) "Document marked dirty after edit")
+             (is (= "modified content" (db/document-text-by-uri (ws/default-conn) uri)))
+             (is (true? (db/document-dirty-by-uri (ws/default-conn) uri)) "Document marked dirty after edit")
 
              ;; Step 4: Simulate version increment (as LSP didChange would do)
-             (db/increment-document-version-by-uri! uri)
-             (is (= 2 (db/document-version-by-uri uri)) "Version incremented for LSP")
+             (db/increment-document-version-by-uri! (ws/default-conn) uri)
+             (is (= 2 (db/document-version-by-uri (ws/default-conn) uri)) "Version incremented for LSP")
 
              ;; Step 5: Simulate another edit
-             (db/update-document-text-by-uri! uri "final content")
-             (db/increment-document-version-by-uri! uri)
+             (db/update-document-text-by-uri! (ws/default-conn) uri "final content")
+             (db/increment-document-version-by-uri! (ws/default-conn) uri)
 
              ;; Step 6: Verify final state
-             (is (= 3 (db/document-version-by-uri uri)) "Version 3 after two edits")
-             (is (= "final content" (db/document-text-by-uri uri)))
-             (is (true? (db/document-dirty-by-uri uri)))
+             (is (= 3 (db/document-version-by-uri (ws/default-conn) uri)) "Version 3 after two edits")
+             (is (= "final content" (db/document-text-by-uri (ws/default-conn) uri)))
+             (is (true? (db/document-dirty-by-uri (ws/default-conn) uri)))
 
              ;; Step 7: Simulate save
-             (db/document-saved-by-uri! uri)
-             (is (false? (db/document-dirty-by-uri uri)) "Dirty cleared after save"))
+             (db/document-saved-by-uri! (ws/default-conn) uri)
+             (is (false? (db/document-dirty-by-uri (ws/default-conn) uri)) "Dirty cleared after save"))
            (done))))
 
 (deftest concurrent-diagnostics-across-documents
@@ -601,12 +601,12 @@
         (h/create-test-document! {:uri uri :text text :language "rholang" :opened true}))
 
       ;; Add diagnostics to each document
-      (db/replace-diagnostics-by-uri! uri1 nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri1 nil
                                        [{:message "Error in doc1"
                                          :severity 1
                                          :startLine 0 :startChar 0
                                          :endLine 0 :endChar 5}])
-      (db/replace-diagnostics-by-uri! uri2 nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri2 nil
                                        [{:message "Warning in doc2"
                                          :severity 2
                                          :startLine 0 :startChar 0
@@ -615,24 +615,24 @@
                                          :severity 3
                                          :startLine 0 :startChar 0
                                          :endLine 0 :endChar 5}])
-      (db/replace-diagnostics-by-uri! uri3 nil [])  ; No diagnostics
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri3 nil [])  ; No diagnostics
 
       ;; Verify each document has correct diagnostics using db functions
-      (let [diags1 (db/diagnostics-by-uri uri1)]
+      (let [diags1 (db/diagnostics-by-uri (ws/default-conn) uri1)]
         (is (= 1 (count diags1)) "Doc1 has 1 diagnostic")
         (is (= "Error in doc1" (:message (first diags1)))))
 
-      (let [diags2 (db/diagnostics-by-uri uri2)]
+      (let [diags2 (db/diagnostics-by-uri (ws/default-conn) uri2)]
         (is (= 2 (count diags2)) "Doc2 has 2 diagnostics"))
 
-      (let [diags3 (db/diagnostics-by-uri uri3)]
+      (let [diags3 (db/diagnostics-by-uri (ws/default-conn) uri3)]
         (is (= 0 (count diags3)) "Doc3 has 0 diagnostics")))))
 
 (deftest symbol-update-replaces-previous
   (testing "Symbol updates replace previous symbols for a document"
     (let [uri "file:///test/symbol-replace.rho"]
       (h/create-test-document! {:uri uri :text "code" :language "rholang" :opened true})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; First symbol set
       (let [symbols1 (db/flatten-symbols
@@ -643,7 +643,7 @@
                         :selectionRange {:start {:line 0 :character 0}
                                          :end {:line 0 :character 10}}}]
                       nil uri)]
-        (db/replace-symbols! uri symbols1))
+        (db/replace-symbols! (ws/default-conn) uri symbols1))
       (is (= 1 (count @(rf/subscribe [:lsp/symbols]))))
       (is (= "OldSymbol" (:name (first @(rf/subscribe [:lsp/symbols])))))
 
@@ -662,14 +662,14 @@
                         :selectionRange {:start {:line 1 :character 0}
                                          :end {:line 1 :character 10}}}]
                       nil uri)]
-        (db/replace-symbols! uri symbols2))
+        (db/replace-symbols! (ws/default-conn) uri symbols2))
       (is (= 2 (count @(rf/subscribe [:lsp/symbols]))))
       (is (not (some #(= "OldSymbol" (:name %)) @(rf/subscribe [:lsp/symbols])))))))
 
 (deftest lsp-state-affects-feature-availability
   (testing "LSP state affects whether features are available"
     (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})]
-      (let [manager (cm/make-connection-manager state-atom nil)]
+      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
         ;; Disconnected: features not available
         (is (false? (cm/initialized? manager "rholang")))
 

@@ -45,15 +45,17 @@
 ;; =============================================================================
 ;; EXP-011: Delta-Based Text Synchronization State
 ;; =============================================================================
-
-;; EXP-011 Phase 1: Track pending requestIdleCallback handles to prevent duplicates.
-;; Maps URI -> idle callback handle (number returned by requestIdleCallback).
-(defonce ^:private pending-idle-syncs (atom {}))
-
-;; EXP-011 Phase 2b: Accumulates ContentChangeEvent objects during the debounce window
-;; for efficient incremental sync with LSP servers that support it.
-;; Maps URI -> vector of ContentChangeEvent objects containing :range, :rangeLength, :text.
-(defonce ^:private pending-lsp-changes (atom {}))
+;; Multi-editor: this state was formerly held in two module-global `defonce`
+;; atoms keyed by URI. With instantiable workspaces, two editors can have the
+;; same URI active simultaneously, so global maps would let panes clobber each
+;; other's idle-sync handle and concatenate each other's deltas. Both maps now
+;; live in the PER-EDITOR `state-atom` under :pending-idle-syncs and
+;; :pending-lsp-changes (initialized in lib.core/default-state):
+;;   :pending-idle-syncs  -- URI -> requestIdleCallback handle (dedupes the
+;;                           idle-deferred CodeMirror->DataScript text sync).
+;;   :pending-lsp-changes -- URI -> vector of ContentChangeEvent {:range
+;;                           :rangeLength :text} accumulated during the debounce
+;;                           window for incremental LSP didChange.
 
 ;; =============================================================================
 ;; Event Emission with Debouncing (EXP-008: Consolidated Debouncing)
@@ -158,11 +160,11 @@
     - Phase 1: Debounced DataScript text sync
     - Phase 2: LSP-aware lazy text serialization
     - Phase 3: Cached active URI within handler"
-  [state-atom events on-content-change view-ref client]
+  [state-atom events on-content-change view-ref client conn]
   (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              ;; EXP-009 Phase 3: Cache URI once per handler invocation
-                             (let [uri (db/active-uri)]
+                             (let [uri (db/active-uri conn)]
                                (when (or (.-docChanged u) (.-selectionSet u))
                                  ;; EXP-009 Phase 4: Pass cached URI to update-editor-state
                                  (update-editor-state (.-state u) state-atom events uri))
@@ -191,7 +193,7 @@
                                                      (fn [fromA toA _fromB _toB inserted]
                                                        (let [start-pos (offset->pos old-doc fromA false)
                                                              end-pos (offset->pos old-doc toA false)]
-                                                         (swap! pending-lsp-changes update uri (fnil conj [])
+                                                         (swap! state-atom update-in [:pending-lsp-changes uri] (fnil conj [])
                                                                 {:range {:start {:line (:line start-pos)
                                                                                  :character (:column start-pos)}
                                                                          :end {:line (:line end-pos)
@@ -209,12 +211,12 @@
                                       (when-let [_view (.-current view-ref)]
                                         (let [sync-fn (fn []
                                                         ;; Clear the pending handle before executing
-                                                        (swap! pending-idle-syncs dissoc uri)
+                                                        (swap! state-atom update :pending-idle-syncs dissoc uri)
                                                         (when (.-current view-ref)
                                                           (let [current-text (str (.-doc (.-state (.-current view-ref))))]
-                                                            (db/update-document-text-by-uri! uri current-text))))]
+                                                            (db/update-document-text-by-uri! conn uri current-text))))]
                                           ;; Cancel any pending idle callback for this URI to prevent duplicates
-                                          (when-let [pending-handle (get @pending-idle-syncs uri)]
+                                          (when-let [pending-handle (get-in @state-atom [:pending-idle-syncs uri])]
                                             (when (exists? js/cancelIdleCallback)
                                               (js/cancelIdleCallback pending-handle)))
                                           (if (exists? js/requestIdleCallback)
@@ -224,7 +226,7 @@
                                                             (when (pos? (.timeRemaining deadline))
                                                               (sync-fn)))
                                                           #js {:timeout 500})]  ; Guarantee sync within 500ms
-                                              (swap! pending-idle-syncs assoc uri handle))
+                                              (swap! state-atom assoc-in [:pending-idle-syncs uri] handle))
                                             ;; Fallback for unsupported browsers (Safari)
                                             (js/setTimeout sync-fn 0)))))
                                     50      ; 50ms debounce
@@ -255,20 +257,20 @@
                                        (debounce/debounced-call
                                         :lsp-did-change
                                         (fn []
-                                          (let [[uri text lang] (db/active-uri-text-lang)]
+                                          (let [[uri text lang] (db/active-uri-text-lang conn)]
                                             (when (and uri text lang)
-                                              (let [version (db/inc-document-version-by-uri! uri)
-                                                    changes (get @pending-lsp-changes uri)
+                                              (let [version (db/inc-document-version-by-uri! conn uri)
+                                                    changes (get-in @state-atom [:pending-lsp-changes uri])
                                                     incremental? (and (seq changes)
                                                                       (get-in @state-atom [:lsp lang :incremental-sync?]))]
                                                 (if incremental?
                                                   (do
                                                     (p/notify-did-change-incremental! client lang uri changes version)
-                                                    (swap! pending-lsp-changes dissoc uri))
+                                                    (swap! state-atom update :pending-lsp-changes dissoc uri))
                                                   ;; Fallback to full sync - clear any accumulated changes
                                                   (do
                                                     (p/notify-did-change! client lang uri text version)
-                                                    (swap! pending-lsp-changes dissoc uri)))))))
+                                                    (swap! state-atom update :pending-lsp-changes dissoc uri)))))))
                                         150  ; Reduced from 200ms
                                         {:max-wait 500})))))))))
         default-exts [(lineNumbers)
@@ -289,8 +291,8 @@
   "Ensures the document is opened in LSP if configured, connecting if necessary.
   Sends didOpen and requests symbols on success, emitting events for LSP actions.
   Waits for an ongoing connection if one is in progress."
-  [lang uri state-atom events client]
-  (let [[text version] (db/doc-text-version-by-uri uri)]
+  [lang uri state-atom events client conn]
+  (let [[text version] (db/doc-text-version-by-uri conn uri)]
     (when-let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
       (let [lsp-state (get-in @state-atom [:lsp lang])
             connected? (:connected? lsp-state false)
@@ -305,7 +307,7 @@
           (try
             (if (and connected? initialized?)
               ;; Already connected and initialized, proceed with didOpen
-              (when-not (db/document-opened-by-uri? uri)
+              (when-not (db/document-opened-by-uri? conn uri)
                 (p/notify-did-open! client lang uri text version)
                 (emit-event events "lsp-message" {:method "textDocument/didOpen"
                                                   :lang lang
@@ -313,7 +315,7 @@
                                                                           :uri uri
                                                                           :version version
                                                                           :text text}}})
-                (db/document-opened-by-uri! uri)
+                (db/document-opened-by-uri! conn uri)
                 ;; EXP-010 Phase 3: Update cache for hot path
                 (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                 (emit-event events "document-open" {:uri uri
@@ -337,7 +339,7 @@
                           (throw (js/Error. "Failed to connect and initialize LSP" #js {:cause (second res)})))
                         (do
                           (log/debug "Existing LSP connection resolved for lang:" lang)
-                          (when-not (db/document-opened-by-uri? uri)
+                          (when-not (db/document-opened-by-uri? conn uri)
                             (p/notify-did-open! client lang uri text version)
                             (emit-event events "lsp-message" {:method "textDocument/didOpen"
                                                               :lang lang
@@ -345,7 +347,7 @@
                                                                                       :uri uri
                                                                                       :version version
                                                                                       :text text}}})
-                            (db/document-opened-by-uri! uri)
+                            (db/document-opened-by-uri! conn uri)
                             ;; EXP-010 Phase 3: Update cache for hot path
                             (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                             (emit-event events "document-open" {:uri uri
@@ -366,7 +368,7 @@
                         (throw (js/Error. "Failed to connect and initialize LSP" #js {:cause (second res)})))
                       (do
                         (log/debug "LSP connected and initialized for lang:" lang)
-                        (when-not (db/document-opened-by-uri? uri)
+                        (when-not (db/document-opened-by-uri? conn uri)
                           (p/notify-did-open! client lang uri text version)
                           (emit-event events "lsp-message" {:method "textDocument/didOpen"
                                                             :lang lang
@@ -374,7 +376,7 @@
                                                                                     :uri uri
                                                                                     :version version
                                                                                     :text text}}})
-                          (db/document-opened-by-uri! uri)
+                          (db/document-opened-by-uri! conn uri)
                           ;; EXP-010 Phase 3: Update cache for hot path
                           (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                           (emit-event events "document-open" {:uri uri
@@ -397,18 +399,18 @@
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
   Emits events for document activation and LSP open if necessary.
   EXP-008: Uses centralized debounce coordination to handle rapid calls."
-  [uri state-atom view-ref events client]
+  [uri state-atom view-ref events client conn]
   (debounce/debounced-call
    [:activate-document uri]
    (fn []
      (go
        (try
          (log/trace "Activating document:" uri)
-         (let [old-lang (db/active-lang)]
-           (when (not= uri (db/active-uri))
+         (let [old-lang (db/active-lang conn)]
+           (when (not= uri (db/active-uri conn))
              (log/debug "Updating active URI for document with old-lang:" old-lang)
-             (db/update-active-uri! uri))
-           (let [[text new-lang] (db/doc-text-lang-by-uri uri)]
+             (db/update-active-uri! conn uri))
+           (let [[text new-lang] (db/doc-text-lang-by-uri conn uri)]
              (log/debug "New language for activation:" new-lang)
              (when-let [view (.-current view-ref)]
                (let [current-doc (.-doc (.-state view))
@@ -420,15 +422,15 @@
              (let [lsp-ch (go
                             (try
                               (if (get-in @state-atom [:languages new-lang :lsp-url])
-                                (<! (ensure-lsp-document-opened new-lang uri state-atom events client))
+                                (<! (ensure-lsp-document-opened new-lang uri state-atom events client conn))
                                 (do
-                                  (db/document-opened-by-uri! uri)
+                                  (db/document-opened-by-uri! conn uri)
                                   [:ok nil]))
                               (catch :default e
                                 [:error (js/Error. "LSP init in activate-document failed" #js {:cause e})])))
                    syntax-ch (go
                                (try
-                                 (<! (syntax/init-syntax (.-current view-ref) state-atom))
+                                 (<! (syntax/init-syntax (.-current view-ref) state-atom conn))
                                  (catch :default e
                                    [:error (js/Error. "Syntax init in activate-document failed" #js {:cause e})])))
                    lsp-timeout-ms (:lsp-init-timeout-ms @state-atom 5000)

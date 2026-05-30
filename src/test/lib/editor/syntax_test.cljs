@@ -2,9 +2,9 @@
   (:require
    [clojure.core.async :as async :refer [go <! timeout]]
    [clojure.test :refer [deftest is async use-fixtures]]
-   [datascript.core :as d]
    [taoensso.timbre :as log :include-macros true]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.editor.syntax :as syntax]
    [lib.state :as state]
    [lib.utils :as lib-utils :refer [promise->chan]]
@@ -16,7 +16,7 @@
   {:before (fn []
              (reset! syntax/languages {})
              (reset! state/resources {:lsp {} :tree-sitter {}})
-             (d/reset-conn! db/conn (d/empty-db db/schema)))})
+             (ws/reset-workspace! @ws/default-workspace))})
 
 (defn slurp
   "Reads the contents of a file into a string."
@@ -195,11 +195,11 @@
                                                                             :indents-query indents-str
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "test.rho" :text "content" :language "rholang" :version 1 :dirty true :opened false}])
-                               (db/update-active-uri! "test.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "test.rho" :text "content" :language "rholang" :version 1 :dirty true :opened false}])
+                               (db/update-active-uri! (ws/default-conn) "test.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? (get-in @state-atom [:languages "rholang"])) "Language config found with string key")
                                  (is (nil? (get-in @state-atom [:languages :rholang])) "No keyword key exists")
                                  (.destroy view)
@@ -230,11 +230,11 @@
                                                                            :indents-query indents-str
                                                                            :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "demo.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "demo.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "demo.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "demo.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (some? (get-in @state-atom [:languages "rholang"])) "Keyword key normalized to string")
                                  (is (nil? (get-in @state-atom [:languages :rholang])) "Keyword key removed")
                                  (.destroy view)
@@ -262,11 +262,11 @@
                                                                             :highlights-query-path "/invalid/path/highlights.scm"
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (nil? (get @syntax/languages "rholang")) "Language not cached on failure")
                                  (.destroy view)
                                  (if (= :ok (first result))
@@ -293,11 +293,11 @@
                                                                             :highlights-query-path "/invalid/path/highlights.scm"
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "let x = 1" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.rho")
                                (let [state (.create EditorState #js {:doc "let x = 1" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (is (nil? (get @syntax/languages "rholang")) "Language not cached on query failure")
                                  (.destroy view)
                                  (if (= :ok (first result))
@@ -328,11 +328,11 @@
                                                                             :indent-size 2
                                                                             :extensions [".rho"]}}})]
                                ;; Setup mock active document to ensure db/active-lang returns "rholang"
-                               (db/create-documents! [{:uri "file.rho" :text "{ Nil }" :language "rholang" :version 1 :dirty false :opened true}])
-                               (db/update-active-uri! "file.rho")
+                               (db/create-documents! (ws/default-conn) [{:uri "file.rho" :text "{ Nil }" :language "rholang" :version 1 :dirty false :opened true}])
+                               (db/update-active-uri! (ws/default-conn) "file.rho")
                                (let [state (.create EditorState #js {:doc "{ Nil }" :extensions #js []})
                                      view (EditorView. #js {:state state :parent js/document.body})
-                                     result (<! (syntax/init-syntax view state-atom))]
+                                     result (<! (syntax/init-syntax view state-atom (ws/default-conn)))]
                                  (.destroy view)
                                  (if (= :ok (first result))
                                    (do

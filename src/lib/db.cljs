@@ -26,7 +26,11 @@
              :document/opened {:db/index true}
              :workspace/active-uri {:db/unique :db.unique/identity}})
 
-(defonce conn (d/create-conn schema))
+;; NOTE: there is intentionally NO module-global conn (multi-editor-workspace
+;; refactor). Each workspace (lib.workspace/Workspace) owns its own DataScript conn;
+;; every function below takes that `conn` as its first argument. This is what makes
+;; the editor multi-instance / multi-workspace (no shared-by-accident global store).
+;; `schema` remains public — lib.workspace/make-workspace uses it to build conns.
 
 ;; =============================================================================
 ;; Query-function naming convention
@@ -39,6 +43,10 @@
 ;; The infrastructure repositories (infrastructure.datascript-adapter) call the
 ;; coalesced accessors for the hot reads; new hot-path reads should add/extend a
 ;; coalesced accessor rather than chaining single-attribute ones.
+;;
+;; CONN THREADING: every query/mutation takes `conn` as its FIRST argument so the
+;; library is workspace-instanced (no module-global store). Pure helpers
+;; (flatten-*, create-diagnostics, valid-*?, transform-*) take no conn.
 
 (s/def ::id integer?)
 (s/def ::dirty boolean?)
@@ -146,7 +154,7 @@
   (valid? ::symbol data))
 
 (defn create-logs!
-  [logs]
+  [conn logs]
   (let [tx (map (fn [log]
                   {:log/message (:message log)
                    :log/lang (:lang log)
@@ -159,7 +167,7 @@
     (d/transact! conn tx)))
 
 (defn document-id-lang-opened-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -173,7 +181,7 @@
    [nil nil nil]))
 
 (defn active-uri
-  []
+  [conn]
   (if DEBUG
     (let [uris (d/q '[:find [?uri ...] :where [?e :workspace/active-uri ?uri]] @conn)]
       (when (> (count uris) 1)
@@ -184,7 +192,7 @@
          @conn)))
 
 (defn active-text
-  []
+  [conn]
   (d/q '[:find ?text .
          :where [?a :workspace/active-uri ?uri]
                 [?e :document/uri ?uri]
@@ -192,7 +200,7 @@
        @conn))
 
 (defn active-lang
-  []
+  [conn]
   (d/q '[:find ?lang .
          :where [?a :workspace/active-uri ?uri]
                 [?e :document/uri ?uri]
@@ -200,7 +208,7 @@
        @conn))
 
 (defn active-version
-  []
+  [conn]
   (d/q '[:find ?version .
          :where [?a :workspace/active-uri ?uri]
                 [?e :document/uri ?uri]
@@ -208,7 +216,7 @@
        @conn))
 
 (defn document-text-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -219,7 +227,7 @@
        @conn uri))
 
 (defn document-version-by-id
-  [id]
+  [conn id]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id))))
@@ -229,7 +237,7 @@
        @conn id))
 
 (defn document-id-version-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -242,7 +250,7 @@
    [nil nil]))
 
 (defn document-opened-by-uri?
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -254,12 +262,12 @@
 
 (defn document-opened-by-uri
   "Alias for document-opened-by-uri? for API consistency."
-  [uri]
-  (document-opened-by-uri? uri))
+  [conn uri]
+  (document-opened-by-uri? conn uri))
 
 (defn document-dirty-by-uri
   "Returns the dirty flag for a document by URI."
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -271,7 +279,7 @@
 
 (defn document-version-by-uri
   "Returns the version for a document by URI."
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -282,7 +290,7 @@
        @conn uri))
 
 (defn documents
-  []
+  [conn]
   (d/q '[:find ?uri ?text ?language ?version ?dirty ?opened
          :keys uri text language version dirty opened
          :where [?e :document/uri ?uri]
@@ -294,7 +302,7 @@
        @conn))
 
 (defn logs
-  []
+  [conn]
   (d/q '[:find ?message ?lang
          :keys message lang
          :where [?e :log/message ?message]
@@ -358,7 +366,7 @@
        :version (or diag-version doc-version)})))
 
 (defn diagnostics
-  []
+  [conn]
   ;; EXP-003: Use d/pull-many for batch attribute extraction with post-query filtering
   (let [entity-ids (d/q '[:find [?e ...]
                           :where [?e :diagnostic/document _]]
@@ -395,7 +403,7 @@
    :parent (or (:symbol/parent entity) 0)})
 
 (defn symbols
-  []
+  [conn]
   ;; EXP-002: Use d/pull-many for batch attribute extraction
   (let [entity-ids (d/q '[:find [?e ...]
                           :where [?e :symbol/document _]]
@@ -405,7 +413,7 @@
             (d/pull-many @conn symbol-pull-pattern-with-doc entity-ids)))))
 
 (defn active-uri-text-lang
-  []
+  [conn]
   (or
    (d/q '[:find [?uri ?text ?lang]
           :where [?a :workspace/active-uri ?uri]
@@ -422,7 +430,7 @@
 (defn active-uri-version
   "Returns [uri version] for the active document in a single query.
    EXP-007: Coalesces active-uri + active-version."
-  []
+  [conn]
   (or
    (d/q '[:find [?uri ?version]
           :where [?a :workspace/active-uri ?uri]
@@ -434,7 +442,7 @@
 (defn active-uri-text-lang-version
   "Returns [uri text lang version] for the active document in a single query.
    EXP-007: Coalesces active-uri + text + lang + version for coeffects."
-  []
+  [conn]
   (or
    (d/q '[:find [?uri ?text ?lang ?version]
           :where [?a :workspace/active-uri ?uri]
@@ -446,7 +454,7 @@
    [nil nil nil nil]))
 
 (defn doc-text-version-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -460,7 +468,7 @@
    [nil nil]))
 
 (defn doc-id-text-lang-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -474,7 +482,7 @@
    [nil nil nil]))
 
 (defn doc-text-lang-dirty-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -489,7 +497,7 @@
    [nil nil nil]))
 
 (defn document-id-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -499,7 +507,7 @@
        @conn uri))
 
 (defn doc-text-lang-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -515,7 +523,7 @@
 (defn doc-text-lang-version-by-uri
   "Returns [text lang version] for a document by URI in a single query.
    EXP-007: Coalesces text + lang + version for coeffects."
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -530,7 +538,7 @@
    [nil nil nil]))
 
 (defn document-language-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -543,7 +551,7 @@
    [nil nil]))
 
 (defn document-language-opened-by-uri
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -557,11 +565,11 @@
    [nil nil]))
 
 (defn inc-document-version-by-uri!
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (when-let [[id old-version] (document-id-version-by-uri uri)]
+  (when-let [[id old-version] (document-id-version-by-uri conn uri)]
     (let [new-version (inc old-version)
           tx [[:db/add id :document/version new-version]]]
       (when DEBUG
@@ -572,11 +580,11 @@
       new-version)))
 
 (defn inc-document-version-by-id!
-  [id]
+  [conn id]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id))))
-  (let [old-version (document-version-by-id id)]
+  (let [old-version (document-version-by-id conn id)]
     (when id
       (let [new-version (inc old-version)
             tx [[:db/add id :document/version new-version]]]
@@ -592,7 +600,7 @@
   inc-document-version-by-uri!)
 
 (defn update-document-dirty-by-id!
-  [id dirty?]
+  [conn id dirty?]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id)))
@@ -605,7 +613,7 @@
     (log/error "No entity exists with id" id)))
 
 (defn update-document-text-by-id!
-  [id text]
+  [conn id text]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id)))
@@ -619,20 +627,20 @@
     (log/error "No entity exists with id" id)))
 
 (defn update-document-text-by-uri!
-  [uri text]
+  [conn uri text]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri)))
     (when-not (s/valid? ::text text)
       (log/warn (s/explain-str ::text text))))
-  (when-let [id (document-id-by-uri uri)]
+  (when-let [id (document-id-by-uri conn uri)]
     (let [tx [[:db/add id :document/text text]
               [:db/add id :document/dirty true]]]
       (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn update-document-uri-language-by-id!
-  [id uri lang]
+  [conn id uri lang]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id)))
@@ -648,7 +656,7 @@
     (log/error "No entity exists with id" id)))
 
 (defn update-document-uri-by-id!
-  [id uri]
+  [conn id uri]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id)))
@@ -661,7 +669,7 @@
     (log/error "No entity exists with id" id)))
 
 (defn update-document-text-language-by-id!
-  [id text lang]
+  [conn id text lang]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id)))
@@ -679,38 +687,38 @@
     (log/error "No entity exists with id" id)))
 
 (defn document-opened-by-uri!
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (when-let [id (document-id-by-uri uri)]
+  (when-let [id (document-id-by-uri conn uri)]
     (let [tx [[:db/add id :document/opened true]]]
       (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn document-closed-by-uri!
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (when-let [id (document-id-by-uri uri)]
+  (when-let [id (document-id-by-uri conn uri)]
     (let [tx [[:db/add id :document/opened false]]]
       (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn document-saved-by-uri!
   "Marks a document as saved (clears dirty flag) by URI."
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (when-let [id (document-id-by-uri uri)]
+  (when-let [id (document-id-by-uri conn uri)]
     (let [tx [[:db/add id :document/dirty false]]]
       (log/trace "Executing transaction:" tx)
       (d/transact! conn tx))))
 
 (defn opened-uris-by-lang
-  [lang]
+  [conn lang]
   (when DEBUG
     (when-not (s/valid? :document/language lang)
       (log/warn (s/explain-str :document/language lang))))
@@ -722,12 +730,12 @@
        @conn lang))
 
 (defn close-all-opened-by-lang!
-  [lang]
-  (doseq [uri (opened-uris-by-lang lang)]
-    (document-closed-by-uri! uri)))
+  [conn lang]
+  (doseq [uri (opened-uris-by-lang conn lang)]
+    (document-closed-by-uri! conn uri)))
 
 (defn update-active-uri!
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :workspace/active-uri uri)
       (log/warn (s/explain-str :workspace/active-uri uri))))
@@ -743,7 +751,7 @@
     (d/transact! conn tx)))
 
 (defn create-documents!
-  [docs]
+  [conn docs]
   (let [tx (map (fn [doc]
                   {:document/uri (:uri doc)
                    :document/text (:text doc)
@@ -760,7 +768,7 @@
     (d/transact! conn tx)))
 
 (defn delete-document-by-id!
-  [id]
+  [conn id]
   (when DEBUG
     (when-not (s/valid? ::id id)
       (log/warn (s/explain-str ::id id))))
@@ -769,18 +777,18 @@
     (d/transact! conn tx)))
 
 (defn first-document-uri
-  []
+  [conn]
   (d/q '[:find ?uri . :where [?e :document/uri ?uri]] @conn))
 
 (defn active-uri?
-  [uri]
+  [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (= uri (active-uri)))
+  (= uri (active-uri conn)))
 
-(defn- ensure-document-eid [uri version language text dirty opened]
-  (if-let [eid (document-id-by-uri uri)]
+(defn- ensure-document-eid [conn uri version language text dirty opened]
+  (if-let [eid (document-id-by-uri conn uri)]
     eid
     (let [temp-id -1
           entity {:db/id temp-id
@@ -835,13 +843,13 @@
     tx))
 
 (defn replace-diagnostics-by-uri!
-  [uri version diags]
+  [conn uri version diags]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri)))
     (when-not (or (nil? version) (s/valid? ::version version))
       (log/warn (s/explain-str ::version version))))
-  (when-let [doc-eid (document-id-by-uri uri)]
+  (when-let [doc-eid (document-id-by-uri conn uri)]
     (let [old-ids (d/q '[:find [?e ...]
                          :in $ ?uri
                          :where
@@ -891,8 +899,8 @@
       (flatten-rec symbols parent-id))))
 
 (defn create-symbols
-  [doc-eid uri flat-symbols]
-  (let [effective-doc-eid (or doc-eid (ensure-document-eid uri nil nil nil false false))
+  [conn doc-eid uri flat-symbols]
+  (let [effective-doc-eid (or doc-eid (ensure-document-eid conn uri nil nil nil false false))
         tx (map (fn [s]
                   (cond-> {:symbol/document effective-doc-eid
                            :symbol/name (:symbol/name s)
@@ -916,11 +924,11 @@
     tx))
 
 (defn replace-symbols!
-  [uri symbols]
+  [conn uri symbols]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
-  (when-let [doc-eid (document-id-by-uri uri)]
+  (when-let [doc-eid (document-id-by-uri conn uri)]
     (let [old-ids (d/q '[:find [?e ...]
                          :in $ ?doc
                          :where [?e :symbol/document ?doc]]
@@ -930,17 +938,17 @@
         (when (seq deletions)
           (log/trace "Executing transaction:" deletions)
           (d/transact! conn deletions))
-        (let [creations (create-symbols doc-eid uri symbols)
+        (let [creations (create-symbols conn doc-eid uri symbols)
               tx (concat deletions creations)]
           (log/trace "Executing transaction:" tx)
           (d/transact! conn tx))))))
 
-(defn diagnostics-by-uri [uri]
+(defn diagnostics-by-uri [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
   ;; EXP-003: Use d/pull-many for batch attribute extraction with post-query filtering
-  (when-let [[doc-id doc-version] (document-id-version-by-uri uri)]
+  (when-let [[doc-id doc-version] (document-id-version-by-uri conn uri)]
     (let [entity-ids (d/q '[:find [?e ...]
                             :in $ ?doc
                             :where [?e :diagnostic/document ?doc]]
@@ -975,7 +983,7 @@
    :selectionEndChar (:symbol/selection-end-char entity)
    :parent (or (:symbol/parent entity) 0)})
 
-(defn symbols-by-uri [uri]
+(defn symbols-by-uri [conn uri]
   (when DEBUG
     (when-not (s/valid? :document/uri uri)
       (log/warn (s/explain-str :document/uri uri))))
@@ -990,7 +998,7 @@
             (d/pull-many @conn symbol-pull-pattern entity-ids)))))
 
 (defn reset-active-uri!
-  []
+  [conn]
   (let [prev-eids (d/q '[:find [?e ...]
                          :where [?e :workspace/active-uri _]]
                        @conn)]

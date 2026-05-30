@@ -6,6 +6,7 @@
    ["rxjs" :as rxjs :refer [ReplaySubject]]
    [reagent.core :as r]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.editor.diagnostics :as diagnostics :refer [set-diagnostic-effect]]
    [lib.editor.runtime :as rt :refer [emit-event clear-emit-timers! get-extensions update-editor-state]]
    [lib.editor.commands :as commands]
@@ -18,6 +19,21 @@
 ;; Hardcoded default languages for the library; uses string keys.
 (defonce ^:const default-languages {"text" {:extensions [".txt"]
                                             :fallback-highlighter "none"}})
+
+;; React context carrying a shared Workspace to a subtree of editors. `defonce` so
+;; the context object identity is stable across hot reloads (provider/consumer must
+;; agree on the same context object). Editors with no :workspace prop and no
+;; provider resolve to the shared lib.workspace/default-workspace (also defonce),
+;; so documents survive re-renders AND hot reloads.
+(defonce ^:private workspace-context (react/createContext nil))
+
+(defn ^:export EditorWorkspaceProvider
+  "Provider component: wrap editors that should SHARE a workspace.
+  Usage (JS): <EditorWorkspaceProvider value={ws}>...editors...</EditorWorkspaceProvider>"
+  [js-props]
+  (react/createElement (.-Provider workspace-context)
+                       #js {:value (.-value js-props)}
+                       (.-children js-props)))
 
 (defn- default-state
   "Computes the initial editor state from converted CLJS props.
@@ -40,6 +56,10 @@
      :search-term ""
      :lsp {}
      :lsp-document-opened {}  ; EXP-010: Cache {uri -> true} for documents opened with LSP
+     ;; EXP-011 per-editor sync scratch (moved out of module-global atoms so
+     ;; multiple editors over the same URI don't clobber each other):
+     :pending-idle-syncs {}   ; URI -> requestIdleCallback handle (idle DataScript sync)
+     :pending-lsp-changes {}  ; URI -> vector of ContentChangeEvent (incremental didChange)
      :languages languages
      :tree-sitter-wasm tree-sitter-wasm
      :extra-extensions extra-extensions
@@ -48,8 +68,21 @@
 
 
 ;; Inner React functional component, handling CodeMirror integration and state management.
-(let [inner (fn [js-props forwarded-ref]
-              (let [props (normalize-editor-config (js->clj js-props :keywordize-keys true))
+(let [inner (fn [^js js-props forwarded-ref]
+              ;; Resolve the effective workspace BEFORE per-editor state. The raw
+              ;; :workspace prop is read off js-props directly (NOT through js->clj,
+              ;; which would mangle the Workspace record), and stripped from the
+              ;; config before validation. Resolution: prop > React context > shared
+              ;; default-workspace. useMemo over [prop-ws ctx-ws] keeps identity
+              ;; stable across re-renders.
+              (let [prop-ws (.-workspace js-props)
+                    ctx-ws (react/useContext workspace-context)
+                    workspace (react/useMemo
+                               (fn [] (ws/ensure-workspace (or prop-ws ctx-ws)))
+                               #js [prop-ws ctx-ws])
+                    conn (:conn workspace)
+                    props (normalize-editor-config (dissoc (js->clj js-props :keywordize-keys true)
+                                                           :workspace :uri))
                     state-ref (react/useRef nil)]
                 (when (nil? (.-current state-ref))
                   (set! (.-current state-ref) (r/atom (default-state props))))
@@ -58,10 +91,12 @@
                       [ready set-ready] (react/useState false)
                       events (react/useMemo (fn [] (ReplaySubject.)) #js [])
                       ;; Per-editor LSP client (ILspClient). Constructed once over this
-                      ;; editor's state-atom + events; routes all LSP calls through the protocol.
-                      client (react/useMemo (fn [] (cm/make-connection-manager state-atom events)) #js [])
+                      ;; editor's state-atom + events + workspace conn; routes all LSP
+                      ;; calls through the protocol.
+                      client (react/useMemo (fn [] (cm/make-connection-manager state-atom events conn)) #js [])
                       ;; Per-editor context bundling the deps the imperative handle methods need.
-                      ctx (react/useMemo (fn [] {:state-atom state-atom :view-ref view-ref :events events :client client}) #js [])
+                      ctx (react/useMemo (fn [] {:state-atom state-atom :view-ref view-ref :events events
+                                                 :client client :conn conn}) #js [])
                       on-content-change (:on-content-change props)
                       container-ref (react/useRef nil)]
                   (react/useImperativeHandle
@@ -73,18 +108,18 @@
                      (when-let [^js editor-view (.-current view-ref)]
                        (let [^js editor-state (.-state editor-view)
                              current-doc (str (.-doc editor-state))
-                             active-text (db/active-text)]
+                             active-text (db/active-text conn)]
                          (when (not= active-text current-doc)
                            (log/debug "Updating view content to match db for active uri")
                            (.dispatch editor-view #js {:changes #js {:from 0
                                                                      :to (count current-doc)
                                                                      :insert active-text}})
                            (emit-event events "content-change" {:content active-text
-                                                                :uri (db/active-uri)})
+                                                                :uri (db/active-uri conn)})
                            (when on-content-change
                              (on-content-change active-text)))))
                      js/undefined)
-                   #js [(db/active-text)])
+                   #js [(db/active-text conn)])
                   (react/useEffect
                    (fn []
                      (let [shutdown-all (fn []
@@ -99,7 +134,7 @@
                      (log/info "Editor: Initializing EditorView")
                      (try
                        (let [container (.-current container-ref)
-                             exts (get-extensions state-atom events on-content-change view-ref client)
+                             exts (get-extensions state-atom events on-content-change view-ref client conn)
                              editor-state (EditorState.create #js {:doc ""
                                                                    :extensions exts})
                              editor-view (EditorView. #js {:state editor-state
@@ -113,7 +148,7 @@
                                                      (log/trace "Updating diagnostics in view for uri:" (:uri evt))
                                                      (.dispatch editor-view #js {:effects #js [(.of set-diagnostic-effect (clj->js diags))]})
                                                      (let [uri (:uri evt)]
-                                                       (when-let [lang (db/document-language-by-uri uri)]
+                                                       (when-let [lang (db/document-language-by-uri conn uri)]
                                                          (p/request-symbols! client lang uri))))))))]
                          (set! (.-current view-ref) editor-view)
                          (js/setTimeout
@@ -121,7 +156,7 @@
                             (emit-event events "ready" {})
                             (set-ready true))
                           0)
-                         (update-editor-state editor-state state-atom events (db/active-uri))
+                         (update-editor-state editor-state state-atom events (db/active-uri conn))
                          (fn []
                            (log/info "Editor: Destroying EditorView")
                            (swap! state-atom assoc :mounted? false)
@@ -133,7 +168,7 @@
                            (clear-emit-timers!) ;; Clean up pending event timers
                            (emit-event events "destroy" {})
                            (set-ready false)
-                           (db/reset-active-uri!)))
+                           (db/reset-active-uri! conn)))
                        (catch js/Error error
                          (emit-event events "error" {:message (.-message error)
                                                      :operation "initEditorView"})

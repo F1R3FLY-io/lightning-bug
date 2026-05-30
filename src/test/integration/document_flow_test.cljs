@@ -9,8 +9,8 @@
    [clojure.string :as str]
    [re-frame.core :as rf]
    [re-frame.db :as rf-db]
-   [datascript.core :as d]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [app.events :as events]
    [app.subs]
    [test.lib.test-helpers :as h]
@@ -22,7 +22,7 @@
 
 (use-fixtures :each
   {:before (fn []
-             (d/reset-conn! db/conn (d/empty-db db/schema))
+             (ws/reset-workspace! @ws/default-workspace)
              (rfh/reset-app-db!)
              (rfh/reset-captured-effects!))
    :after (fn []
@@ -45,10 +45,10 @@
                                 :dirty false
                                 :opened true})
       ;; Verify in DataScript
-      (let [doc-id (db/document-id-by-uri uri)]
+      (let [doc-id (db/document-id-by-uri (ws/default-conn) uri)]
         (is (some? doc-id) "Document should have an ID")
-        (is (= text (db/document-text-by-uri uri)))
-        (is (= "rholang" (db/document-language-by-uri uri)))))))
+        (is (= text (db/document-text-by-uri (ws/default-conn) uri)))
+        (is (= "rholang" (db/document-language-by-uri (ws/default-conn) uri)))))))
 
 (deftest document-becomes-active-and-accessible-via-subscriptions
   (testing "Setting active document makes it accessible via subscriptions"
@@ -57,7 +57,7 @@
       (h/create-test-document! {:uri uri
                                 :text text
                                 :language "rholang"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify via Re-Frame subscriptions
       (is (= uri @(rf/subscribe [:workspace/active-file])))
@@ -78,15 +78,15 @@
                                 :text original
                                 :dirty false})
       ;; Verify initial state
-      (is (= original (db/document-text-by-uri uri)))
-      (is (false? (db/document-dirty-by-uri uri)))
+      (is (= original (db/document-text-by-uri (ws/default-conn) uri)))
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri)))
 
       ;; Edit document
-      (db/update-document-text-by-uri! uri updated)
+      (db/update-document-text-by-uri! (ws/default-conn) uri updated)
 
       ;; Verify updated state
-      (is (= updated (db/document-text-by-uri uri)))
-      (is (true? (db/document-dirty-by-uri uri))))))
+      (is (= updated (db/document-text-by-uri (ws/default-conn) uri)))
+      (is (true? (db/document-dirty-by-uri (ws/default-conn) uri))))))
 
 (deftest document-edit-increments-version
   (testing "Editing a document increments its version"
@@ -94,15 +94,15 @@
       (h/create-test-document! {:uri uri
                                 :text "v1"
                                 :version 1})
-      (is (= 1 (db/document-version-by-uri uri)))
+      (is (= 1 (db/document-version-by-uri (ws/default-conn) uri)))
 
       ;; Increment version
-      (db/increment-document-version-by-uri! uri)
-      (is (= 2 (db/document-version-by-uri uri)))
+      (db/increment-document-version-by-uri! (ws/default-conn) uri)
+      (is (= 2 (db/document-version-by-uri (ws/default-conn) uri)))
 
       ;; Increment again
-      (db/increment-document-version-by-uri! uri)
-      (is (= 3 (db/document-version-by-uri uri))))))
+      (db/increment-document-version-by-uri! (ws/default-conn) uri)
+      (is (= 3 (db/document-version-by-uri (ws/default-conn) uri))))))
 
 ;; =============================================================================
 ;; Document Save Flow Tests
@@ -114,12 +114,12 @@
       (h/create-test-document! {:uri uri
                                 :text "content"
                                 :dirty true})
-      (is (true? (db/document-dirty-by-uri uri)))
+      (is (true? (db/document-dirty-by-uri (ws/default-conn) uri)))
 
       ;; Save document (clear dirty flag)
-      (db/document-saved-by-uri! uri)
+      (db/document-saved-by-uri! (ws/default-conn) uri)
 
-      (is (false? (db/document-dirty-by-uri uri))))))
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri))))))
 
 ;; =============================================================================
 ;; Document Open/Close Flow Tests
@@ -133,19 +133,19 @@
                                 :text "content"
                                 :language "rholang"
                                 :opened false})
-      (is (false? (db/document-opened-by-uri uri)))
+      (is (false? (db/document-opened-by-uri (ws/default-conn) uri)))
 
       ;; Open document
-      (db/document-opened-by-uri! uri)
-      (is (true? (db/document-opened-by-uri uri)))
+      (db/document-opened-by-uri! (ws/default-conn) uri)
+      (is (true? (db/document-opened-by-uri (ws/default-conn) uri)))
 
       ;; Document appears in opened list
-      (let [opened (db/opened-uris-by-lang "rholang")]
+      (let [opened (db/opened-uris-by-lang (ws/default-conn) "rholang")]
         (is (contains? (set opened) uri)))
 
       ;; Close document
-      (db/document-closed-by-uri! uri)
-      (is (false? (db/document-opened-by-uri uri))))))
+      (db/document-closed-by-uri! (ws/default-conn) uri)
+      (is (false? (db/document-opened-by-uri (ws/default-conn) uri))))))
 
 ;; =============================================================================
 ;; Multiple Documents Tests
@@ -161,9 +161,9 @@
       (h/create-test-document! {:uri uri3 :text "doc3" :language "text"})
 
       ;; Verify all documents exist
-      (is (some? (db/document-id-by-uri uri1)))
-      (is (some? (db/document-id-by-uri uri2)))
-      (is (some? (db/document-id-by-uri uri3)))
+      (is (some? (db/document-id-by-uri (ws/default-conn) uri1)))
+      (is (some? (db/document-id-by-uri (ws/default-conn) uri2)))
+      (is (some? (db/document-id-by-uri (ws/default-conn) uri3)))
 
       ;; Verify workspace/files subscription
       (let [files @(rf/subscribe [:workspace/files])]
@@ -180,13 +180,13 @@
       (h/create-test-document! {:uri uri2 :text "content2" :language "text"})
 
       ;; Activate first document
-      (db/update-active-uri! uri1)
+      (db/update-active-uri! (ws/default-conn) uri1)
       (is (= uri1 @(rf/subscribe [:workspace/active-file])))
       (is (= "content1" @(rf/subscribe [:active-content])))
       (is (= "rholang" @(rf/subscribe [:active-lang])))
 
       ;; Switch to second document
-      (db/update-active-uri! uri2)
+      (db/update-active-uri! (ws/default-conn) uri2)
       (is (= uri2 @(rf/subscribe [:workspace/active-file])))
       (is (= "content2" @(rf/subscribe [:active-content])))
       (is (= "text" @(rf/subscribe [:active-lang]))))))
@@ -201,7 +201,7 @@
       (h/create-test-document! {:uri uri :text "error code"})
 
       ;; Add diagnostics
-      (db/replace-diagnostics-by-uri! uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                        [{:message "Syntax error"
                                          :severity 1
                                          :startLine 0
@@ -216,7 +216,7 @@
                                          :endChar 10}])
 
       ;; Verify diagnostics are retrievable
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
       (let [diags @(rf/subscribe [:lsp/diagnostics])]
         (is (= 2 (count diags)))))))
 
@@ -224,20 +224,20 @@
   (testing "Clearing diagnostics removes all for a document"
     (let [uri "file:///test/clear-diag.rho"]
       (h/create-test-document! {:uri uri :text "code"})
-      (db/replace-diagnostics-by-uri! uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                        [{:message "Error"
                                          :severity 1
                                          :startLine 0
                                          :startChar 0
                                          :endLine 0
                                          :endChar 4}])
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify diagnostics exist
       (is (= 1 (count @(rf/subscribe [:lsp/diagnostics]))))
 
       ;; Clear diagnostics
-      (db/replace-diagnostics-by-uri! uri nil [])
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil [])
 
       ;; Verify cleared
       (is (= 0 (count @(rf/subscribe [:lsp/diagnostics])))))))
@@ -260,10 +260,10 @@
                        :selectionRange {:start {:line 0 :character 9}
                                         :end {:line 0 :character 13}}}]
                      nil uri)]
-        (db/replace-symbols! uri symbols))
+        (db/replace-symbols! (ws/default-conn) uri symbols))
 
       ;; Verify symbols are retrievable
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
       (let [syms @(rf/subscribe [:lsp/symbols])]
         (is (= 1 (count syms)))
         (is (= "Test" (:name (first syms))))))))
@@ -276,9 +276,9 @@
   (testing "Deleting a document removes it and related data"
     (let [uri "file:///test/delete.rho"]
       (h/create-test-document! {:uri uri :text "to delete"})
-      (let [doc-id (db/document-id-by-uri uri)]
+      (let [doc-id (db/document-id-by-uri (ws/default-conn) uri)]
         ;; Add diagnostics
-        (db/replace-diagnostics-by-uri! uri nil
+        (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                          [{:message "Error"
                                            :severity 1
                                            :startLine 0
@@ -289,10 +289,10 @@
         (is (some? doc-id))
 
         ;; Delete document
-        (db/delete-document-by-id! doc-id)
+        (db/delete-document-by-id! (ws/default-conn) doc-id)
 
         ;; Verify removed
-        (is (nil? (db/document-id-by-uri uri)))))))
+        (is (nil? (db/document-id-by-uri (ws/default-conn) uri)))))))
 
 ;; =============================================================================
 ;; Event Handler Integration Tests
@@ -315,7 +315,7 @@
     (let [uri "file:///test/search.rho"]
       (h/create-test-document! {:uri uri
                                 :text "line one\nline two with match\nline three"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Mock the coeffects
       (rfh/mock-coeffect! :document-repo/active-document
@@ -336,7 +336,7 @@
 
 (deftest logs-creation-and-retrieval
   (testing "Logs can be created and retrieved"
-    (db/create-logs! [{:message "Log message 1" :lang "rholang"}
+    (db/create-logs! (ws/default-conn) [{:message "Log message 1" :lang "rholang"}
                       {:message "Log message 2" :lang "rholang"}
                       {:message "Error occurred" :lang "text"}])
 
@@ -367,36 +367,36 @@
                                 :version 1
                                 :dirty false
                                 :opened true})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify creation
-      (is (some? (db/document-id-by-uri uri)) "Document created")
-      (is (= initial-text (db/document-text-by-uri uri)) "Initial text set")
-      (is (= 1 (db/document-version-by-uri uri)) "Initial version is 1")
-      (is (false? (db/document-dirty-by-uri uri)) "Not dirty after creation")
-      (is (true? (db/document-opened-by-uri uri)) "Document is opened")
+      (is (some? (db/document-id-by-uri (ws/default-conn) uri)) "Document created")
+      (is (= initial-text (db/document-text-by-uri (ws/default-conn) uri)) "Initial text set")
+      (is (= 1 (db/document-version-by-uri (ws/default-conn) uri)) "Initial version is 1")
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri)) "Not dirty after creation")
+      (is (true? (db/document-opened-by-uri (ws/default-conn) uri)) "Document is opened")
 
       ;; Step 2: Edit document
-      (db/update-document-text-by-uri! uri edited-text)
+      (db/update-document-text-by-uri! (ws/default-conn) uri edited-text)
 
       ;; Verify edit effects
-      (is (= edited-text (db/document-text-by-uri uri)) "Text updated")
-      (is (true? (db/document-dirty-by-uri uri)) "Marked dirty after edit")
+      (is (= edited-text (db/document-text-by-uri (ws/default-conn) uri)) "Text updated")
+      (is (true? (db/document-dirty-by-uri (ws/default-conn) uri)) "Marked dirty after edit")
 
       ;; Step 3: Increment version (as LSP would)
-      (db/increment-document-version-by-uri! uri)
-      (is (= 2 (db/document-version-by-uri uri)) "Version incremented")
+      (db/increment-document-version-by-uri! (ws/default-conn) uri)
+      (is (= 2 (db/document-version-by-uri (ws/default-conn) uri)) "Version incremented")
 
       ;; Step 4: Save document
-      (db/document-saved-by-uri! uri)
-      (is (false? (db/document-dirty-by-uri uri)) "Dirty cleared after save")
+      (db/document-saved-by-uri! (ws/default-conn) uri)
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri)) "Dirty cleared after save")
 
       ;; Step 5: Close document
-      (db/document-closed-by-uri! uri)
-      (is (false? (db/document-opened-by-uri uri)) "Document closed")
+      (db/document-closed-by-uri! (ws/default-conn) uri)
+      (is (false? (db/document-opened-by-uri (ws/default-conn) uri)) "Document closed")
 
       ;; Document still exists but is closed
-      (is (some? (db/document-id-by-uri uri)) "Document still exists after close"))))
+      (is (some? (db/document-id-by-uri (ws/default-conn) uri)) "Document still exists after close"))))
 
 (deftest document-rename-preserves-diagnostics-and-symbols
   (testing "Renaming a document preserves its associated diagnostics and symbols"
@@ -411,7 +411,7 @@
                                 :opened true})
 
       ;; Add diagnostics
-      (db/replace-diagnostics-by-uri! old-uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) old-uri nil
                                        [{:message "Warning: unused variable"
                                          :severity 2
                                          :startLine 0
@@ -428,10 +428,10 @@
                        :selectionRange {:start {:line 0 :character 9}
                                         :end {:line 0 :character 13}}}]
                      nil old-uri)]
-        (db/replace-symbols! old-uri symbols))
+        (db/replace-symbols! (ws/default-conn) old-uri symbols))
 
       ;; Verify initial state
-      (db/update-active-uri! old-uri)
+      (db/update-active-uri! (ws/default-conn) old-uri)
       (is (= 1 (count @(rf/subscribe [:lsp/diagnostics]))) "Diagnostics exist before rename")
       (is (= 1 (count @(rf/subscribe [:lsp/symbols]))) "Symbols exist before rename")
 
@@ -439,9 +439,9 @@
       ;; 1. Creating new document with same content
       ;; 2. Copying diagnostics and symbols
       ;; 3. Deleting old document
-      (let [doc-text (db/document-text-by-uri old-uri)
-            doc-lang (db/document-language-by-uri old-uri)
-            doc-version (db/document-version-by-uri old-uri)
+      (let [doc-text (db/document-text-by-uri (ws/default-conn) old-uri)
+            doc-lang (db/document-language-by-uri (ws/default-conn) old-uri)
+            doc-version (db/document-version-by-uri (ws/default-conn) old-uri)
             old-diags @(rf/subscribe [:lsp/diagnostics])
             _old-syms @(rf/subscribe [:lsp/symbols])]
 
@@ -454,7 +454,7 @@
                                   :opened true})
 
         ;; Copy diagnostics to new URI
-        (db/replace-diagnostics-by-uri! new-uri nil
+        (db/replace-diagnostics-by-uri! (ws/default-conn) new-uri nil
                                          (map #(dissoc % :db/id :document) old-diags))
 
         ;; Copy symbols to new URI
@@ -466,18 +466,18 @@
                              :selectionRange {:start {:line 0 :character 9}
                                               :end {:line 0 :character 13}}}]
                            nil new-uri)]
-          (db/replace-symbols! new-uri new-symbols))
+          (db/replace-symbols! (ws/default-conn) new-uri new-symbols))
 
         ;; Delete old document
-        (let [old-id (db/document-id-by-uri old-uri)]
-          (db/delete-document-by-id! old-id))
+        (let [old-id (db/document-id-by-uri (ws/default-conn) old-uri)]
+          (db/delete-document-by-id! (ws/default-conn) old-id))
 
         ;; Activate new document
-        (db/update-active-uri! new-uri)
+        (db/update-active-uri! (ws/default-conn) new-uri)
 
         ;; Verify preservation
-        (is (nil? (db/document-id-by-uri old-uri)) "Old document deleted")
-        (is (some? (db/document-id-by-uri new-uri)) "New document exists")
+        (is (nil? (db/document-id-by-uri (ws/default-conn) old-uri)) "Old document deleted")
+        (is (some? (db/document-id-by-uri (ws/default-conn) new-uri)) "New document exists")
         (is (= 1 (count @(rf/subscribe [:lsp/diagnostics]))) "Diagnostics preserved after rename")
         (is (= 1 (count @(rf/subscribe [:lsp/symbols]))) "Symbols preserved after rename")))))
 
@@ -496,7 +496,7 @@
       ;; Rapidly switch between documents
       (doseq [_ (range 3)]  ; Multiple rounds
         (doseq [[idx uri] (map-indexed vector uris)]
-          (db/update-active-uri! uri)
+          (db/update-active-uri! (ws/default-conn) uri)
           ;; Verify correct document is active
           (is (= uri @(rf/subscribe [:workspace/active-file]))
               (str "Active file should be " uri))
@@ -505,7 +505,7 @@
 
       ;; Final verification - all documents still exist
       (doseq [uri uris]
-        (is (some? (db/document-id-by-uri uri))
+        (is (some? (db/document-id-by-uri (ws/default-conn) uri))
             (str "Document " uri " should still exist"))))))
 
 (deftest document-state-consistency-after-errors
@@ -516,14 +516,14 @@
       (h/create-test-document! {:uri valid-uri
                                 :text "valid content"
                                 :language "rholang"})
-      (db/update-active-uri! valid-uri)
+      (db/update-active-uri! (ws/default-conn) valid-uri)
 
       ;; Try operations on non-existent URI (should not throw or corrupt state)
-      (is (nil? (db/document-text-by-uri invalid-uri)) "Non-existent returns nil")
-      (is (nil? (db/document-id-by-uri invalid-uri)) "Non-existent ID returns nil")
+      (is (nil? (db/document-text-by-uri (ws/default-conn) invalid-uri)) "Non-existent returns nil")
+      (is (nil? (db/document-id-by-uri (ws/default-conn) invalid-uri)) "Non-existent ID returns nil")
 
       ;; Valid document should still be accessible
-      (is (= "valid content" (db/document-text-by-uri valid-uri))
+      (is (= "valid content" (db/document-text-by-uri (ws/default-conn) valid-uri))
           "Valid document unaffected")
       (is (= valid-uri @(rf/subscribe [:workspace/active-file]))
           "Active file unaffected"))))
@@ -537,14 +537,14 @@
 
       ;; Simulate multiple edit cycles
       (dotimes [i 10]
-        (db/update-document-text-by-uri! uri (str "v" (+ i 2)))
-        (db/increment-document-version-by-uri! uri)
-        (is (= (+ i 2) (db/document-version-by-uri uri))
+        (db/update-document-text-by-uri! (ws/default-conn) uri (str "v" (+ i 2)))
+        (db/increment-document-version-by-uri! (ws/default-conn) uri)
+        (is (= (+ i 2) (db/document-version-by-uri (ws/default-conn) uri))
             (str "Version should be " (+ i 2) " after edit " (inc i))))
 
       ;; Final state
-      (is (= 11 (db/document-version-by-uri uri)) "Final version is 11")
-      (is (= "v11" (db/document-text-by-uri uri)) "Final text is v11"))))
+      (is (= 11 (db/document-version-by-uri (ws/default-conn) uri)) "Final version is 11")
+      (is (= "v11" (db/document-text-by-uri (ws/default-conn) uri)) "Final text is v11"))))
 
 (deftest diagnostics-filtering-by-document
   (testing "Diagnostics are correctly isolated per document"
@@ -555,14 +555,14 @@
       (h/create-test-document! {:uri uri2 :text "code2" :language "rholang"})
 
       ;; Add different diagnostics to each
-      (db/replace-diagnostics-by-uri! uri1 nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri1 nil
                                        [{:message "Error in doc1"
                                          :severity 1
                                          :startLine 0
                                          :startChar 0
                                          :endLine 0
                                          :endChar 5}])
-      (db/replace-diagnostics-by-uri! uri2 nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri2 nil
                                        [{:message "Warning in doc2"
                                          :severity 2
                                          :startLine 0
@@ -577,9 +577,9 @@
                                          :endChar 5}])
 
       ;; Verify diagnostics are correctly associated with each document
-      (let [diags1 (db/diagnostics-by-uri uri1)]
+      (let [diags1 (db/diagnostics-by-uri (ws/default-conn) uri1)]
         (is (= 1 (count diags1)) "Doc1 has 1 diagnostic")
         (is (= "Error in doc1" (:message (first diags1)))))
 
-      (let [diags2 (db/diagnostics-by-uri uri2)]
+      (let [diags2 (db/diagnostics-by-uri (ws/default-conn) uri2)]
         (is (= 2 (count diags2)) "Doc2 has 2 diagnostics")))))

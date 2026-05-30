@@ -10,7 +10,7 @@
    ["@codemirror/search" :refer [openSearchPanel]]
    [clojure.core.async :refer [go <!]]
    [datascript.core :as d]
-   [lib.db :as db :refer [conn]]
+   [lib.db :as db]
    [lib.editor.annotations :refer [external-set-annotation]]
    [lib.editor.highlight :as highlight]
    [lib.editor.syntax :as syntax]
@@ -19,30 +19,30 @@
    [lib.utils :refer [split-uri pos->offset log-error-with-cause get-lang-from-ext]]
    [taoensso.timbre :as log]))
 
-(defn- normalize-uri [file-or-uri-js default-protocol]
+(defn- normalize-uri [conn file-or-uri-js default-protocol]
   (if (and file-or-uri-js (pos? (count file-or-uri-js)))
     (let [file-or-uri (js->clj file-or-uri-js :keywordize-keys true)]
       (if (re-find #"^[a-zA-Z]+:" file-or-uri)
         file-or-uri
         (str (or default-protocol "inmemory://") file-or-uri)))
-    (db/active-uri)))  ;; Returns nil if no active URI
+    (db/active-uri conn)))  ;; Returns nil if no active URI
 
 (defn build-handle
   "Builds the imperative #js handle for the Editor ref. ctx is the per-editor context
   {:state-atom :view-ref :events :client}; ready is the current readiness flag."
   [ctx ready]
-  (let [{:keys [state-atom view-ref events client]} ctx]
+  (let [{:keys [state-atom view-ref events client conn]} ctx]
                      #js {;; Returns the full current state (workspace, diagnostics, symbols, etc.).
                           ;; Example: (.getState editor)
                           :getState (fn []
                                       (try
                                         (log/trace "Fetching editor state")
                                         (clj->js (assoc @state-atom
-                                                        :workspace {:documents (db/documents)
-                                                                    :activeUri (db/active-uri)}
-                                                        :logs (db/logs)
-                                                        :diagnostics (db/diagnostics)
-                                                        :symbols (db/symbols)
+                                                        :workspace {:documents (db/documents conn)
+                                                                    :activeUri (db/active-uri conn)}
+                                                        :logs (db/logs conn)
+                                                        :diagnostics (db/diagnostics conn)
+                                                        :symbols (db/symbols conn)
                                                         :searchTerm (:search-term @state-atom "")))
                                         (catch js/Error error
                                           (emit-event events "error" {:message (.-message error)
@@ -78,7 +78,7 @@
                                                    (.dispatch editor-view #js {:selection (EditorSelection.cursor offset)})
                                                    (emit-event events "selection-change" {:cursor pos
                                                                                           :selection nil
-                                                                                          :uri (db/active-uri)}))
+                                                                                          :uri (db/active-uri conn)}))
                                                  (do
                                                    (emit-event events "error" {:message "Invalid cursor position"
                                                                                :operation "setCursor"
@@ -122,7 +122,7 @@
                                                                                              :selection {:from from
                                                                                                          :to to
                                                                                                          :text (.sliceString doc from-offset to-offset)}
-                                                                                             :uri (db/active-uri)}))
+                                                                                             :uri (db/active-uri conn)}))
                                                     (do
                                                       (emit-event events "error" {:message "Invalid selection range"
                                                                                   :operation "setSelection"
@@ -144,9 +144,9 @@
                           ;;          (.openDocument editor "demo.rho") ; activates existing
                           ;;          (.openDocument editor "demo.rho" nil nil false) ; opens without activating
                           :openDocument (fn [file-or-uri-js text-js lang-js & [make-active-js]]
-                                          (if-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
+                                          (if-let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))]
                                             (try
-                                              (if-not (db/document-id-by-uri uri)
+                                              (if-not (db/document-id-by-uri conn uri)
                                                 (log/info "Opening document:" uri)
                                                 (log/info "Re-opening document:" uri))
                                               (let [text (js->clj text-js :keywordize-keys true)
@@ -154,7 +154,7 @@
                                                     make-active (if (nil? make-active-js) true (boolean make-active-js))
                                                     [_protocol path] (split-uri uri)
                                                     ext (get-ext-from-path path)
-                                                    [id current-text current-lang] (db/doc-id-text-lang-by-uri uri)
+                                                    [id current-text current-lang] (db/doc-id-text-lang-by-uri conn uri)
                                                     effective-lang (or lang
                                                                        current-lang
                                                                        (when ext
@@ -165,22 +165,22 @@
                                                 (log/debug (str "Document path=" path ", ext=" ext ", effective-lang=" effective-lang))
                                                 (if id
                                                   (do
-                                                    (db/update-document-text-language-by-id! id effective-text effective-lang)
-                                                    (when (and changed? (db/document-opened-by-uri? uri))
-                                                      (let [version (db/inc-document-version-by-uri! uri)]
+                                                    (db/update-document-text-language-by-id! conn id effective-text effective-lang)
+                                                    (when (and changed? (db/document-opened-by-uri? conn uri))
+                                                      (let [version (db/inc-document-version-by-uri! conn uri)]
                                                         (p/notify-did-change! client effective-lang uri effective-text version)
                                                         (emit-event events "lsp-message" {:method "textDocument/didChange"
                                                                                           :lang effective-lang
                                                                                           :params {:textDocument {:uri uri
                                                                                                                   :version version}}}))))
-                                                  (db/create-documents! [{:uri uri
+                                                  (db/create-documents! conn [{:uri uri
                                                                           :text effective-text
                                                                           :language effective-lang
                                                                           :version 1
                                                                           :dirty (boolean changed?)
                                                                           :opened false}]))
                                                 (when make-active
-                                                  (activate-document uri state-atom view-ref events client))
+                                                  (activate-document uri state-atom view-ref events client conn))
                                                 (emit-event events "document-open" {:uri uri
                                                                                     :content effective-text
                                                                                     :language effective-lang
@@ -200,9 +200,9 @@
                           ;; Example: (.closeDocument editor "specific-uri")
                           :closeDocument (fn [file-or-uri-js]
                                            (try
-                                             (when-let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
+                                             (when-let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))]
                                                (log/info "Closing document:" uri)
-                                               (let [[id lang opened?] (db/document-id-lang-opened-by-uri uri)]
+                                               (let [[id lang opened?] (db/document-id-lang-opened-by-uri conn uri)]
                                                  (when opened?
                                                    (p/notify-did-close! client lang uri)
                                                    (emit-event events "lsp-message" {:method "textDocument/didClose"
@@ -210,10 +210,10 @@
                                                                                      :params {:textDocument {:uri uri}}})
                                                    ;; EXP-010 Phase 3: Clear cache on close
                                                    (swap! state-atom update :lsp-document-opened dissoc uri))
-                                                 (db/delete-document-by-id! id)
-                                                 (when (db/active-uri? uri)
-                                                   (if-let [next-uri (db/first-document-uri)]
-                                                     (activate-document next-uri state-atom view-ref events client)
+                                                 (db/delete-document-by-id! conn id)
+                                                 (when (db/active-uri? conn uri)
+                                                   (if-let [next-uri (db/first-document-uri conn)]
+                                                     (activate-document next-uri state-atom view-ref events client conn)
                                                      (emit-event events "document-open" {:uri nil
                                                                                          :content ""
                                                                                          :language "text"
@@ -235,16 +235,16 @@
                                                    (js/Error.
                                                     (str "Invalid `new-file-or-uri-js` passed to `renameDocument`:" new-file-or-uri-js))))
                                                 (let [default-protocol (:default-protocol @state-atom)
-                                                      new-uri (normalize-uri new-file-or-uri-js default-protocol)
-                                                      old-uri (normalize-uri old-file-or-uri-js default-protocol)]
+                                                      new-uri (normalize-uri conn new-file-or-uri-js default-protocol)
+                                                      old-uri (normalize-uri conn old-file-or-uri-js default-protocol)]
                                                   (log/info (str "Renaming document from: " old-uri ", to: " new-uri))
                                                   (when (not= new-uri old-uri)
                                                     (let [new-ext (get-ext-from-path new-uri)
                                                           new-lang (when new-ext (get-lang-from-ext (:languages @state-atom) new-ext))
-                                                          [id old-lang opened?] (db/document-id-lang-opened-by-uri old-uri)
+                                                          [id old-lang opened?] (db/document-id-lang-opened-by-uri conn old-uri)
                                                           lang-changed? (and new-lang (not= new-lang old-lang))]
                                                       (when (and old-uri id)
-                                                        (when-not (db/document-id-by-uri new-uri)
+                                                        (when-not (db/document-id-by-uri conn new-uri)
                                                           (when opened?
                                                             (when-not lang-changed?
                                                               (p/notify-did-rename! client old-lang old-uri new-uri)
@@ -256,17 +256,17 @@
                                                             (swap! state-atom update :lsp-document-opened
                                                                    (fn [m] (-> m (dissoc old-uri) (assoc new-uri true)))))
                                                           (if lang-changed?
-                                                            (db/update-document-uri-language-by-id! id new-uri new-lang)
-                                                            (db/update-document-uri-by-id! id new-uri))
-                                                          (when (= old-uri (db/active-uri))
-                                                            (db/update-active-uri! new-uri)
+                                                            (db/update-document-uri-language-by-id! conn id new-uri new-lang)
+                                                            (db/update-document-uri-by-id! conn id new-uri))
+                                                          (when (= old-uri (db/active-uri conn))
+                                                            (db/update-active-uri! conn new-uri)
                                                             (when-let [^js editor-view (.-current view-ref)]
-                                                              (if-let [res (<! (syntax/init-syntax editor-view state-atom))]
+                                                              (if-let [res (<! (syntax/init-syntax editor-view state-atom conn))]
                                                                 (when (= :error (first res))
                                                                   (throw (js/Error. (str "(.renameDocument this " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause (second res)})))
                                                                 (throw (js/Error. (str "(syntax/init-syntax editor-view state-atom) returned nothing in call to (.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed"))))))
-                                                          (when-not (db/document-opened-by-uri? new-uri)
-                                                            (ensure-lsp-document-opened new-lang new-uri state-atom events client))
+                                                          (when-not (db/document-opened-by-uri? conn new-uri)
+                                                            (ensure-lsp-document-opened new-lang new-uri state-atom events client conn))
                                                           (emit-event events "document-rename" {:old-uri old-uri
                                                                                                 :new-uri new-uri}))))))
                                                 [:ok nil]
@@ -284,9 +284,9 @@
                           ;; Example: (.saveDocument editor "specific-uri")
                           :saveDocument (fn [file-or-uri-js]
                                           (try
-                                            (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
-                                                  id (db/document-id-by-uri uri)
-                                                  [text lang dirty] (db/doc-text-lang-dirty-by-uri uri)]
+                                            (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))
+                                                  id (db/document-id-by-uri conn uri)
+                                                  [text lang dirty] (db/doc-text-lang-dirty-by-uri conn uri)]
                                               (log/info "Saving document:" uri)
                                               (when (and uri dirty)
                                                 (when (get-in @state-atom [:lsp lang :connected?])
@@ -294,7 +294,7 @@
                                                   (emit-event events "lsp-message" {:method "textDocument/didSave"
                                                                                     :lang lang
                                                                                     :params {:textDocument {:uri uri}}}))
-                                                (db/update-document-dirty-by-id! id false)
+                                                (db/update-document-dirty-by-id! conn id false)
                                                 (emit-event events "document-save" {:uri uri
                                                                                     :content text})))
                                             (catch js/Error error
@@ -390,8 +390,8 @@
                           ;; Example: (.getText editor "specific-uri")
                           :getText (fn [file-or-uri-js]
                                      (try
-                                       (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
-                                             text (db/document-text-by-uri uri)]
+                                       (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))
+                                             text (db/document-text-by-uri conn uri)]
                                          (log/trace "Fetching text for uri:" uri)
                                          (or text nil))
                                        (catch js/Error error
@@ -406,16 +406,16 @@
                           :setText (fn [text-js file-or-uri-js]
                                      (try
                                        (let [text (js->clj text-js :keywordize-keys true)
-                                             uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
-                                             id (db/document-id-by-uri uri)
-                                             [lang opened?] (db/document-language-opened-by-uri uri)
-                                             current-text (db/document-text-by-uri uri)
+                                             uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))
+                                             id (db/document-id-by-uri conn uri)
+                                             [lang opened?] (db/document-language-opened-by-uri conn uri)
+                                             current-text (db/document-text-by-uri conn uri)
                                              changed? (not= current-text text)]
                                          (log/info (str "Setting text for uri: " uri ", length: " (count text)))
                                          (when uri
                                            (when changed?
-                                             (db/update-document-text-by-id! id text)
-                                             (when (= uri (db/active-uri))
+                                             (db/update-document-text-by-id! conn id text)
+                                             (when (= uri (db/active-uri conn))
                                                (if-let [^js editor-view (.-current view-ref)]
                                                  (let [^js editor-state (.-state editor-view)
                                                        ^js doc (.-doc editor-state)
@@ -426,7 +426,7 @@
                                                                                :annotations (.of external-set-annotation true)}))
                                                  (log/warn "Cannot set editor text: view not ready")))
                                              (when (and lang opened? (get-in @state-atom [:lsp lang :connected?]))
-                                               (let [version (db/inc-document-version-by-id! id)]
+                                               (let [version (db/inc-document-version-by-id! conn id)]
                                                  (p/notify-did-change! client lang uri text version)
                                                  (emit-event events "lsp-message" {:method "textDocument/didChange"
                                                                                    :lang lang
@@ -444,7 +444,7 @@
                           ;; Example: (.getFilePath editor "specific-uri")
                           :getFilePath (fn [file-or-uri-js]
                                          (try
-                                           (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))
+                                           (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))
                                              [_ path] (split-uri uri)]
                                              (log/trace "Fetching file path for uri:" uri)
                                              (or path nil))
@@ -459,7 +459,7 @@
                           ;; Example: (.getFileUri editor "specific-uri")
                           :getFileUri (fn [file-or-uri-js]
                                         (try
-                                          (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
+                                          (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))]
                                             (log/trace "Fetching file URI:" uri)
                                             (or uri nil))
                                           (catch js/Error error
@@ -472,10 +472,10 @@
                           ;; Example: (.activateDocument editor "demo.rho")
                           :activateDocument (fn [file-or-uri-js]
                                               (try
-                                                (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
-                                                  (if (db/document-id-by-uri uri)
-                                                    (when (not= uri (db/active-uri))
-                                                      (activate-document uri state-atom view-ref events client))
+                                                (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))]
+                                                  (if (db/document-id-by-uri conn uri)
+                                                    (when (not= uri (db/active-uri conn))
+                                                      (activate-document uri state-atom view-ref events client conn))
                                                     (do
                                                       (emit-event events "error" {:message "Document not found"
                                                                                   :operation "activateDocument"
@@ -508,9 +508,9 @@
                           ;; Example: (.getDiagnostics editor 'inmemory://demo.rho')
                           :getDiagnostics (fn [file-or-uri-js]
                                             (try
-                                              (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
+                                              (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))]
                                                 (log/trace "Fetching diagnostics for uri:" uri)
-                                                (clj->js (db/diagnostics-by-uri uri)))
+                                                (clj->js (db/diagnostics-by-uri conn uri)))
                                               (catch js/Error error
                                                 (emit-event events "error" {:message (.-message error)
                                                                             :operation "getDiagnostics"
@@ -522,9 +522,9 @@
                           ;; Example: (.getSymbols editor 'inmemory://demo.rho')
                           :getSymbols (fn [file-or-uri-js]
                                         (try
-                                          (let [uri (normalize-uri file-or-uri-js (:default-protocol @state-atom))]
+                                          (let [uri (normalize-uri conn file-or-uri-js (:default-protocol @state-atom))]
                                             (log/trace "Fetching symbols for uri:" uri)
-                                            (clj->js (db/symbols-by-uri uri)))
+                                            (clj->js (db/symbols-by-uri conn uri)))
                                           (catch js/Error error
                                             (emit-event events "error" {:message (.-message error)
                                                                         :operation "getSymbols"

@@ -399,9 +399,12 @@ Usage:
   node compare-benchmarks.js <baseline.json> <experiment.json> [options]
 
 Options:
-  --output, -o <file>   Write report to file (default: stdout)
-  --json                Output as JSON
-  --help, -h            Show this help message
+  --output, -o <file>      Write report to file (default: stdout)
+  --json                   Output as JSON
+  --gate-regression <pct>  CI mode: exit 1 if any metric is significant AND
+                           regressed more than <pct>% (e.g. 50). Tolerant of
+                           unpinned-CI noise; catches algorithmic blowups.
+  --help, -h               Show this help message
 
 Examples:
   node compare-benchmarks.js baseline.json experiment.json
@@ -416,12 +419,15 @@ Examples:
 
     let outputPath = null;
     let jsonOutput = false;
+    let gateRegression = null; // when set (pct), exit non-zero on a significant regression beyond this threshold
 
     for (let i = 2; i < args.length; i++) {
         if ((args[i] === '--output' || args[i] === '-o') && args[i + 1]) {
             outputPath = args[++i];
         } else if (args[i] === '--json') {
             jsonOutput = true;
+        } else if (args[i] === '--gate-regression' && args[i + 1]) {
+            gateRegression = parseFloat(args[++i]);
         }
     }
 
@@ -520,6 +526,26 @@ Examples:
             } else {
                 console.log('\n' + report);
             }
+        }
+
+        // Regression-gate mode (for CI): fail iff a metric is BOTH statistically
+        // significant AND regressed beyond the threshold. The threshold is set
+        // generously (CI runs are unpinned and noisy) to catch algorithmic blowups
+        // without flagging noise. This is distinct from the default exit code, which
+        // reflects the "did my optimization help" workflow (ACCEPT vs REJECT).
+        if (gateRegression !== null) {
+            const regressions = Object.entries(results).filter(
+                ([, c]) => c.significant && c.percentChange > gateRegression
+            );
+            if (regressions.length > 0) {
+                console.error(`\nBenchmark gate FAILED (threshold +${gateRegression}% slower):`);
+                for (const [name, c] of regressions) {
+                    console.error(`  ${name}: +${c.percentChange.toFixed(2)}% (p=${c.welchTTest.pValue.toFixed(4)})`);
+                }
+                process.exit(1);
+            }
+            console.log(`\nBenchmark gate PASSED: no significant regression beyond +${gateRegression}%.`);
+            process.exit(0);
         }
 
         // Exit with appropriate code

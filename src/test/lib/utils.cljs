@@ -1,6 +1,7 @@
 (ns test.lib.utils
   (:require [clojure.core.async :refer [go <! timeout]]
-            [lib.db :as db]))
+            [lib.db :as db]
+   [lib.workspace :as ws]))
 
 (defn ref->editor
   ([^js ref]
@@ -147,7 +148,7 @@
   (wait-for #(some (fn [evt] (= event-type (:type evt))) @events-atom) timeout-ms))
 
 (defn wait-for-uri [uri timeout-ms]
-  (wait-for #(db/document-id-by-uri uri) timeout-ms))
+  (wait-for #(db/document-id-by-uri (ws/default-conn) uri) timeout-ms))
 
 (defn wait-for-opened-uri [uri timeout-ms]
-  (wait-for #(db/document-opened-by-uri? uri) timeout-ms))
+  (wait-for #(db/document-opened-by-uri? (ws/default-conn) uri) timeout-ms))

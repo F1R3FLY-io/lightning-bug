@@ -6,21 +6,25 @@
    DataScript-backed repositories; tests inject mocks via set-system!/reset-system!,
    which is the dependency-injection seam the cofx/fx docstrings have always promised.
 
-   The repositories are stateless wrappers over the global lib.db/conn, so a plain
-   atom is the right representation (no async lifecycle to manage)."
-  (:require [infrastructure.datascript-adapter :as ds]))
+   The repositories are thin wrappers holding the demo's workspace conn (the
+   default workspace; the demo is single-workspace), so a plain atom is the right
+   representation (no async lifecycle to manage)."
+  (:require [infrastructure.datascript-adapter :as ds]
+            [lib.workspace :as ws]))
 
 (defonce ^:private system (atom nil))
 
 (defn init!
-  "Instantiates the production system (DataScript-backed repositories).
-   Idempotent: safe to call from app.core/init and the hot-reload hook."
+  "Instantiates the production system (DataScript-backed repositories over the
+   default workspace's conn). Idempotent: safe to call from app.core/init and the
+   hot-reload hook."
   []
-  (reset! system
-          {:document-repo    (ds/make-document-repository)
-           :diagnostics-repo (ds/make-diagnostics-repository)
-           :symbols-repo     (ds/make-symbols-repository)
-           :log-repo         (ds/make-log-repository)}))
+  (let [conn (:conn @ws/default-workspace)]
+    (reset! system
+            {:document-repo    (ds/make-document-repository conn)
+             :diagnostics-repo (ds/make-diagnostics-repository conn)
+             :symbols-repo     (ds/make-symbols-repository conn)
+             :log-repo         (ds/make-log-repository conn)})))
 
 (defn set-system!
   "Replaces the entire system map (tests inject mock repositories)."

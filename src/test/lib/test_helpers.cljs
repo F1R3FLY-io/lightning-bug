@@ -9,7 +9,8 @@
             [clojure.set :as set]
             [clojure.test.check.generators :as gen]
             [datascript.core :as d]
-            [lib.db :as db]))
+            [lib.db :as db]
+   [lib.workspace :as ws]))
 
 ;; =============================================================================
 ;; Database Fixtures
@@ -18,7 +19,7 @@
 (defn reset-db!
   "Resets the DataScript database to empty state with schema."
   []
-  (d/reset-conn! db/conn (d/empty-db db/schema)))
+  (ws/reset-workspace! @ws/default-workspace))
 
 (defn with-clean-db
   "Fixture that resets database before test."
@@ -35,13 +36,13 @@
          version 0
          dirty false
          opened false}}]
-  (db/create-documents! [{:uri uri
+  (db/create-documents! (ws/default-conn) [{:uri uri
                           :text text
                           :language language
                           :version version
                           :dirty dirty
                           :opened opened}])
-  (db/document-id-by-uri uri))
+  (db/document-id-by-uri (ws/default-conn) uri))
 
 (defn with-sample-documents
   "Fixture that creates sample documents for testing.
@@ -66,7 +67,7 @@
                           :version 0
                           :dirty false
                           :opened false})
-  (db/update-active-uri! "file:///test/test.rho")
+  (db/update-active-uri! (ws/default-conn) "file:///test/test.rho")
   (f))
 
 ;; =============================================================================
@@ -108,9 +109,9 @@
 (defn assert-document-state
   "Asserts that a document exists with expected fields."
   [uri expected]
-  (let [[id version] (db/document-id-version-by-uri uri)
-        [text lang dirty] (db/doc-text-lang-dirty-by-uri uri)
-        opened (db/document-opened-by-uri? uri)]
+  (let [[id version] (db/document-id-version-by-uri (ws/default-conn) uri)
+        [text lang dirty] (db/doc-text-lang-dirty-by-uri (ws/default-conn) uri)
+        opened (db/document-opened-by-uri? (ws/default-conn) uri)]
     (is (some? id) (str "Document exists: " uri))
     (when (:version expected)
       (is (= (:version expected) version) "Version matches"))
@@ -127,7 +128,7 @@
   "Asserts that diagnostics match expected values.
    Can check by URI or check all diagnostics."
   ([expected]
-   (let [actual (db/diagnostics)]
+   (let [actual (db/diagnostics (ws/default-conn))]
      (is (= (count expected) (count actual)) "Diagnostic count matches")
      (doseq [exp expected]
        (is (some #(and (= (:uri exp) (:uri %))
@@ -136,7 +137,7 @@
                  actual)
            (str "Expected diagnostic found: " (:message exp))))))
   ([uri expected]
-   (let [actual (db/diagnostics-by-uri uri)]
+   (let [actual (db/diagnostics-by-uri (ws/default-conn) uri)]
      (is (= (count expected) (count actual)) "Diagnostic count matches for URI")
      (doseq [exp expected]
        (is (some #(and (= (:message exp) (:message %))
@@ -147,7 +148,7 @@
 (defn assert-symbols
   "Asserts that symbols match expected values for a URI."
   [uri expected]
-  (let [actual (db/symbols-by-uri uri)]
+  (let [actual (db/symbols-by-uri (ws/default-conn) uri)]
     (is (= (count expected) (count actual)) "Symbol count matches")
     (doseq [exp expected]
       (is (some #(and (= (:name exp) (:name %))
@@ -158,7 +159,7 @@
 (defn assert-active-uri
   "Asserts that the active URI matches expected."
   [expected-uri]
-  (is (= expected-uri (db/active-uri)) "Active URI matches"))
+  (is (= expected-uri (db/active-uri (ws/default-conn))) "Active URI matches"))
 
 ;; =============================================================================
 ;; Test Data Generators
@@ -372,7 +373,7 @@
 (defn- get-all-document-uris
   "Returns a set of all document URIs in the database."
   []
-  (set (map :uri (db/documents))))
+  (set (map :uri (db/documents (ws/default-conn)))))
 
 (defn snapshot-db-state
   "Captures current database state for later comparison.
@@ -382,9 +383,9 @@
   (let [all-uris (get-all-document-uris)]
     {:documents all-uris
      :document-count (count all-uris)
-     :active-uri (db/active-uri)
+     :active-uri (db/active-uri (ws/default-conn))
      :timestamp (js/Date.now)
-     :dirty-uris (set (filter db/document-dirty-by-uri all-uris))}))
+     :dirty-uris (set (filter #(db/document-dirty-by-uri (ws/default-conn) %) all-uris))}))
 
 (defn assert-db-unchanged
   "Asserts that database state matches a previous snapshot.
@@ -492,7 +493,7 @@
    (wait-for-document-dirty uri expected-dirty? 1000))
   ([uri expected-dirty? timeout-ms]
    (wait-for-condition
-    #(= expected-dirty? (db/document-dirty-by-uri uri))
+    #(= expected-dirty? (db/document-dirty-by-uri (ws/default-conn) uri))
     timeout-ms)))
 
 (defn wait-for-version
@@ -501,7 +502,7 @@
    (wait-for-version uri expected-version 1000))
   ([uri expected-version timeout-ms]
    (wait-for-condition
-    #(= expected-version (db/document-version-by-uri uri))
+    #(= expected-version (db/document-version-by-uri (ws/default-conn) uri))
     timeout-ms)))
 
 ;; =============================================================================
@@ -521,7 +522,7 @@
   (doseq [{:keys [doc diagnostics]} docs-with-diags]
     (create-test-document! doc)
     (when (seq diagnostics)
-      (db/replace-diagnostics-by-uri! (:uri doc) nil diagnostics))))
+      (db/replace-diagnostics-by-uri! (ws/default-conn) (:uri doc) nil diagnostics))))
 
 (defn create-documents-with-symbols!
   "Creates documents with associated symbols."
@@ -530,7 +531,7 @@
     (create-test-document! doc)
     (when (seq symbols)
       (let [flattened (db/flatten-symbols symbols nil (:uri doc))]
-        (db/replace-symbols! (:uri doc) flattened)))))
+        (db/replace-symbols! (ws/default-conn) (:uri doc) flattened)))))
 
 ;; =============================================================================
 ;; Test Isolation Helpers
@@ -540,12 +541,12 @@
   "Runs test function with isolated database state.
    Restores previous state after test completes."
   [f]
-  (let [saved-db @db/conn]
+  (let [saved-db @(ws/default-conn)]
     (try
       (reset-db!)
       (f)
       (finally
-        (d/reset-conn! db/conn saved-db)))))
+        (d/reset-conn! (ws/default-conn) saved-db)))))
 
 (defn with-test-documents
   "Higher-order fixture that creates documents, runs test, then cleans up."

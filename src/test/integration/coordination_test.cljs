@@ -7,8 +7,8 @@
    [clojure.test :refer [deftest is testing use-fixtures async]]
    [clojure.core.async :refer [go <! timeout]]
    [re-frame.core :as rf]
-   [datascript.core :as d]
    [lib.db :as db]
+   [lib.workspace :as ws]
    [lib.debounce :as debounce]
    [lib.query-cache :as qc]
    [app.events :as events]
@@ -22,7 +22,7 @@
 
 (use-fixtures :each
   {:before (fn []
-             (d/reset-conn! db/conn (d/empty-db db/schema))
+             (ws/reset-workspace! @ws/default-workspace)
              (rfh/reset-app-db!)
              (rfh/reset-captured-effects!)
              (debounce/cancel-all)
@@ -49,16 +49,16 @@
                                 :version 1
                                 :dirty false
                                 :opened true})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify initial state via subscription
       (is (= initial-text @(rf/subscribe [:active-content])))
 
       ;; Simulate editor update
-      (db/update-document-text-by-uri! uri updated-text)
+      (db/update-document-text-by-uri! (ws/default-conn) uri updated-text)
 
       ;; Verify database updated
-      (is (= updated-text (db/document-text-by-uri uri)))
+      (is (= updated-text (db/document-text-by-uri (ws/default-conn) uri)))
 
       ;; Verify subscription reflects change
       (is (= updated-text @(rf/subscribe [:active-content]))))))
@@ -69,18 +69,18 @@
       (h/create-test-document! {:uri uri
                                 :text "content"
                                 :dirty false})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify initially clean
-      (is (false? (db/document-dirty-by-uri uri)))
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri)))
 
       ;; Edit makes dirty
-      (db/update-document-text-by-uri! uri "new content")
-      (is (true? (db/document-dirty-by-uri uri)))
+      (db/update-document-text-by-uri! (ws/default-conn) uri "new content")
+      (is (true? (db/document-dirty-by-uri (ws/default-conn) uri)))
 
       ;; Save clears dirty
-      (db/document-saved-by-uri! uri)
-      (is (false? (db/document-dirty-by-uri uri))))))
+      (db/document-saved-by-uri! (ws/default-conn) uri)
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri))))))
 
 ;; =============================================================================
 ;; DB-LSP Sync Tests
@@ -90,10 +90,10 @@
   (testing "LSP diagnostics are stored and retrieved consistently"
     (let [uri "file:///test/lsp-diag-sync.rho"]
       (h/create-test-document! {:uri uri :text "code" :language "rholang"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Add diagnostics (simulating LSP notification)
-      (db/replace-diagnostics-by-uri! uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                        [{:message "Error 1"
                                          :severity 1
                                          :startLine 0 :startChar 0
@@ -113,7 +113,7 @@
   (testing "LSP symbols are stored and retrieved consistently"
     (let [uri "file:///test/lsp-symbol-sync.rho"]
       (h/create-test-document! {:uri uri :text "contract" :language "rholang"})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Add symbols (simulating LSP response)
       (let [symbols (db/flatten-symbols
@@ -124,7 +124,7 @@
                        :selectionRange {:start {:line 0 :character 9}
                                         :end {:line 0 :character 21}}}]
                      nil uri)]
-        (db/replace-symbols! uri symbols))
+        (db/replace-symbols! (ws/default-conn) uri symbols))
 
       ;; Verify retrieval
       (let [syms @(rf/subscribe [:lsp/symbols])]
@@ -141,9 +141,9 @@
 
       ;; Simulate multiple edits
       (dotimes [_ 5]
-        (db/increment-document-version-by-uri! uri))
+        (db/increment-document-version-by-uri! (ws/default-conn) uri))
 
-      (is (= 6 (db/document-version-by-uri uri))))))
+      (is (= 6 (db/document-version-by-uri (ws/default-conn) uri))))))
 
 ;; =============================================================================
 ;; Edit-to-Diagnostics Pipeline Tests
@@ -159,20 +159,20 @@
                                        :language "rholang"
                                        :version 1
                                        :opened true})
-             (db/update-active-uri! uri)
+             (db/update-active-uri! (ws/default-conn) uri)
 
              ;; Step 2: Verify no diagnostics initially
              (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))))
 
              ;; Step 3: Edit document (introduce error)
-             (db/update-document-text-by-uri! uri "invalid { code")
-             (db/increment-document-version-by-uri! uri)
+             (db/update-document-text-by-uri! (ws/default-conn) uri "invalid { code")
+             (db/increment-document-version-by-uri! (ws/default-conn) uri)
 
              ;; Simulate debounced LSP notification delay
              (<! (timeout 50))
 
              ;; Step 4: Simulate LSP publishing diagnostics
-             (db/replace-diagnostics-by-uri! uri nil
+             (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                               [{:message "Syntax error"
                                                 :severity 1
                                                 :startLine 0 :startChar 8
@@ -182,13 +182,13 @@
              (is (= 1 (count @(rf/subscribe [:lsp/diagnostics]))))
 
              ;; Step 6: Fix the error
-             (db/update-document-text-by-uri! uri "valid { code }")
-             (db/increment-document-version-by-uri! uri)
+             (db/update-document-text-by-uri! (ws/default-conn) uri "valid { code }")
+             (db/increment-document-version-by-uri! (ws/default-conn) uri)
 
              (<! (timeout 50))
 
              ;; Step 7: LSP clears diagnostics
-             (db/replace-diagnostics-by-uri! uri nil [])
+             (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil [])
 
              ;; Step 8: Verify diagnostics cleared
              (is (= 0 (count @(rf/subscribe [:lsp/diagnostics])))))
@@ -255,14 +255,14 @@
       (let [result1 (qc/cached-query
                      :test-query
                      [uri]
-                     (fn [] (db/document-text-by-uri uri)))]
+                     (fn [] (db/document-text-by-uri (ws/default-conn) uri)))]
         (is (= "content" result1)))
 
       ;; Second identical query (cache hit)
       (let [result2 (qc/cached-query
                      :test-query
                      [uri]
-                     (fn [] (db/document-text-by-uri uri)))]
+                     (fn [] (db/document-text-by-uri (ws/default-conn) uri)))]
         (is (= "content" result2)))
 
       ;; Verify cache stats
@@ -281,14 +281,14 @@
       ;; cached-query does: (apply make-cache-key query-name args)
       (let [cache-key (apply qc/make-cache-key :doc-text [uri])]
         ;; Cache the query
-        (qc/cached-query :doc-text [uri] (fn [] (db/document-text-by-uri uri)))
+        (qc/cached-query :doc-text [uri] (fn [] (db/document-text-by-uri (ws/default-conn) uri)))
 
         ;; Invalidate cache
         (qc/invalidate! cache-key)
 
         ;; Next query should be a miss
         (qc/reset-stats!)
-        (qc/cached-query :doc-text [uri] (fn [] (db/document-text-by-uri uri)))
+        (qc/cached-query :doc-text [uri] (fn [] (db/document-text-by-uri (ws/default-conn) uri)))
 
         (let [stats (qc/get-stats)]
           (is (= 1 (:misses stats)) "Query after invalidation is a miss"))))))
@@ -309,12 +309,12 @@
                                   :opened true}))
 
       ;; Add diagnostics to some
-      (db/replace-diagnostics-by-uri! (first uris) nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) (first uris) nil
                                        [{:message "Error"
                                          :severity 1
                                          :startLine 0 :startChar 0
                                          :endLine 0 :endChar 5}])
-      (db/replace-diagnostics-by-uri! (second uris) nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) (second uris) nil
                                        [{:message "Warning"
                                          :severity 2
                                          :startLine 0 :startChar 0
@@ -322,7 +322,7 @@
 
       ;; Switch between documents rapidly and verify consistency
       (doseq [uri uris]
-        (db/update-active-uri! uri)
+        (db/update-active-uri! (ws/default-conn) uri)
         ;; Each switch should show correct active content
         (let [idx (.indexOf uris uri)]
           (is (= (str "content " idx) @(rf/subscribe [:active-content])))))
@@ -334,22 +334,22 @@
   (testing "Subscriptions react immediately to database changes"
     (let [uri "file:///test/reactive.rho"]
       (h/create-test-document! {:uri uri :text "initial" :language "rholang" :version 1})
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify initial state via subscription
       (is (= "initial" @(rf/subscribe [:active-content])))
 
       ;; Change text and verify subscription reflects change
-      (db/update-document-text-by-uri! uri "changed")
+      (db/update-document-text-by-uri! (ws/default-conn) uri "changed")
       (is (= "changed" @(rf/subscribe [:active-content])))
 
       ;; Verify version changes via db function
-      (db/increment-document-version-by-uri! uri)
-      (is (= 2 (db/document-version-by-uri uri)))
+      (db/increment-document-version-by-uri! (ws/default-conn) uri)
+      (is (= 2 (db/document-version-by-uri (ws/default-conn) uri)))
 
       ;; Verify dirty flag changes via db function
-      (db/document-saved-by-uri! uri)
-      (is (false? (db/document-dirty-by-uri uri))))))
+      (db/document-saved-by-uri! (ws/default-conn) uri)
+      (is (false? (db/document-dirty-by-uri (ws/default-conn) uri))))))
 
 ;; =============================================================================
 ;; Event Handler Coordination Tests
@@ -380,7 +380,7 @@
       (h/create-test-document! {:uri uri :text "code" :language "rholang"})
 
       ;; Add diagnostics
-      (db/replace-diagnostics-by-uri! uri nil
+      (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil
                                        [{:message "Error"
                                          :severity 1
                                          :startLine 0 :startChar 0
@@ -395,20 +395,20 @@
                        :selectionRange {:start {:line 0 :character 0}
                                         :end {:line 0 :character 6}}}]
                      nil uri)]
-        (db/replace-symbols! uri symbols))
+        (db/replace-symbols! (ws/default-conn) uri symbols))
 
-      (db/update-active-uri! uri)
+      (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify data exists
       (is (= 1 (count @(rf/subscribe [:lsp/diagnostics]))))
       (is (= 1 (count @(rf/subscribe [:lsp/symbols]))))
 
       ;; Delete document
-      (let [doc-id (db/document-id-by-uri uri)]
-        (db/delete-document-by-id! doc-id))
+      (let [doc-id (db/document-id-by-uri (ws/default-conn) uri)]
+        (db/delete-document-by-id! (ws/default-conn) doc-id))
 
       ;; Document should be gone
-      (is (nil? (db/document-id-by-uri uri))))))
+      (is (nil? (db/document-id-by-uri (ws/default-conn) uri))))))
 
 (deftest debounce-cleanup-on-document-close
   (async done

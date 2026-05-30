@@ -93,7 +93,7 @@
 ;; Connection Manager Record
 ;; =============================================================================
 
-(defrecord ConnectionManager [state-atom events config]
+(defrecord ConnectionManager [state-atom events conn config]
   p/ILspClient
 
   ;; === Connection Management ===
@@ -117,7 +117,7 @@
               (swap! state-atom assoc-in [:lsp language :state] :connecting)
 
               ;; Attempt connection with timeout
-              (let [connect-ch (lsp/connect language config state-atom events)
+              (let [connect-ch (lsp/connect conn language config state-atom events)
                     timeout-ch (timeout init-timeout)
                     [result port] (alts! [connect-ch timeout-ch])]
                 (cond
@@ -162,7 +162,7 @@
   (connect-supplier [_this language url]
     ;; Returns the exact resource supplier lib.core feeds to lib.state/load-resource,
     ;; preserving the resource-managed connect flow (no state-machine adoption).
-    #(lsp/connect language {:url url} state-atom events))
+    #(lsp/connect conn language {:url url} state-atom events))
 
   ;; === Document Lifecycle Notifications ===
 
@@ -239,12 +239,13 @@
    Parameters:
    - state-atom: Atom holding editor state including LSP state
    - events: RxJS Subject for event emission
+   - conn: the workspace DataScript conn the LSP handlers transact against
    - config: Optional configuration map overriding DEFAULT-CONFIG"
-  ([state-atom events]
-   (make-connection-manager state-atom events {}))
-  ([state-atom events config]
+  ([state-atom events conn]
+   (make-connection-manager state-atom events conn {}))
+  ([state-atom events conn config]
    (let [merged-config (merge DEFAULT-CONFIG config)]
-     (->ConnectionManager state-atom events merged-config))))
+     (->ConnectionManager state-atom events conn merged-config))))
 
 (defn connected?
   "Returns true if the connection manager is connected for the given language.
