@@ -110,11 +110,11 @@
                       ;; Per-editor LSP client (ILspClient). Constructed once over this
                       ;; editor's state-atom + events + workspace conn; routes all LSP
                       ;; calls through the protocol.
-                      client (react/useMemo (fn [] (cm/make-connection-manager state-atom events conn)) #js [])
+                      client (react/useMemo (fn [] (cm/make-connection-manager (:lsp workspace) events conn)) #js [])
                       ;; Per-editor context bundling the deps the imperative handle methods need.
                       ctx (react/useMemo (fn [] {:state-atom state-atom :view-ref view-ref :events events
                                                  :client client :conn conn :workspace workspace :pane-id pane-id
-                                                 :lsp-atom state-atom}) #js [])
+                                                 :lsp-atom (:lsp workspace)}) #js [])
                       on-content-change (:on-content-change props)
                       container-ref (react/useRef nil)]
                   (react/useImperativeHandle
@@ -179,7 +179,7 @@
                   (react/useEffect
                    (fn []
                      (let [shutdown-all (fn []
-                                          (doseq [[lang _] (:lsp @state-atom)]
+                                          (doseq [[lang _] (:lsp @(:lsp workspace))]
                                             (p/request-shutdown! client lang)))]
                        (js/window.addEventListener "beforeunload" shutdown-all)
                        (fn []
@@ -217,7 +217,7 @@
                          ;; already exist in the workspace) — declarative file selection for
                          ;; split-pane setups. Editors without :uri are driven via the handle.
                          (when prop-uri
-                           (rt/activate-document prop-uri state-atom view-ref events client conn))
+                           (rt/activate-document prop-uri state-atom view-ref events client conn workspace))
                          (fn []
                            (log/info "Editor: Destroying EditorView")
                            (swap! state-atom assoc :mounted? false)

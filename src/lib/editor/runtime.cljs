@@ -162,7 +162,8 @@
     - Phase 2: LSP-aware lazy text serialization
     - Phase 3: Cached active URI within handler"
   [state-atom events on-content-change view-ref client conn workspace pane-id]
-  (let [update-ext (.. EditorView -updateListener
+  (let [lsp-atom (:lsp workspace)   ; per-workspace LSP state + per-(ws,uri) didChange accumulator
+        update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              ;; EXP-009 Phase 3: Cache URI once per handler invocation
                              (let [uri (:active-uri @state-atom)]
@@ -201,7 +202,7 @@
                                                      (fn [fromA toA _fromB _toB inserted]
                                                        (let [start-pos (offset->pos old-doc fromA false)
                                                              end-pos (offset->pos old-doc toA false)]
-                                                         (swap! state-atom update-in [:pending-lsp-changes uri] (fnil conj [])
+                                                         (swap! lsp-atom update-in [:pending-lsp-changes uri] (fnil conj [])
                                                                 {:range {:start {:line (:line start-pos)
                                                                                  :character (:column start-pos)}
                                                                          :end {:line (:line end-pos)
@@ -261,24 +262,29 @@
                                    ;; LSP notification (still debounced separately for server rate limiting)
                                    (when lsp-connected?
                                      (when-not from-api?
-                                       ;; EXP-011 Phase 2: Use incremental sync when available
+                                       ;; EXP-011 Phase 2: Use incremental sync when available.
+                                       ;; Phase 5b: keyed per-(workspace,uri) and reading the
+                                       ;; per-workspace accumulator, so edits to one file from
+                                       ;; ANY pane coalesce into ONE debounced didChange with ONE
+                                       ;; monotonic version (the conn-counter). Different files do
+                                       ;; not stomp each other (the prior constant key was a bug).
                                        (debounce/debounced-call
-                                        :lsp-did-change
+                                        [:lsp-did-change uri]
                                         (fn []
                                           (let [uri (:active-uri @state-atom) [text lang] (when uri (db/doc-text-lang-by-uri conn uri))]
                                             (when (and uri text lang)
                                               (let [version (db/inc-document-version-by-uri! conn uri)
-                                                    changes (get-in @state-atom [:pending-lsp-changes uri])
+                                                    changes (get-in @lsp-atom [:pending-lsp-changes uri])
                                                     incremental? (and (seq changes)
-                                                                      (get-in @state-atom [:lsp lang :incremental-sync?]))]
+                                                                      (get-in @lsp-atom [:lsp lang :incremental-sync?]))]
                                                 (if incremental?
                                                   (do
                                                     (p/notify-did-change-incremental! client lang uri changes version)
-                                                    (swap! state-atom update :pending-lsp-changes dissoc uri))
+                                                    (swap! lsp-atom update :pending-lsp-changes dissoc uri))
                                                   ;; Fallback to full sync - clear any accumulated changes
                                                   (do
                                                     (p/notify-did-change! client lang uri text version)
-                                                    (swap! state-atom update :pending-lsp-changes dissoc uri)))))))
+                                                    (swap! lsp-atom update :pending-lsp-changes dissoc uri)))))))
                                         150  ; Reduced from 200ms
                                         {:max-wait 500})))))))))
         default-exts [(lineNumbers)
@@ -299,10 +305,12 @@
   "Ensures the document is opened in LSP if configured, connecting if necessary.
   Sends didOpen and requests symbols on success, emitting events for LSP actions.
   Waits for an ongoing connection if one is in progress."
-  [lang uri state-atom events client conn]
-  (let [[text version] (db/doc-text-version-by-uri conn uri)]
+  [lang uri state-atom events client conn workspace]
+  (let [[text version] (db/doc-text-version-by-uri conn uri)
+        lsp-atom (:lsp workspace)          ; per-workspace LSP connection state (shared by panes)
+        res-atom (:resources workspace)]   ; per-workspace resource/socket store
     (when-let [lsp-url (get-in @state-atom [:languages lang :lsp-url])]
-      (let [lsp-state (get-in @state-atom [:lsp lang])
+      (let [lsp-state (get-in @lsp-atom [:lsp lang])
             connected? (:connected? lsp-state false)
             initialized? (:initialized? lsp-state false)
             connecting? (:connecting? lsp-state false)]
@@ -331,7 +339,7 @@
                                                     :language lang
                                                     :opened true}))
               ;; Not connected or initialized; check if connecting
-              (let [existing (lib.state/get-resource-promise :lsp lang)]
+              (let [existing (lib.state/get-resource-promise res-atom :lsp lang)]
                 (if connecting?
                   ;; Wait for existing connection channel
                   (do
@@ -364,7 +372,7 @@
                                                                 :opened true}))))))
                   ;; Start new connection
                   (let [supplier (p/connect-supplier client lang lsp-url)
-                        ch (lib.state/load-resource :lsp lang supplier)
+                        ch (lib.state/load-resource res-atom :lsp lang supplier)
                         res (<! ch)]
                     (if (and (seqable? res) (= :error (first res)))
                       (do
@@ -391,6 +399,12 @@
                                                               :content text
                                                               :language lang
                                                               :opened true}))))))))
+            ;; Phase 5b: populate THIS pane's hot-path didChange cache once the file is
+            ;; open at the workspace level — regardless of which pane sent the didOpen.
+            ;; Without this, a 2nd pane that activates an already-open file would never
+            ;; set its cache and so would never accumulate/send its own keystroke didChanges.
+            (when (db/document-opened-by-uri? conn uri)
+              (swap! state-atom assoc-in [:lsp-document-opened uri] true))
             [:ok nil]
             (catch js/Error error
               (when (and @state-atom (:mounted? @state-atom))
@@ -407,7 +421,7 @@
   "Activates the document with the given URI, loading content and re-initializing syntax if language changes.
   Emits events for document activation and LSP open if necessary.
   EXP-008: Uses centralized debounce coordination to handle rapid calls."
-  [uri state-atom view-ref events client conn]
+  [uri state-atom view-ref events client conn workspace]
   (debounce/debounced-call
    [:activate-document uri]
    (fn []
@@ -430,7 +444,7 @@
              (let [lsp-ch (go
                             (try
                               (if (get-in @state-atom [:languages new-lang :lsp-url])
-                                (<! (ensure-lsp-document-opened new-lang uri state-atom events client conn))
+                                (<! (ensure-lsp-document-opened new-lang uri state-atom events client conn workspace))
                                 (do
                                   (db/document-opened-by-uri! conn uri)
                                   [:ok nil]))

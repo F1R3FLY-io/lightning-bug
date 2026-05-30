@@ -31,7 +31,7 @@
   "Builds the imperative #js handle for the Editor ref. ctx is the per-editor context
   {:state-atom :view-ref :events :client}; ready is the current readiness flag."
   [ctx ready]
-  (let [{:keys [state-atom view-ref events client conn lsp-atom]} ctx]
+  (let [{:keys [state-atom view-ref events client conn lsp-atom workspace]} ctx]
                      #js {;; Returns the full current state (workspace, diagnostics, symbols, etc.).
                           ;; Example: (.getState editor)
                           :getState (fn []
@@ -184,7 +184,7 @@
                                                                           :dirty (boolean changed?)
                                                                           :opened false}]))
                                                 (when make-active
-                                                  (activate-document uri state-atom view-ref events client conn))
+                                                  (activate-document uri state-atom view-ref events client conn workspace))
                                                 (emit-event events "document-open" {:uri uri
                                                                                     :content effective-text
                                                                                     :language effective-lang
@@ -217,7 +217,7 @@
                                                  (db/delete-document-by-id! conn id)
                                                  (when (= uri (:active-uri @state-atom))
                                                    (if-let [next-uri (db/first-document-uri conn)]
-                                                     (activate-document next-uri state-atom view-ref events client conn)
+                                                     (activate-document next-uri state-atom view-ref events client conn workspace)
                                                      (emit-event events "document-open" {:uri nil
                                                                                          :content ""
                                                                                          :language "text"
@@ -270,7 +270,7 @@
                                                                   (throw (js/Error. (str "(.renameDocument this " new-file-or-uri-js " " old-file-or-uri-js ") failed") #js {:cause (second res)})))
                                                                 (throw (js/Error. (str "(syntax/init-syntax editor-view state-atom) returned nothing in call to (.renameDocument editor " new-file-or-uri-js " " old-file-or-uri-js ") failed"))))))
                                                           (when-not (db/document-opened-by-uri? conn new-uri)
-                                                            (ensure-lsp-document-opened new-lang new-uri state-atom events client conn))
+                                                            (ensure-lsp-document-opened new-lang new-uri state-atom events client conn workspace))
                                                           (emit-event events "document-rename" {:old-uri old-uri
                                                                                                 :new-uri new-uri}))))))
                                                 [:ok nil]
@@ -479,7 +479,7 @@
                                                 (let [uri (normalize-uri state-atom file-or-uri-js (:default-protocol @state-atom))]
                                                   (if (db/document-id-by-uri conn uri)
                                                     (when (not= uri (:active-uri @state-atom))
-                                                      (activate-document uri state-atom view-ref events client conn))
+                                                      (activate-document uri state-atom view-ref events client conn workspace))
                                                     (do
                                                       (emit-event events "error" {:message "Document not found"
                                                                                   :operation "activateDocument"
