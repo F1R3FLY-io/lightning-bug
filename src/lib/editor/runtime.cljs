@@ -17,6 +17,7 @@
    [lib.editor.diagnostics :as diagnostics]
    [lib.editor.annotations :refer [external-set-annotation]]
    [lib.editor.syntax :as syntax]
+   [lib.workspace.doc-sync :as doc-sync]
    [domain.protocols :as p]
    [lib.state]
    [lib.utils :refer [offset->pos]]
@@ -160,7 +161,7 @@
     - Phase 1: Debounced DataScript text sync
     - Phase 2: LSP-aware lazy text serialization
     - Phase 3: Cached active URI within handler"
-  [state-atom events on-content-change view-ref client conn]
+  [state-atom events on-content-change view-ref client conn workspace pane-id]
   (let [update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
                              ;; EXP-009 Phase 3: Cache URI once per handler invocation
@@ -184,6 +185,13 @@
                                        lsp-connected? (get-in @state-atom [:lsp-document-opened uri] false)
                                        from-api? (some #(.annotation % external-set-annotation) (.-transactions u))]
                                    (log/trace (str "Document changed for uri: " uri ", length:" doc-length))
+                                   ;; Phase 4: propagate this user edit to other panes viewing
+                                   ;; the same file. Skipped when API-driven (echo guard) or when
+                                   ;; no second pane is subscribed (has-peers? avoids serialization).
+                                   (when (and (not from-api?) (doc-sync/has-peers? workspace uri))
+                                     (doc-sync/publish-delta! workspace uri
+                                                              {:origin pane-id
+                                                               :changes (.toJSON (.-changes u))}))
                                    ;; EXP-011 Phase 2b: Accumulate incremental changes for LSP
                                    ;; Only accumulate for user edits (not API calls) when LSP is connected
                                    (when (and lsp-connected? (not from-api?))

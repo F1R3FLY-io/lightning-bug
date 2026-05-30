@@ -104,3 +104,29 @@ and files").
 - New test `db_test/projects-crud-and-linking` (create/query/auto-link/explicit-link).
 
 **Results:** test:debug **502/502**, clj-kondo 0/0, eastwood 0/0, test:types clean.
+
+## Phase 4 — Reactive cross-pane propagation — DONE
+
+**Goal:** editors viewing the SAME file sync live (Google-Docs-style); each keeps its
+own cursor; edits still persist to the backend exactly as before.
+
+- Workspace gains `:doc-streams` (atom). New ns `lib.workspace.doc-sync`: ref-counted
+  per-(workspace,file) RxJS `Subject` with `get-or-create-stream!`/`release-stream!`/
+  `has-peers?`/`publish-delta!`/`subscribe-pane`/`apply-remote-delta!`.
+- **Echo-suppression (double-guarded):** each delta carries its origin `pane-id` and a
+  subscriber ignores its own emissions; AND a receiver applies the remote delta annotated
+  with `external-set-annotation`, so its own updateListener treats it as API-driven and
+  neither re-publishes nor re-runs LSP/DataScript-as-user-edit.
+- `lib.core`: a stable per-pane `pane-id`; `ctx` gains `:workspace`/`:pane-id`; a subscribe
+  `useEffect` (keyed on `[active-uri workspace]`) applies remote deltas to this pane's view
+  via `ChangeSet.fromJSON` + `selection.map` (cursor preserved) + `scrollIntoView false`,
+  and releases the ref-counted stream on cleanup.
+- `lib.editor.runtime`: publishes the keystroke `ChangeSet` delta on the origin, guarded by
+  `(not from-api?)` AND `has-peers?` — so a **single editor serializes nothing** (zero
+  hot-path cost); the DataScript idle-sync + LSP didChange paths are unchanged.
+- Ordering = single-threaded synchronous fan-out in publish order ⇒ convergence (no OT/CRDT).
+- Unit tests `doc_sync_test`: ref-counting/has-peers, echo-suppression + seq ordering,
+  apply-remote-delta. The full two-editor integration test is Phase 8 (multi_pane_test).
+
+**Results:** test:debug **505/505**, clj-kondo 0/0, eastwood 0/0, test:types clean.
+Single-editor hot path unchanged (has-peers? gate); benchmark unaffected (single-editor).

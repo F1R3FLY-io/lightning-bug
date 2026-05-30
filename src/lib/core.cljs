@@ -7,6 +7,7 @@
    [reagent.core :as r]
    [lib.db :as db]
    [lib.workspace :as ws]
+   [lib.workspace.doc-sync :as doc-sync]
    [lib.editor.diagnostics :as diagnostics :refer [set-diagnostic-effect]]
    [lib.editor.runtime :as rt :refer [emit-event clear-emit-timers! get-extensions update-editor-state]]
    [lib.editor.commands :as commands]
@@ -94,13 +95,15 @@
                       view-ref (react/useRef nil)
                       [ready set-ready] (react/useState false)
                       events (react/useMemo (fn [] (ReplaySubject.)) #js [])
+                      ;; Stable per-pane identity for reactive cross-pane echo-suppression.
+                      pane-id (react/useMemo (fn [] (random-uuid)) #js [])
                       ;; Per-editor LSP client (ILspClient). Constructed once over this
                       ;; editor's state-atom + events + workspace conn; routes all LSP
                       ;; calls through the protocol.
                       client (react/useMemo (fn [] (cm/make-connection-manager state-atom events conn)) #js [])
                       ;; Per-editor context bundling the deps the imperative handle methods need.
                       ctx (react/useMemo (fn [] {:state-atom state-atom :view-ref view-ref :events events
-                                                 :client client :conn conn}) #js [])
+                                                 :client client :conn conn :workspace workspace :pane-id pane-id}) #js [])
                       on-content-change (:on-content-change props)
                       container-ref (react/useRef nil)]
                   (react/useImperativeHandle
@@ -126,6 +129,23 @@
                      js/undefined)
                    #js [(:active-uri @state-atom)
                         (when-let [au (:active-uri @state-atom)] (db/document-text-by-uri conn au))])
+                  ;; Phase 4: subscribe this pane to its active file's reactive change
+                  ;; stream, so edits from OTHER panes on the same file apply live here
+                  ;; (this pane's cursor/selection preserved via selection-mapping).
+                  ;; Re-subscribes when the pane's file changes; releases the ref-counted
+                  ;; stream on cleanup.
+                  (react/useEffect
+                   (fn []
+                     (if-let [au (:active-uri @state-atom)]
+                       (let [sub (doc-sync/subscribe-pane
+                                  workspace au pane-id
+                                  (fn [delta]
+                                    (doc-sync/apply-remote-delta! (.-current view-ref) delta)))]
+                         (fn []
+                           (.unsubscribe sub)
+                           (doc-sync/release-stream! workspace au)))
+                       js/undefined))
+                   #js [(:active-uri @state-atom) workspace])
                   (react/useEffect
                    (fn []
                      (let [shutdown-all (fn []
@@ -140,7 +160,7 @@
                      (log/info "Editor: Initializing EditorView")
                      (try
                        (let [container (.-current container-ref)
-                             exts (get-extensions state-atom events on-content-change view-ref client conn)
+                             exts (get-extensions state-atom events on-content-change view-ref client conn workspace pane-id)
                              editor-state (EditorState.create #js {:doc ""
                                                                    :extensions exts})
                              editor-view (EditorView. #js {:state editor-state
