@@ -151,7 +151,19 @@
     ;; No need for double debouncing here
     (emit-event events "selection-change" {:cursor cursor-pos
                                            :selection sel
-                                           :uri uri})))
+                                            :uri uri})))
+
+(defn- clear-visible-diagnostics!
+  "Clears diagnostics that are visible for `uri` after a local edit invalidates
+  them. The workspace LSP event fan-out reaches every pane showing the file."
+  [conn workspace uri]
+  (when (seq (db/diagnostics-by-uri conn uri))
+    (db/replace-diagnostics-by-uri! conn uri nil [])
+    (.next (:lsp-events workspace)
+           (clj->js {:type "diagnostics"
+                     :data []
+                     :uri uri
+                     :version nil}))))
 
 (defn get-extensions
   "Returns the array of CodeMirror extensions, including dynamic syntax compartment,
@@ -189,6 +201,8 @@
                                    ;; Phase 4: propagate this user edit to other panes viewing
                                    ;; the same file. Skipped when API-driven (echo guard) or when
                                    ;; no second pane is subscribed (has-peers? avoids serialization).
+                                   (when-not from-api?
+                                     (clear-visible-diagnostics! conn workspace uri))
                                    (when (and (not from-api?) (doc-sync/has-peers? workspace uri))
                                      (doc-sync/publish-delta! workspace uri
                                                               {:origin pane-id

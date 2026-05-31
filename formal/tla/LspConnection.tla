@@ -1,0 +1,204 @@
+------------------------------- MODULE LspConnection -------------------------------
+EXTENDS Naturals, FiniteSets
+
+\* Abstract model of src/lib/lsp/fsm.cljs plus the browser WebSocket events in
+\* src/lib/lsp/client.cljs and src/lib/lsp/connection_manager.cljs.
+
+\* @type: Set(Str);
+CONSTANTS Langs
+\* @type: Int;
+CONSTANTS MaxPendingId
+\* @type: Int;
+CONSTANTS MaxReconnects
+
+States ==
+  {"disconnected", "connecting", "connected", "initializing",
+   "initialized", "disconnecting", "error"}
+
+AllowedTransition ==
+  {<<"disconnected", "connecting">>,
+   <<"connecting", "connected">>,
+   <<"connecting", "error">>,
+   <<"connecting", "disconnected">>,
+   <<"connected", "initializing">>,
+   <<"connected", "disconnecting">>,
+   <<"connected", "error">>,
+   <<"initializing", "initialized">>,
+   <<"initializing", "error">>,
+   <<"initializing", "disconnected">>,
+   <<"initialized", "disconnecting">>,
+   <<"initialized", "error">>,
+   <<"initialized", "disconnected">>,
+   <<"disconnecting", "disconnected">>,
+   <<"error", "disconnected">>,
+   <<"error", "connecting">>}
+
+CanTransition(from, to) == <<from, to>> \in AllowedTransition
+ConnectedState(s) == s \in {"connected", "initializing", "initialized"}
+InitializedState(s) == s = "initialized"
+ConnectingState(s) == s = "connecting"
+
+\* @type: Str -> Str;
+VARIABLE state
+\* @type: Str -> Bool;
+VARIABLE connected
+\* @type: Str -> Bool;
+VARIABLE isInitialized
+\* @type: Str -> Bool;
+VARIABLE connecting
+\* @type: Str -> Bool;
+VARIABLE reachable
+\* @type: Str -> Set(Int);
+VARIABLE pending
+\* @type: Str -> Int;
+VARIABLE nextId
+\* @type: Str -> Bool;
+VARIABLE shuttingDown
+\* @type: Str -> Int;
+VARIABLE reconnects
+
+vars == <<state, connected, isInitialized, connecting, reachable,
+          pending, nextId, shuttingDown, reconnects>>
+
+FlagsFor(s) ==
+  [connected |-> ConnectedState(s),
+   isInitialized |-> InitializedState(s),
+   connecting |-> ConnectingState(s),
+   reachable |-> ConnectedState(s)]
+
+SetLangState(l, s) ==
+  /\ state' = [state EXCEPT ![l] = s]
+  /\ connected' = [connected EXCEPT ![l] = FlagsFor(s).connected]
+  /\ isInitialized' = [isInitialized EXCEPT ![l] = FlagsFor(s).isInitialized]
+  /\ connecting' = [connecting EXCEPT ![l] = FlagsFor(s).connecting]
+  /\ reachable' = [reachable EXCEPT ![l] = FlagsFor(s).reachable]
+
+Init ==
+  /\ state = [l \in Langs |-> "disconnected"]
+  /\ connected = [l \in Langs |-> FALSE]
+  /\ isInitialized = [l \in Langs |-> FALSE]
+  /\ connecting = [l \in Langs |-> FALSE]
+  /\ reachable = [l \in Langs |-> FALSE]
+  /\ pending = [l \in Langs |-> {}]
+  /\ nextId = [l \in Langs |-> 1]
+  /\ shuttingDown = [l \in Langs |-> FALSE]
+  /\ reconnects = [l \in Langs |-> 0]
+
+StartConnect(l) ==
+  /\ state[l] \in {"disconnected", "error"}
+  /\ reconnects[l] = 0
+  /\ CanTransition(state[l], "connecting")
+  /\ SetLangState(l, "connecting")
+  /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
+  /\ UNCHANGED <<pending, nextId, reconnects>>
+
+OpenSocketAndInitialize(l) ==
+  /\ state[l] = "connecting"
+  /\ nextId[l] <= MaxPendingId
+  /\ SetLangState(l, "initializing")
+  /\ pending' = [pending EXCEPT ![l] = @ \cup {nextId[l]}]
+  /\ nextId' = [nextId EXCEPT ![l] = @ + 1]
+  /\ UNCHANGED <<shuttingDown, reconnects>>
+
+InitializeResponse(l) ==
+  /\ state[l] = "initializing"
+  /\ pending[l] # {}
+  /\ \E id \in pending[l]:
+       /\ pending' = [pending EXCEPT ![l] = @ \ {id}]
+       /\ SetLangState(l, "initialized")
+  /\ UNCHANGED <<nextId, shuttingDown, reconnects>>
+
+Request(l) ==
+  /\ state[l] = "initialized"
+  /\ nextId[l] <= MaxPendingId
+  /\ pending' = [pending EXCEPT ![l] = @ \cup {nextId[l]}]
+  /\ nextId' = [nextId EXCEPT ![l] = @ + 1]
+  /\ UNCHANGED <<state, connected, isInitialized, connecting, reachable,
+                shuttingDown, reconnects>>
+
+Response(l) ==
+  /\ pending[l] # {}
+  /\ \E id \in pending[l]:
+       pending' = [pending EXCEPT ![l] = @ \ {id}]
+  /\ UNCHANGED <<state, connected, isInitialized, connecting, reachable,
+                nextId, shuttingDown, reconnects>>
+
+StartShutdown(l) ==
+  /\ state[l] \in {"connected", "initializing", "initialized"}
+  /\ CanTransition(state[l], "disconnecting")
+  /\ SetLangState(l, "disconnecting")
+  /\ shuttingDown' = [shuttingDown EXCEPT ![l] = TRUE]
+  /\ UNCHANGED <<pending, nextId, reconnects>>
+
+ShutdownClosed(l) ==
+  /\ state[l] = "disconnecting"
+  /\ CanTransition("disconnecting", "disconnected")
+  /\ SetLangState(l, "disconnected")
+  /\ pending' = [pending EXCEPT ![l] = {}]
+  /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
+  /\ UNCHANGED <<nextId, reconnects>>
+
+SocketError(l) ==
+  /\ state[l] \in {"connecting", "connected", "initializing", "initialized"}
+  /\ CanTransition(state[l], "error")
+  /\ SetLangState(l, "error")
+  /\ pending' = [pending EXCEPT ![l] = {}]
+  /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
+  /\ UNCHANGED <<nextId, reconnects>>
+
+UnexpectedClose(l) ==
+  /\ state[l] \in {"connected", "initializing", "initialized"}
+  /\ shuttingDown[l] = FALSE
+  /\ CanTransition(state[l], "disconnected")
+  /\ SetLangState(l, "disconnected")
+  /\ pending' = [pending EXCEPT ![l] = {}]
+  /\ reconnects' = [reconnects EXCEPT ![l] = IF @ < MaxReconnects THEN @ + 1 ELSE @]
+  /\ UNCHANGED <<nextId, shuttingDown>>
+
+Reconnect(l) ==
+  /\ state[l] = "disconnected"
+  /\ reconnects[l] > 0
+  /\ CanTransition("disconnected", "connecting")
+  /\ SetLangState(l, "connecting")
+  /\ reconnects' = [reconnects EXCEPT ![l] = @ - 1]
+  /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
+  /\ UNCHANGED <<pending, nextId>>
+
+Next ==
+  \/ \E l \in Langs:
+       StartConnect(l) \/ OpenSocketAndInitialize(l) \/ InitializeResponse(l)
+       \/ Request(l) \/ Response(l) \/ StartShutdown(l) \/ ShutdownClosed(l)
+       \/ SocketError(l) \/ UnexpectedClose(l) \/ Reconnect(l)
+  \/ UNCHANGED vars
+
+Spec == Init /\ [][Next]_vars
+
+TypeOK ==
+  /\ state \in [Langs -> States]
+  /\ connected \in [Langs -> BOOLEAN]
+  /\ isInitialized \in [Langs -> BOOLEAN]
+  /\ connecting \in [Langs -> BOOLEAN]
+  /\ reachable \in [Langs -> BOOLEAN]
+  /\ pending \in [Langs -> SUBSET (1..MaxPendingId)]
+  /\ nextId \in [Langs -> 1..(MaxPendingId + 1)]
+  /\ shuttingDown \in [Langs -> BOOLEAN]
+  /\ reconnects \in [Langs -> 0..MaxReconnects]
+
+FlagConsistency ==
+  \A l \in Langs:
+    /\ connected[l] = ConnectedState(state[l])
+    /\ isInitialized[l] = InitializedState(state[l])
+    /\ connecting[l] = ConnectingState(state[l])
+    /\ reachable[l] = ConnectedState(state[l])
+
+InitializedImpliesConnected ==
+  \A l \in Langs: isInitialized[l] => connected[l]
+
+PendingOnlyWhileLive ==
+  \A l \in Langs:
+    pending[l] # {} => state[l] \in {"initializing", "initialized", "disconnecting"}
+
+GracefulShutdownDoesNotReconnect ==
+  \A l \in Langs: shuttingDown[l] => reconnects[l] = 0
+
+================================================================================

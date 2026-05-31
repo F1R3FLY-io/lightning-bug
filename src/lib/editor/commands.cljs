@@ -27,6 +27,25 @@
         (str (or default-protocol "inmemory://") file-or-uri)))
     (:active-uri @state-atom)))  ;; Returns nil if no active URI
 
+(defn- first-other-document-uri [conn uri]
+  (first (remove #(= uri %) (map :uri (db/documents conn)))))
+
+(defn- clear-pane-document! [state-atom view-ref events conn uri]
+  (swap! state-atom assoc :active-uri nil :cursor {:line 1 :column 1} :selection nil)
+  (when (= uri (db/active-uri conn))
+    (db/reset-active-uri! conn))
+  (when-let [^js editor-view (.-current view-ref)]
+    (let [^js editor-state (.-state editor-view)
+          ^js doc (.-doc editor-state)]
+      (.dispatch editor-view #js {:changes #js {:from 0
+                                                :to (.-length doc)
+                                                :insert ""}
+                                  :annotations (.of external-set-annotation true)})))
+  (emit-event events "document-open" {:uri nil
+                                      :content ""
+                                      :language "text"
+                                      :activated true}))
+
 (defn build-handle
   "Builds the imperative #js handle for the Editor ref. ctx is the per-editor context
   {:state-atom :view-ref :events :client}; ready is the current readiness flag."
@@ -207,21 +226,31 @@
                                              (when-let [uri (normalize-uri state-atom file-or-uri-js (:default-protocol @state-atom))]
                                                (log/info "Closing document:" uri)
                                                (let [[id lang opened?] (db/document-id-lang-opened-by-uri conn uri)]
-                                                 (when opened?
-                                                   (p/notify-did-close! client lang uri)
-                                                   (emit-event events "lsp-message" {:method "textDocument/didClose"
-                                                                                     :lang lang
-                                                                                     :params {:textDocument {:uri uri}}})
-                                                   ;; EXP-010 Phase 3: Clear cache on close
-                                                   (swap! state-atom update :lsp-document-opened dissoc uri))
-                                                 (db/delete-document-by-id! conn id)
-                                                 (when (= uri (:active-uri @state-atom))
-                                                   (if-let [next-uri (db/first-document-uri conn)]
-                                                     (activate-document next-uri state-atom view-ref events client conn workspace)
-                                                     (emit-event events "document-open" {:uri nil
-                                                                                         :content ""
-                                                                                         :language "text"
-                                                                                         :activated true})))
+                                                 (when-not id
+                                                   (throw (js/Error. (str "Document not found: " uri))))
+                                                 (let [stream-ref-count (get-in @(:doc-streams workspace) [uri :ref-count] 0)
+                                                       this-pane-active? (= uri (:active-uri @state-atom))
+                                                       shared-with-peer? (if this-pane-active?
+                                                                           (> stream-ref-count 1)
+                                                                           (pos? stream-ref-count))]
+                                                   ;; Closing one pane in a split view must not delete the shared
+                                                   ;; workspace document or send didClose while another pane still
+                                                   ;; has the same URI active.
+                                                   (when (and opened? (not shared-with-peer?))
+                                                     (p/notify-did-close! client lang uri)
+                                                     (emit-event events "lsp-message" {:method "textDocument/didClose"
+                                                                                       :lang lang
+                                                                                       :params {:textDocument {:uri uri}}})
+                                                     ;; EXP-010 Phase 3: Clear cache on close
+                                                     (swap! state-atom update :lsp-document-opened dissoc uri))
+                                                   (when-not shared-with-peer?
+                                                     (db/delete-document-by-id! conn id))
+                                                   (when (= uri (:active-uri @state-atom))
+                                                     (if-let [next-uri (if shared-with-peer?
+                                                                         (first-other-document-uri conn uri)
+                                                                         (db/first-document-uri conn))]
+                                                       (activate-document next-uri state-atom view-ref events client conn workspace)
+                                                       (clear-pane-document! state-atom view-ref events conn uri))))
                                                  (emit-event events "document-close" {:uri uri})))
                                              (catch js/Error error
                                                (emit-event events "error" {:message (.-message error)

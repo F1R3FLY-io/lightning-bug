@@ -165,6 +165,61 @@ jobs:
             experiment.json
             bench-report.md
 
+  formal-verification:
+    name: Formal source alignment and Rocq
+    timeout-minutes: 45
+    needs: [lint-and-test-types]
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ROCQ_SWITCH: lightning-bug-rocq
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: latest
+          cache: npm
+          cache-dependency-path: package-lock.json
+          registry-url: 'https://npm.pkg.github.com'
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '23'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Cache Rocq opam switch
+        uses: actions/cache@v4
+        with:
+          path: ~/.opam
+          key: rocq-${{ runner.os }}-9.1.0-ocaml-5.4.1
+
+      - name: Install Rocq
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y opam
+          opam init --disable-sandboxing --bare -y
+          if ! opam switch list --short | grep -qx "$ROCQ_SWITCH"; then
+            opam switch create "$ROCQ_SWITCH" ocaml-base-compiler.5.4.1 -y
+          fi
+          opam repo add rocq-released https://rocq-prover.org/opam/released -y || true
+          opam update
+          opam install --switch "$ROCQ_SWITCH" -y rocq-core.9.1.0 rocq-stdlib.9.0.0
+          opam var bin --switch "$ROCQ_SWITCH" >> "$GITHUB_PATH"
+
+      - name: Run formal source alignment and Rocq
+        run: npm run verify:formal:ci
+
   test:
     timeout-minutes: 20
     needs: [lint-and-test-types]
@@ -343,7 +398,7 @@ jobs:
 
   release:
     timeout-minutes: 15
-    needs: [lint-and-test-types, test]
+    needs: [lint-and-test-types, formal-verification, test]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     env:

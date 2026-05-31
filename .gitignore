@@ -10,6 +10,10 @@
 !/deps.edn
 !/.eastwood.edn
 !/externs/**/*.js
+!/formal/**/*.cfg
+!/formal/**/*.tla
+!/formal/**/*.v
+!/formal/rocq/_CoqProject
 !/.github/workflows/*.yaml
 !/.gitignore
 !/karma.conf.js

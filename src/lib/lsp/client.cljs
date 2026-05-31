@@ -28,6 +28,23 @@
   (s/keys :req-un [::jsonrpc ::id]
           :opt-un [::result ::error]))
 
+(def ^:dynamic *force-send?*
+  "For protocol messages that must be written after the abstract connection state
+  has already moved into graceful shutdown. Bound only around synchronous send
+  construction/writes; do not rely on it across async boundaries."
+  false)
+
+(defn- current-state
+  "Returns the keyword FSM state, deriving it from legacy flags only when old test
+  fixtures or external callers have not populated [:lsp lang :state] yet."
+  [lsp-state]
+  (or (:state lsp-state)
+      (cond
+        (:initialized? lsp-state) :initialized
+        (:connecting? lsp-state) :connecting
+        (:connected? lsp-state) :connected
+        :else :disconnected)))
+
 (defn send-raw
   "Sends the full message string over the WebSocket if connected and reachable.
    Logs a warning if the server is unreachable and hasn't been warned yet."
@@ -35,7 +52,7 @@
   (let [lsp-state (get-in @state-atom [:lsp lang])
         connected? (:connected? lsp-state false)
         warned? (:warned-unreachable? lsp-state false)]
-    (if connected?
+    (if (or connected? *force-send?*)
       (when-let [ws (get-resource (or (:res-atom @state-atom) resources) :lsp lang)]
         (log/trace (str "Sending raw LSP message for lang=" lang ", length=" (.-length full-msg) ":\n" full-msg))
         (.send ws full-msg))
@@ -73,7 +90,7 @@
   derived boolean flags (:connected?/:initialized?/:connecting?/:reachable?) so the
   ConnectionManager's keyword-based predicates AND legacy flag readers stay in sync."
   [state-atom lang next]
-  (let [current (get-in @state-atom [:lsp lang :state] :disconnected)]
+  (let [current (current-state (get-in @state-atom [:lsp lang]))]
     (when-not (fsm/valid-transition? current next)
       (log/debug "LSP state transition" current "->" next "for" lang "(outside declared TRANSITIONS)"))
     (swap! state-atom update-in [:lsp lang] merge {:state next} (fsm/state->flags next))))
@@ -150,18 +167,32 @@
   "Requests shutdown of the LSP server for all languages or a specific one."
   ([state-atom]
    (doseq [[lang lsp-state] (:lsp @state-atom)]
-     (when (and (:ws lsp-state) (:connected? lsp-state) (:reachable? lsp-state))
+     (when (and (:ws lsp-state)
+                (fsm/state->connected? (current-state lsp-state))
+                (:reachable? lsp-state))
        (request-shutdown lang state-atom))))
   ([lang state-atom]
-   ;; Mark a graceful shutdown so the socket's onclose does NOT auto-reconnect.
-   (swap! state-atom assoc-in [:lsp lang :shutting-down?] true)
-   (send lang {:method "shutdown"
-               :response-type :shutdown} state-atom)))
+   (let [current (current-state (get-in @state-atom [:lsp lang]))]
+     (when (fsm/state->connected? current)
+       ;; Mark a graceful shutdown so the socket's onclose does NOT auto-reconnect.
+       ;; Drop unrelated pending requests; only the shutdown response is meaningful
+       ;; after this point.
+       (swap! state-atom update-in [:lsp lang] merge {:shutting-down? true
+                                                      :pending {}})
+       (when (fsm/valid-transition? current :disconnecting)
+         (transition! state-atom lang :disconnecting))
+       (binding [*force-send?* true]
+         (send lang {:method "shutdown"
+                     :response-type :shutdown} state-atom))))))
 
 (defn notify-exit
   "Notifies the LSP server to exit."
   [lang state-atom]
-  (send lang {:method "exit"} state-atom))
+  ;; `exit` is sent after the shutdown response, while the abstract state is
+  ;; already :disconnecting and derived :connected? is intentionally false. Force
+  ;; the raw write so graceful shutdown does not rely on stale legacy flags.
+  (binding [*force-send?* true]
+    (send lang {:method "exit"} state-atom)))
 
 ;; Response handlers (server -> client responses)
 
@@ -199,6 +230,9 @@
   (log/info "Received shutdown response for lang" lang)
   (close-all-opened-by-lang! conn lang)
   (notify-exit lang state-atom)
+  (let [current (current-state (get-in @state-atom [:lsp lang]))]
+    (when (fsm/valid-transition? current :disconnected)
+      (transition! state-atom lang :disconnected)))
   (close-resource! (or (:res-atom @state-atom) resources) :lsp lang (fn [ws] (.close ws))))
 
 ;; Notification handlers (server -> client notifications)

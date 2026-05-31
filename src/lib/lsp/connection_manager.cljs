@@ -130,7 +130,7 @@
                                                 :attempted :connecting})]))
             (do
               ;; Update state to connecting
-              (swap! state-atom assoc-in [:lsp language :state] :connecting)
+              (lsp/transition! state-atom language :connecting)
 
               ;; Attempt connection with timeout
               (let [connect-ch (lsp/connect conn language config state-atom events
@@ -143,7 +143,7 @@
                   (= port timeout-ch)
                   (do
                     (log/error "LSP connection timed out for" language "after" init-timeout "ms")
-                    (swap! state-atom assoc-in [:lsp language :state] :error)
+                    (lsp/transition! state-atom language :error)
                     (put! result-ch [:error (ex-info "Connection timeout"
                                                      {:language language
                                                       :timeout init-timeout})]))
@@ -151,14 +151,13 @@
                   ;; Success
                   (and (vector? result) (= :ok (first result)))
                   (do
-                    (swap! state-atom assoc-in [:lsp language :state] :initialized)
                     (log/info "LSP connection established for" language)
                     (put! result-ch result))
 
                   ;; Error
                   :else
                   (do
-                    (swap! state-atom assoc-in [:lsp language :state] :error)
+                    (lsp/transition! state-atom language :error)
                     (log/error "LSP connection failed for" language)
                     (put! result-ch result))))))))
       result-ch))
@@ -166,9 +165,7 @@
   (disconnect! [_this language]
     (let [current-state (get-in @state-atom [:lsp language :state] :disconnected)]
       (when (valid-transition? current-state :disconnecting)
-        (swap! state-atom assoc-in [:lsp language :state] :disconnecting)
-        (lsp/request-shutdown language state-atom)
-        (swap! state-atom assoc-in [:lsp language :state] :disconnected))))
+        (lsp/request-shutdown language state-atom))))
 
   (connected? [_this language]
     (contains? #{:connected :initializing :initialized}
