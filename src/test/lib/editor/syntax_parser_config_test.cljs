@@ -22,6 +22,10 @@
              (reset! state/resources {:lsp {} :tree-sitter {}})
              (ws/reset-workspace! @ws/default-workspace))})
 
+(defn- tree-root-node [^js tree]
+  (when tree
+    (.-rootNode tree)))
+
 (defn slurp
   "Reads the contents of a file into a string."
   [path]
@@ -415,11 +419,12 @@
                                (.dispatch view #js {:changes #js {:from 11 :to 14 :insert "x!(\"Hello\") | Nil"}})
                                (<! (timeout 50))
                                ;; Verify the tree was updated incrementally
-                               (let [new-state (.-state view)
-                                     lang-state (.field new-state language-state-field false)
-                                     ^js tree (when lang-state (.-tree lang-state))]
+                               (let [^js new-state (.-state view)
+                                     ^js lang-state (.field new-state language-state-field false)
+                                     ^js tree (when lang-state (.-tree lang-state))
+                                     root-node (tree-root-node tree)]
                                  (is (some? tree) "Parse tree exists after insertion")
-                                 (is (some? (.-rootNode ^js tree)) "Root node exists")
+                                 (is (some? root-node) "Root node exists")
                                  ;; The document should reflect the change
                                  (is (= "new x in { x!(\"Hello\") | Nil }" (str (.-doc new-state))) "Document updated correctly"))
                                (.destroy view))
@@ -452,17 +457,19 @@
                                    state (.create EditorState #js {:doc broken-doc :extensions #js [language-state-field plugin]})
                                    view (EditorView. #js {:state state :parent js/document.body})]
                                ;; Parser should handle syntax errors gracefully
-                               (let [lang-state (.field (.-state view) language-state-field false)
-                                     ^js tree (when lang-state (.-tree lang-state))]
+                               (let [^js state (.-state view)
+                                     ^js lang-state (.field state language-state-field false)
+                                     ^js tree (when lang-state (.-tree lang-state))
+                                     root-node (tree-root-node tree)]
                                  (is (some? tree) "Parse tree exists even with syntax errors")
-                                 (is (some? (.-rootNode ^js tree)) "Root node exists despite errors"))
+                                 (is (some? root-node) "Root node exists despite errors"))
                                ;; Fix the syntax error
                                (.dispatch view #js {:changes #js {:from 14 :to 14 :insert "\"Hello\")"}})
                                (<! (timeout 50))
                                ;; Verify recovery
-                               (let [new-state (.-state view)
-                                     lang-state (.field new-state language-state-field false)
-                                     tree (when lang-state (.-tree lang-state))]
+                               (let [^js new-state (.-state view)
+                                     ^js lang-state (.field new-state language-state-field false)
+                                     ^js tree (when lang-state (.-tree lang-state))]
                                  (is (some? tree) "Parse tree exists after fix")
                                  (is (= "new x in { x!(\"Hello\") }" (str (.-doc new-state))) "Document reflects the fix"))
                                (.destroy view))
@@ -488,9 +495,11 @@
                                (is (zero? (:misses stats)) "Misses reset to 0")
                                (is (zero? (:rebuilds stats)) "Rebuilds reset to 0")
                                (is (zero? (:queries stats)) "Queries reset to 0"))
-                             ;; Verify getCacheStats and resetCacheStats JS exports exist
-                             (is (fn? syntax/getCacheStats) "getCacheStats export exists")
-                             (is (fn? syntax/resetCacheStats) "resetCacheStats export exists")
+                             ;; Verify getCacheStats and resetCacheStats JS exports exist.
+                             (is (fn? (goog/getObjectByName "lib.editor.syntax.getCacheStats"))
+                                 "getCacheStats export exists")
+                             (is (fn? (goog/getObjectByName "lib.editor.syntax.resetCacheStats"))
+                                 "resetCacheStats export exists")
                              [:ok nil]
                              (catch :default e
                                [:error (js/Error. "cache-stats-reset-and-tracking failed" #js {:cause e})]))))]

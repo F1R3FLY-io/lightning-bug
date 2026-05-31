@@ -280,9 +280,9 @@
     ;; Reset
     (cache/reset-stats!)
     (let [stats (cache/get-stats)]
-      (is (= 0 (:hits stats)))
-      (is (= 0 (:misses stats)))
-      (is (= 0 (:evictions stats))))))
+      (is (zero? (:hits stats)))
+      (is (zero? (:misses stats)))
+      (is (zero? (:evictions stats))))))
 
 (deftest get-stats-includes-entry-count
   (testing "get-stats includes current entry count"

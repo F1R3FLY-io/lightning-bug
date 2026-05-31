@@ -116,7 +116,7 @@
 
 (defn mock-effect!
   "Registers a mock effect handler that captures invocations.
-   Stores the original handler for later restoration."
+   Stores the original handler for restoration after the test."
   [effect-key]
   (let [original (rf-registrar/get-handler :fx effect-key)]
     (when original
@@ -229,14 +229,13 @@
     (go
       (let [start (js/Date.now)]
         (loop []
-          (let [value (sub-value sub-vec)]
-            (if value
-              (put! result-ch [:ok value])
-              (if (> (- (js/Date.now) start) timeout-ms)
-                (put! result-ch [:error :timeout])
-                (do
-                  (<! (timeout 10))
-                  (recur))))))))
+          (if-let [value (sub-value sub-vec)]
+            (put! result-ch [:ok value])
+            (if (> (- (js/Date.now) start) timeout-ms)
+              (put! result-ch [:error :timeout])
+              (do
+                (<! (timeout 10))
+                (recur)))))))
     result-ch))
 
 ;; =============================================================================
@@ -252,9 +251,8 @@
                       {:db default-db :active-uri \"file:///test.rho\"}
                       [::my-event arg1 arg2])"
   [event-key coeffects event-vec]
-  (let [handler (rf-registrar/get-handler :event event-key)]
-    (when handler
-      (handler coeffects event-vec))))
+  (when-let [handler (rf-registrar/get-handler :event event-key)]
+    (handler coeffects event-vec)))
 
 (defn run-event-db-handler
   "Runs an event-db handler directly with given db and event.
@@ -263,9 +261,8 @@
    Usage:
    (run-event-db-handler ::my-event default-db [::my-event arg1])"
   [event-key db event-vec]
-  (let [handler (rf-registrar/get-handler :event event-key)]
-    (when handler
-      (handler db event-vec))))
+  (when-let [handler (rf-registrar/get-handler :event event-key)]
+    (handler db event-vec)))
 
 ;; =============================================================================
 ;; Test Fixture Composition

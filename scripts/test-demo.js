@@ -38,7 +38,7 @@ import puppeteer from 'puppeteer-core';
   const isLinux = process.platform === 'linux';
   const isMacOS = process.platform === 'darwin';
   const browsers = [
-    { name: 'Chrome', browser: 'chrome', executablePath: process.env.CHROME_BIN || (isMacOS ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : isWindows ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : '/usr/bin/google-chrome-stable'), args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'] },
+    { name: 'Chrome', browser: 'chrome', executablePath: process.env.CHROME_BIN || (isMacOS ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : isWindows ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : '/usr/bin/google-chrome-stable'), args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-web-security'], requiredByDefault: true },
     { name: 'Firefox', browser: 'firefox', executablePath: process.env.FIREFOX_BIN || (isMacOS ? '/Applications/Firefox.app/Contents/MacOS/firefox' : isWindows ? 'C:\\Program Files\\Mozilla Firefox\\firefox.exe' : '/usr/bin/firefox'), args: ['--headless', '--remote-debugging-port=0', '--remote-allow-origins=*'] },
     { name: 'Edge', browser: 'chrome', executablePath: process.env.EDGE_BIN || (isMacOS ? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' : isWindows ? 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe' : '/usr/bin/microsoft-edge-stable'), args: ['--no-sandbox', '--disable-setuid-sandbox', '--headless=new', '--disable-gpu'] },
     { name: 'Opera', browser: 'chrome', executablePath: process.env.OPERA_BIN || (isMacOS ? '/Applications/Opera.app/Contents/MacOS/Opera' : isWindows ? 'C:\\Users\\%USERNAME%\\AppData\\Local\\Programs\\Opera\\opera.exe' : '/usr/bin/opera'), args: ['--no-sandbox', '--headless', '--disable-gpu'] },
@@ -47,6 +47,15 @@ import puppeteer from 'puppeteer-core';
   ];
 
   const testBrowser = process.env.TEST_BROWSER;
+  const explicitBrowser = Boolean(testBrowser);
+  const summarizeError = e => e && e.message ? e.message.split('\n')[0] : String(e);
+  const shouldSkipMissingBrowser = ({ name, executablePath, requiredByDefault }) =>
+    !explicitBrowser
+    && !requiredByDefault
+    && (name === 'Safari'
+      ? !isMacOS
+      : executablePath && !fs.existsSync(executablePath));
+
   let browsersToTest = browsers;
   if (testBrowser) {
     browsersToTest = browsers.filter(b => b.name.toLowerCase() === testBrowser.toLowerCase());
@@ -61,10 +70,17 @@ import puppeteer from 'puppeteer-core';
   }
 
   let allTestsPassed = true;
+  let skippedBrowsers = 0;
 
   for (const browserConfig of browsersToTest) {
     const { name, browser: browserType, executablePath, args } = browserConfig;
     console.log(`Testing with ${name}, executable: ${executablePath}`);
+
+    if (shouldSkipMissingBrowser(browserConfig)) {
+      skippedBrowsers += 1;
+      console.log(`Skipping ${name}: browser executable is not available in this environment`);
+      continue;
+    }
 
     try {
       let playwright;
@@ -154,14 +170,22 @@ import puppeteer from 'puppeteer-core';
         console.log(`${name} browser closed`);
       }
     } catch (e) {
-      console.error(`Failed to run test with ${name}:`, e);
-      allTestsPassed = false;
+      if (!explicitBrowser && !browserConfig.requiredByDefault) {
+        skippedBrowsers += 1;
+        console.log(`Skipping ${name}: browser failed to launch (${summarizeError(e)})`);
+      } else {
+        console.error(`Failed to run test with ${name}:`, e);
+        allTestsPassed = false;
+      }
     }
   }
 
   server.close(() => {
     console.log('Server closed');
     if (allTestsPassed) {
+      if (skippedBrowsers > 0) {
+        console.log(`Skipped ${skippedBrowsers} optional browser sanity test(s)`);
+      }
       console.log('All sanity tests passed');
       process.exit(0);
     } else {

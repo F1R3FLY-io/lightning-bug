@@ -5,11 +5,21 @@ const fsmPath = 'src/lib/lsp/fsm.cljs';
 const tlaPath = 'formal/tla/LspConnection.tla';
 const rocqPath = 'formal/rocq/Async/Fsm.v';
 const lspSourceRoot = 'src/lib/lsp';
+const lspClientPath = 'src/lib/lsp/client.cljs';
+const editorRuntimePath = 'src/lib/editor/runtime.cljs';
+const editorCommandsPath = 'src/lib/editor/commands.cljs';
+const ciWorkflowPath = '.github/workflows/ci.yaml';
 const requiredTlaModels = [
   'LspConnection',
   'BrowserAsync',
   'DocSync',
   'LightningBugAsync'
+];
+const requiredTlaProofModules = [
+  'proofs/LspConnectionProofs.tla',
+  'proofs/BrowserAsyncProofs.tla',
+  'proofs/DocSyncProofs.tla',
+  'proofs/LightningBugAsyncProofs.tla'
 ];
 const requiredRocqModules = [
   'Async/Fsm.v',
@@ -22,6 +32,10 @@ const requiredRocqModules = [
 const source = readFileSync(fsmPath, 'utf8');
 const tla = readFileSync(tlaPath, 'utf8');
 const rocq = readFileSync(rocqPath, 'utf8');
+const lspClient = readFileSync(lspClientPath, 'utf8');
+const editorRuntime = readFileSync(editorRuntimePath, 'utf8');
+const editorCommands = readFileSync(editorCommandsPath, 'utf8');
+const ciWorkflow = readFileSync(ciWorkflowPath, 'utf8');
 
 function uniqueSorted(items) {
   return [...new Set(items)].sort();
@@ -147,6 +161,20 @@ function assertSame(label, expected, actual, expectedName, actualName) {
   }
 }
 
+function assertContains(text, pattern, description, path) {
+  if (!pattern.test(text)) {
+    console.error(`Missing source/formal alignment fact in ${path}: ${description}`);
+    process.exit(1);
+  }
+}
+
+function assertNotContains(text, pattern, description, path) {
+  if (pattern.test(text)) {
+    console.error(`Forbidden source/formal alignment fact in ${path}: ${description}`);
+    process.exit(1);
+  }
+}
+
 function verifyRequiredFiles() {
   for (const model of requiredTlaModels) {
     for (const ext of ['tla', 'cfg']) {
@@ -158,6 +186,14 @@ function verifyRequiredFiles() {
     }
   }
 
+  for (const proofModule of requiredTlaProofModules) {
+    const path = `formal/tla/${proofModule}`;
+    if (!existsSync(path)) {
+      console.error(`Missing required TLAPS proof module: ${path}`);
+      process.exit(1);
+    }
+  }
+
   for (const module of requiredRocqModules) {
     const path = `formal/rocq/${module}`;
     if (!existsSync(path)) {
@@ -165,6 +201,132 @@ function verifyRequiredFiles() {
       process.exit(1);
     }
   }
+}
+
+function verifyCiDoesNotRunTlaTools() {
+  assertNotContains(
+    ciWorkflow,
+    /\b(verify:tla|verify:tlaps|verify:formal(?!:ci)|tlapm|tla2tools|TLA_TOOLS|Install TLC)\b/,
+    'CI must not install or run TLC/TLA+/TLAPS',
+    ciWorkflowPath
+  );
+  assertContains(
+    ciWorkflow,
+    /run:\s*npm run verify:formal:ci/,
+    'CI formal job runs only the CI-safe formal gate',
+    ciWorkflowPath
+  );
+}
+
+function verifyLspShutdownAlignment() {
+  assertContains(
+    source,
+    /:initializing\s+#\{[^}]*:disconnecting/,
+    'shutdown while initialize is in flight has an explicit source FSM transition',
+    fsmPath
+  );
+  assertContains(
+    tla,
+    /<<"initializing",\s*"disconnecting">>/,
+    'shutdown while initialize is in flight has an explicit TLA+ FSM transition',
+    tlaPath
+  );
+  assertContains(
+    rocq,
+    /\(Initializing,\s*Disconnecting\)/,
+    'shutdown while initialize is in flight has an explicit Rocq FSM transition',
+    rocqPath
+  );
+  assertContains(
+    tla,
+    /StartShutdown\(l\) ==[\s\S]*pending' = \[pending EXCEPT !\[l\] = \{nextId\[l\]\}\][\s\S]*nextId' = \[nextId EXCEPT !\[l\] = @ \+ 1\][\s\S]*shuttingDown' = \[shuttingDown EXCEPT !\[l\] = TRUE\]/,
+    'StartShutdown clears unrelated pending work and records only the shutdown request',
+    tlaPath
+  );
+  assertContains(
+    tla,
+    /Response\(l\) ==\s*\n\s*\/\\ shuttingDown\[l\] = FALSE/,
+    'generic responses are disabled during graceful shutdown',
+    tlaPath
+  );
+  assertContains(
+    lspClient,
+    /:shutting-down\? true\s*:pending \{\}[\s\S]*\(send lang \{:method "shutdown"\s*:response-type :shutdown\}/,
+    'request-shutdown clears pending before sending the shutdown request',
+    lspClientPath
+  );
+  assertContains(
+    lspClient,
+    /\(notify-exit lang state-atom\)[\s\S]*\(transition! state-atom lang :disconnected\)[\s\S]*\(close-resource!/,
+    'shutdown response sends exit, transitions to disconnected, then closes the resource',
+    lspClientPath
+  );
+}
+
+function verifyLspTransitionGuardAlignment() {
+  assertContains(
+    lspClient,
+    /\(if \(fsm\/valid-transition\? current next\)[\s\S]*\(swap! state-atom update-in \[:lsp lang\] merge \{:state next\}[\s\S]*Rejected invalid LSP state transition/s,
+    'transition! rejects invalid transitions instead of mutating source state',
+    lspClientPath
+  );
+  assertNotContains(
+    lspClient,
+    /outside declared TRANSITIONS/,
+    'invalid transitions must not be accepted with a debug-only warning',
+    lspClientPath
+  );
+}
+
+function verifyDocumentLifecycleAlignment() {
+  assertContains(
+    editorRuntime,
+    /\[:lsp-did-change uri\][\s\S]*\(fn \[\][\s\S]*\(let \[\[text lang\] \(db\/doc-text-lang-by-uri conn uri\)\]/,
+    'debounced didChange flush uses the edited URI, not the active URI at flush time',
+    editorRuntimePath
+  );
+  assertNotContains(
+    editorRuntime,
+    /\[:lsp-did-change uri\][\s\S]{0,500}\(let \[uri \(:active-uri @state-atom\)/,
+    'debounced didChange callback must not re-read :active-uri',
+    editorRuntimePath
+  );
+  assertContains(
+    editorRuntime,
+    /\(when-not from-api\?\s*\n\s*\(clear-visible-diagnostics! conn workspace uri\)\)/,
+    'local user edits clear visible diagnostics for the edited URI',
+    editorRuntimePath
+  );
+  assertContains(
+    editorCommands,
+    /shared-with-peer\?[\s\S]*\(when \(and opened\? \(not shared-with-peer\?\)\)[\s\S]*\(p\/notify-did-close! client lang uri\)/,
+    'didClose is suppressed while another pane still references the URI',
+    editorCommandsPath
+  );
+  assertContains(
+    editorCommands,
+    /\(when-not shared-with-peer\?\s*\n\s*\(db\/delete-document-by-id! conn id\)\)/,
+    'shared pane close does not delete the workspace document',
+    editorCommandsPath
+  );
+}
+
+function verifyTlaAsyncPropertyCoverage() {
+  const browser = readFileSync('formal/tla/BrowserAsync.tla', 'utf8');
+  const docSync = readFileSync('formal/tla/DocSync.tla', 'utf8');
+  const publicTrace = readFileSync('formal/tla/LightningBugAsync.tla', 'utf8');
+  const proofText = requiredTlaProofModules
+    .map((proofModule) => readFileSync(`formal/tla/${proofModule}`, 'utf8'))
+    .join('\n');
+
+  assertContains(browser, /writeHistory[\s\S]*NoUnmountedMutation ==\s*\n\s*\\A w \\in writeHistory: w\.wasMounted = TRUE/, 'browser async model records write history for mounted-only mutation safety', 'formal/tla/BrowserAsync.tla');
+  assertContains(docSync, /DeliverySeqPrecedesWorkspace ==\s*\n\s*\\A d \\in deliveries: d\.n < workspaceText\[d\.uri\]/, 'doc sync model covers delivery sequence ordering', 'formal/tla/DocSync.tla');
+  assertContains(publicTrace, /DidChangeSentAfterOpen ==\s*\n\s*\\A d \\in didChangeLog: d\.openedAtSend = TRUE/, 'public trace model covers didChange-after-open ordering', 'formal/tla/LightningBugAsync.tla');
+  assertContains(publicTrace, /DidCloseOnlyWhenUnshared ==\s*\n\s*\\A d \\in didCloseLog: d\.sharedAtClose = FALSE/, 'public trace model covers didClose suppression for shared documents', 'formal/tla/LightningBugAsync.tla');
+  assertContains(proofText, /THEOREM FlagConsistencyImpliesInitializedConnected/, 'TLAPS proves FSM flag implication', 'formal/tla/proofs');
+  assertContains(proofText, /THEOREM FireDebounceWritesOnlyWhenMounted/, 'TLAPS proves mounted-only debounce writes', 'formal/tla/proofs');
+  assertContains(proofText, /THEOREM UserEditDoesNotEchoToOrigin/, 'TLAPS proves no origin echo for doc sync deliveries', 'formal/tla/proofs');
+  assertContains(proofText, /THEOREM FlushDidChangeRequiresOpen/, 'TLAPS proves didChange flush requires didOpen', 'formal/tla/proofs');
 }
 
 function verifyNoDirectStateWrites() {
@@ -189,7 +351,12 @@ function verifyNoDirectStateWrites() {
 }
 
 verifyRequiredFiles();
+verifyCiDoesNotRunTlaTools();
 verifyNoDirectStateWrites();
+verifyLspShutdownAlignment();
+verifyLspTransitionGuardAlignment();
+verifyDocumentLifecycleAlignment();
+verifyTlaAsyncPropertyCoverage();
 
 const sourceStates = parseCljsKeywordSet(source, 'STATES');
 const sourceTransitions = parseCljsTransitions(source);

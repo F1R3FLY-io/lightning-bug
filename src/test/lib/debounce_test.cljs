@@ -56,7 +56,7 @@
            (let [call-count (atom 0)]
              (debounce/debounced-call :test-delay #(swap! call-count inc) 50)
              ;; Should not be called immediately
-             (is (= 0 @call-count))
+             (is (zero? @call-count))
              ;; Wait for debounce
              (<! (timeout 100))
              ;; Should have been called
@@ -116,7 +116,7 @@
              (cancel-fn)
              (<! (timeout 150))
              ;; Should not have been called
-             (is (= 0 @call-count)))
+             (is (zero? @call-count)))
            (done))))
 
 ;; =============================================================================
@@ -132,7 +132,7 @@
              (debounce/cancel :test-cancel-key)
              (<! (timeout 150))
              ;; Should not have been called
-             (is (= 0 @call-count)))
+             (is (zero? @call-count)))
            (done))))
 
 (deftest cancel-is-safe-for-missing-key
@@ -152,9 +152,9 @@
              (debounce/cancel-all)
              (<! (timeout 150))
              ;; None should have been called
-             (is (= 0 (:a @counts)))
-             (is (= 0 (:b @counts)))
-             (is (= 0 (:c @counts))))
+             (is (zero? (:a @counts)))
+             (is (zero? (:b @counts)))
+             (is (zero? (:c @counts))))
            (done))))
 
 (deftest cancel-matching-cancels-matching-keys
@@ -169,8 +169,8 @@
                                              (clojure.string/starts-with? (name %) "lsp")))
              (<! (timeout 150))
              ;; LSP keys should not have been called
-             (is (= 0 (:lsp-a @counts)))
-             (is (= 0 (:lsp-b @counts)))
+             (is (zero? (:lsp-a @counts)))
+             (is (zero? (:lsp-b @counts)))
              ;; Other key should have been called
              (is (= 1 (:other @counts))))
            (done))))
@@ -233,7 +233,7 @@
              (debounced)
              (debounced)
              (debounced)
-             (is (= 0 @call-count))
+             (is (zero? @call-count))
              (<! (timeout 100))
              (is (= 1 @call-count)))
            (done))))
@@ -284,7 +284,7 @@
   (async done
          (go
            ;; Start clean
-           (is (= 0 (debounce/pending-count)))
+           (is (zero? (debounce/pending-count)))
            ;; Add some pending calls
            (debounce/debounced-call :pending-1 #() 500)
            (debounce/debounced-call :pending-2 #() 500)
@@ -295,7 +295,7 @@
            (is (= 2 (debounce/pending-count)))
            ;; Cancel all
            (debounce/cancel-all)
-           (is (= 0 (debounce/pending-count)))
+           (is (zero? (debounce/pending-count)))
            (done))))
 
 (deftest pending-keys-returns-set
@@ -452,7 +452,7 @@
                                         30)
                (debounce/cancel :rapid-cancel))
              ;; None should have executed
-             (is (= 0 @call-count))
+             (is (zero? @call-count))
              ;; Now schedule one that should execute
              (debounce/debounced-call :rapid-cancel
                                       #(swap! call-count inc)
@@ -501,21 +501,17 @@
   (async done
          (go
            (let [call-count (atom 0)
-                 debounced (debounce/debounce-fn #(swap! call-count inc)
-                                                 :delay 50)]
-             ;; Call and get cancel function
-             (let [cancel-fn (debounced)]
-               ;; Cancel before execution
-               (cancel-fn)
-               (<! (timeout 100))
-               ;; Should not have executed
-               (is (= 0 @call-count) "Cancelled call should not execute")))
+                 debounced (debounce/debounce-fn #(swap! call-count inc) :delay 50)
+                 cancel-fn (debounced)]
+             (cancel-fn)
+             (<! (timeout 100))
+             (is (zero? @call-count) "Cancelled call should not execute"))
            (done))))
 
 (deftest pending-state-tracking-accuracy
   (testing "Pending state accurately reflects scheduled calls"
     ;; Initially empty
-    (is (= 0 (debounce/pending-count)))
+    (is (zero? (debounce/pending-count)))
     (is (empty? (debounce/pending-keys)))
     ;; Schedule some calls
     (debounce/debounced-call :track-a #() 500)

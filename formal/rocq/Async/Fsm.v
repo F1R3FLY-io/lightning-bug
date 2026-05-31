@@ -53,6 +53,7 @@ Definition valid_transition (from to : state) : bool :=
   | Connected, Disconnecting => true
   | Connected, Error => true
   | Initializing, Initialized => true
+  | Initializing, Disconnecting => true
   | Initializing, Error => true
   | Initializing, Disconnected => true
   | Initialized, Disconnecting => true
@@ -77,6 +78,7 @@ Definition all_transitions : list (state * state) :=
    (Connected, Disconnecting);
    (Connected, Error);
    (Initializing, Initialized);
+   (Initializing, Disconnecting);
    (Initializing, Error);
    (Initializing, Disconnected);
    (Initialized, Disconnecting);

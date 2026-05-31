@@ -247,11 +247,10 @@
 
 (deftest inc-document-version-by-id!-increments
   (testing "Incrementing version by ID"
-    (let [id (h/create-test-document! {:uri "file:///versioned.rho"
-                                       :version 10})]
-      (let [new-version (db/inc-document-version-by-id! (ws/default-conn) id)]
-        (is (= 11 new-version))
-        (is (= 11 (db/document-version-by-id (ws/default-conn) id)))))))
+    (let [id (h/create-test-document! {:uri "file:///versioned.rho", :version 10})
+          new-version (db/inc-document-version-by-id! (ws/default-conn) id)]
+      (is (= 11 new-version))
+      (is (= 11 (db/document-version-by-id (ws/default-conn) id))))))
 
 ;; =============================================================================
 ;; Document Update Tests

@@ -33,7 +33,7 @@
              :workspace/active-uri {:db/unique :db.unique/identity}})
 
 ;; Forward declarations: create-documents! auto-links a new document to a project,
-;; but the project accessors are defined later in this namespace.
+;; but the project accessors are defined below in this namespace.
 (declare project-by-id project-for-uri)
 
 ;; NOTE: there is intentionally NO module-global conn (multi-editor-workspace
@@ -1034,7 +1034,7 @@
                          :where [?e :workspace/active-uri _]]
                        @conn)]
     (when (seq prev-eids)
-      (let [tx (mapv (fn [eid] [:db/retractEntity eid]) prev-eids)]
+      (let [tx (vec (for [eid prev-eids] [:db/retractEntity eid]))]
         (log/trace "Retracting active-uri on destroy:" tx)
         (d/transact! conn tx)))))
 

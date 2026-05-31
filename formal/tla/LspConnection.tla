@@ -11,6 +11,9 @@ CONSTANTS MaxPendingId
 \* @type: Int;
 CONSTANTS MaxReconnects
 
+ASSUME MaxPendingIdAssumption == MaxPendingId \in (Nat \ {0})
+ASSUME MaxReconnectsAssumption == MaxReconnects \in Nat
+
 States ==
   {"disconnected", "connecting", "connected", "initializing",
    "initialized", "disconnecting", "error"}
@@ -24,6 +27,7 @@ AllowedTransition ==
    <<"connected", "disconnecting">>,
    <<"connected", "error">>,
    <<"initializing", "initialized">>,
+   <<"initializing", "disconnecting">>,
    <<"initializing", "error">>,
    <<"initializing", "disconnected">>,
    <<"initialized", "disconnecting">>,
@@ -117,6 +121,7 @@ Request(l) ==
                 shuttingDown, reconnects>>
 
 Response(l) ==
+  /\ shuttingDown[l] = FALSE
   /\ pending[l] # {}
   /\ \E id \in pending[l]:
        pending' = [pending EXCEPT ![l] = @ \ {id}]
@@ -125,10 +130,13 @@ Response(l) ==
 
 StartShutdown(l) ==
   /\ state[l] \in {"connected", "initializing", "initialized"}
+  /\ nextId[l] <= MaxPendingId
   /\ CanTransition(state[l], "disconnecting")
   /\ SetLangState(l, "disconnecting")
+  /\ pending' = [pending EXCEPT ![l] = {nextId[l]}]
+  /\ nextId' = [nextId EXCEPT ![l] = @ + 1]
   /\ shuttingDown' = [shuttingDown EXCEPT ![l] = TRUE]
-  /\ UNCHANGED <<pending, nextId, reconnects>>
+  /\ UNCHANGED reconnects
 
 ShutdownClosed(l) ==
   /\ state[l] = "disconnecting"
@@ -200,5 +208,19 @@ PendingOnlyWhileLive ==
 
 GracefulShutdownDoesNotReconnect ==
   \A l \in Langs: shuttingDown[l] => reconnects[l] = 0
+
+ShutdownStateConsistent ==
+  \A l \in Langs:
+    shuttingDown[l] =>
+      /\ state[l] = "disconnecting"
+      /\ Cardinality(pending[l]) = 1
+
+LspInv ==
+  /\ TypeOK
+  /\ FlagConsistency
+  /\ InitializedImpliesConnected
+  /\ PendingOnlyWhileLive
+  /\ GracefulShutdownDoesNotReconnect
+  /\ ShutdownStateConsistent
 
 ================================================================================

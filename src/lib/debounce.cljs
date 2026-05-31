@@ -146,7 +146,7 @@
           (f)
         (catch js/Error e
           (log/error "Error in throttled call:" key "-" (.-message e)))))
-      ;; Schedule for later if not already scheduled
+      ;; Schedule trailing execution if one is not already pending
       (when-not (get @timers key)
         (let [remaining (- interval time-since)
               timer-id (js/setTimeout

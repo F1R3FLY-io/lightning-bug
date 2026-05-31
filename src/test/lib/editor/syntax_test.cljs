@@ -411,7 +411,7 @@
                  (is false err-msg)))
              (done)))))
 
-;; Re-enabled (tech-debt Phase 4): the par operator `|` is a `@branch` alignment
+;; Re-enabled (remediation Phase 4): the par operator `|` is a `@branch` alignment
 ;; point (indents.scm: `(par "|" @branch)`), so the next parallel process aligns
 ;; with the indent of the line where the par construct begins. The original tests
 ;; were disabled because they used single-line docs (construct on the indent-0

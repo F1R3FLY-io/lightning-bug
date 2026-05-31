@@ -52,8 +52,8 @@
 ;; other's idle-sync handle and concatenate each other's deltas. Both maps now
 ;; live in the PER-EDITOR `state-atom` under :pending-idle-syncs and
 ;; :pending-lsp-changes (initialized in lib.core/default-state):
-;;   :pending-idle-syncs  -- URI -> requestIdleCallback handle (dedupes the
-;;                           idle-deferred CodeMirror->DataScript text sync).
+  ;;   :pending-idle-syncs  -- URI -> requestIdleCallback handle (dedupes the
+  ;;                           idle-scheduled CodeMirror->DataScript text sync).
 ;;   :pending-lsp-changes -- URI -> vector of ContentChangeEvent {:range
 ;;                           :rangeLength :text} accumulated during the debounce
 ;;                           window for incremental LSP didChange.
@@ -224,7 +224,7 @@
                                                                  :rangeLength (- toA fromA)
                                                                  :text (str inserted)})))
                                                      false)))
-                                   ;; EXP-011 Phase 1: Idle-deferred DataScript sync
+                                   ;; EXP-011 Phase 1: Idle-scheduled DataScript sync
                                    ;; CodeMirror is the source of truth during editing.
                                    ;; DataScript only needs eventual consistency for LSP and persistence.
                                    ;; Use requestIdleCallback to avoid blocking the main thread with O(n) serialization.
@@ -285,7 +285,7 @@
                                        (debounce/debounced-call
                                         [:lsp-did-change uri]
                                         (fn []
-                                          (let [uri (:active-uri @state-atom) [text lang] (when uri (db/doc-text-lang-by-uri conn uri))]
+                                          (let [[text lang] (db/doc-text-lang-by-uri conn uri)]
                                             (when (and uri text lang)
                                               (let [version (db/inc-document-version-by-uri! conn uri)
                                                     changes (get-in @lsp-atom [:pending-lsp-changes uri])

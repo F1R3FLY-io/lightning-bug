@@ -14,8 +14,8 @@
             [lib.db :as db]))
 
 ;; A Workspace bundles the shared, per-instance state. Constructed via
-;; `map->Workspace` so additional fields (LSP state, etc.) can be added in later
-;; phases without breaking existing construction sites.
+;; `map->Workspace` so additional fields (LSP state, etc.) can be added without
+;; breaking existing construction sites.
 ;;   :conn        - DataScript connection (documents/projects/diagnostics/...)
 ;;   :resources   - loaded language resources (tree-sitter grammars/parsers, and the
 ;;                  LSP connect-dedup bookkeeping); see lib.state resource fns.

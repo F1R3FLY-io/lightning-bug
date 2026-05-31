@@ -190,7 +190,7 @@ Both target metrics show statistically significant improvements (p < 0.0001) wit
 
 1. Merge this experiment into main
 2. Update baseline with new performance levels
-3. Consider similar optimizations for any remaining `or-join` queries
+3. Similar optimizations apply to other `or-join` queries when profiling identifies them.
 
 ## Environment
 

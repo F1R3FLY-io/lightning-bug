@@ -40,7 +40,7 @@
 !/types/**/*.test-d.ts
 !/docs/benchmarks/**/*.md
 !/docs/benchmarks/results/*.json
-!/docs/tech-debt/**/*.md
+!/docs/remediation/**/*.md
 
 # Exclude specific file patterns
 /resources/public/js/test/*

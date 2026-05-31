@@ -15,7 +15,7 @@
    ["react" :as react]
    ["react-dom/client" :as rdclient]
    ["@codemirror/view" :refer [EditorView]]
-   [lib.core :refer [Editor createWorkspace]]
+   [lib.core :refer [Editor create-workspace]]
    [lib.workspace :as ws]
    [lib.state :as state :refer [resources get-resource]]
    [lib.editor.syntax :as syntax]
@@ -58,6 +58,15 @@
        (filter #(= "textDocument/didChange" (get-in % [:body :method])))
        (map #(get-in % [:body :params :textDocument :version]))))
 
+(defn- open-document! [^js editor uri text language]
+  (.openDocument editor uri text language))
+
+(defn- activate-document! [^js editor uri]
+  (.activateDocument editor uri))
+
+(defn- subscribe-events! [^js editor listener]
+  (.subscribe (.getEvents editor) listener))
+
 (deftest split-pane-lsp-single-connection-and-didopen
   (testing "two panes over one LSP file share one connection and emit exactly one didOpen"
     (async done
@@ -65,18 +74,18 @@
         (let [res (<! (with-mock-lsp
                         (fn [mock]
                           (go
-                            (let [workspace (createWorkspace)
+                            (let [workspace (create-workspace)
                                   pane-a (mount-editor! workspace lsp-langs)
                                   pane-b (mount-editor! workspace lsp-langs)
                                   uri "inmemory:///lsp-split.txt"]
                               (<! (timeout 200))
-                              (let [ea @(:ref-atom pane-a)
-                                    eb @(:ref-atom pane-b)]
-                                (.openDocument ea uri "hello" "text")   ; creates the socket
+                              (let [^js ea @(:ref-atom pane-a)
+                                    ^js eb @(:ref-atom pane-b)]
+                                (open-document! ea uri "hello" "text")   ; creates the socket
                                 (<! (timeout 300))
                                 ((:trigger-open mock))                  ; fire onopen -> initialize + didOpen
                                 (<! (timeout 400))
-                                (.activateDocument eb uri)              ; same file, 2nd pane
+                                (activate-document! eb uri)              ; same file, 2nd pane
                                 (<! (timeout 400))
                                 (is (= 1 (count-method mock "initialize"))
                                     "exactly one LSP connection initialized for two panes")
@@ -103,18 +112,18 @@
         (let [res (<! (with-mock-lsp
                         (fn [mock]
                           (go
-                            (let [workspace (createWorkspace)
+                            (let [workspace (create-workspace)
                                   pane-a (mount-editor! workspace lsp-langs)
                                   pane-b (mount-editor! workspace lsp-langs)
                                   uri "inmemory:///lsp-edits.txt"]
                               (<! (timeout 200))
-                              (let [ea @(:ref-atom pane-a)
-                                    eb @(:ref-atom pane-b)]
-                                (.openDocument ea uri "abc" "text")
+                              (let [^js ea @(:ref-atom pane-a)
+                                    ^js eb @(:ref-atom pane-b)]
+                                (open-document! ea uri "abc" "text")
                                 (<! (timeout 300))
                                 ((:trigger-open mock))
                                 (<! (timeout 400))
-                                (.activateDocument eb uri)
+                                (activate-document! eb uri)
                                 (<! (timeout 400))
                                 (let [va (view-of pane-a)
                                       vb (view-of pane-b)]
@@ -145,11 +154,12 @@
         (let [res (<! (with-mock-lsp
                         (fn [mock]
                           (go
-                            (let [ws1 (createWorkspace)
-                                  ws2 (createWorkspace)
+                            (let [ws1 (create-workspace)
+                                  ws2 (create-workspace)
                                   pane (mount-editor! ws1 lsp-langs)]
                               (<! (timeout 200))
-                              (.openDocument @(:ref-atom pane) "inmemory:///iso-lsp.txt" "x" "text")
+                              (let [^js editor @(:ref-atom pane)]
+                                (open-document! editor "inmemory:///iso-lsp.txt" "x" "text"))
                               (<! (timeout 300))
                               ((:trigger-open mock))
                               (<! (timeout 400))
@@ -175,7 +185,7 @@
         (let [res (<! (with-mock-lsp
                         (fn [mock]
                           (go
-                            (let [workspace (createWorkspace)
+                            (let [workspace (create-workspace)
                                   pane-a (mount-editor! workspace lsp-langs)
                                   pane-b (mount-editor! workspace lsp-langs)
                                   uri "inmemory:///diag-split.txt"
@@ -187,15 +197,15 @@
                                                    (when (and (= "diagnostics" (:type m)) (= uri (:uri m)))
                                                      (swap! a inc)))))]
                               (<! (timeout 200))
-                              (let [ea @(:ref-atom pane-a)
-                                    eb @(:ref-atom pane-b)]
-                                (.subscribe (.getEvents ea) (count-diag diags-a))
-                                (.subscribe (.getEvents eb) (count-diag diags-b))
-                                (.openDocument ea uri "hello" "text")
+                              (let [^js ea @(:ref-atom pane-a)
+                                    ^js eb @(:ref-atom pane-b)]
+                                (subscribe-events! ea (count-diag diags-a))
+                                (subscribe-events! eb (count-diag diags-b))
+                                (open-document! ea uri "hello" "text")
                                 (<! (timeout 300))
                                 ((:trigger-open mock))
                                 (<! (timeout 400))
-                                (.activateDocument eb uri)            ; B splits onto the same file
+                                (activate-document! eb uri)            ; B splits onto the same file
                                 (<! (timeout 400))
                                 ;; server publishes a diagnostic for the shared file
                                 (trigger-diagnostic! mock uri

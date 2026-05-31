@@ -102,9 +102,8 @@
   "Runs a single async iteration of a benchmark and returns a promise with duration."
   [f]
   (let [start (bench/now)]
-    (-> (f)
-        (.then (fn [_result]
-                 (- (bench/now) start))))))
+    (.then (f) (fn [_result]
+                 (- (bench/now) start)))))
 
 (defn run-benchmark-sync
   "Runs a synchronous benchmark with warmup and measurement phases.
@@ -136,48 +135,42 @@
 
           ;; Measurement phase
           (log/debug "Running measurement phase...")
-          (let [measurements (loop [i 0
-                                    results []]
+          (let [measurements (loop [i 0, results []]
                                (if (>= i measurement-iterations)
                                  results
-                                 (do
-                                   (let [duration (run-single-iteration f)]
-                                     (when gc-between-iterations? (trigger-gc))
-                                     (<! (timeout delay-between-iterations-ms))
-                                     (recur (inc i) (conj results duration))))))]
-
-            ;; Calculate statistics
-            (let [raw-stats (stats/full-statistics measurements)
-                  cleaned-data (stats/remove-outliers measurements)
-                  clean-stats (stats/full-statistics (:cleaned cleaned-data))
-                  target (get bench/PERFORMANCE-TARGETS name)
-                  result {:name name
-                          :config config
-                          :raw {:measurements measurements
-                                :stats raw-stats}
-                          :cleaned {:measurements (:cleaned cleaned-data)
-                                    :stats clean-stats
-                                    :outliers-removed (:outlier-count cleaned-data)}
-                          :target target
-                          :passes-target? (when target
-                                            (<= (:p95 clean-stats)
-                                                (:target-ms target)))
-                          :environment (capture-environment)
-                          :timestamp (js/Date.now)}]
-
-              (log/info "Benchmark complete:" name)
-              (log/info "  Mean:" (.toFixed (:mean clean-stats) 3) "ms")
-              (log/info "  Median:" (.toFixed (:median clean-stats) 3) "ms")
-              (log/info "  P95:" (.toFixed (:p95 clean-stats) 3) "ms")
-              (log/info "  Std Dev:" (.toFixed (:std-dev clean-stats) 3) "ms")
-              (log/info "  Outliers removed:" (:outlier-count cleaned-data))
-              (when target
-                (log/info "  Target:" (:target-ms target) "ms"
-                         (if (:passes-target? result) "PASS" "FAIL")))
-
-              ;; Store results
-              (swap! benchmark-results assoc name result)
-              (resolve result)))))))))
+                                 (let [duration (run-single-iteration f)]
+                                   (when gc-between-iterations? (trigger-gc))
+                                   (<! (timeout delay-between-iterations-ms))
+                                   (recur (inc i) (conj results duration)))))
+                raw-stats (stats/full-statistics measurements)
+                cleaned-data (stats/remove-outliers measurements)
+                clean-stats (stats/full-statistics (:cleaned cleaned-data))
+                target (get bench/PERFORMANCE-TARGETS name)
+                result {:name name
+                        :config config
+                        :raw {:measurements measurements, :stats raw-stats}
+                        :cleaned {:measurements (:cleaned cleaned-data)
+                                  :stats clean-stats
+                                  :outliers-removed (:outlier-count cleaned-data)}
+                        :target target
+                        :passes-target? (when target
+                          (<= (:p95 clean-stats) (:target-ms target)))
+                        :environment (capture-environment)
+                        :timestamp (js/Date.now)}]
+            (log/info "Benchmark complete:" name)
+            (log/info "  Mean:" (.toFixed (:mean clean-stats) 3) "ms")
+            (log/info "  Median:" (.toFixed (:median clean-stats) 3) "ms")
+            (log/info "  P95:" (.toFixed (:p95 clean-stats) 3) "ms")
+            (log/info "  Std Dev:" (.toFixed (:std-dev clean-stats) 3) "ms")
+            (log/info "  Outliers removed:" (:outlier-count cleaned-data))
+            (when target
+              (log/info
+               "  Target:"
+               (:target-ms target)
+               "ms"
+               (if (:passes-target? result) "PASS" "FAIL")))
+            (swap! benchmark-results assoc name result)
+            (resolve result))))))))
 
 (defn run-benchmark-async
   "Runs an asynchronous benchmark with warmup and measurement phases.
@@ -211,47 +204,44 @@
 
           ;; Measurement phase
           (log/debug "Running measurement phase...")
-          (let [measurements (<! (go-loop [i 0
-                                           results []]
-                                   (if (>= i measurement-iterations)
-                                     results
-                                     (let [duration (<p! (run-single-iteration-async f))]
-                                       (when gc-between-iterations? (trigger-gc))
-                                       (<! (timeout delay-between-iterations-ms))
-                                       (recur (inc i) (conj results duration))))))]
-
-            ;; Calculate statistics
-            (let [raw-stats (stats/full-statistics measurements)
-                  cleaned-data (stats/remove-outliers measurements)
-                  clean-stats (stats/full-statistics (:cleaned cleaned-data))
-                  target (get bench/PERFORMANCE-TARGETS name)
-                  result {:name name
-                          :config config
-                          :raw {:measurements measurements
-                                :stats raw-stats}
-                          :cleaned {:measurements (:cleaned cleaned-data)
-                                    :stats clean-stats
-                                    :outliers-removed (:outlier-count cleaned-data)}
-                          :target target
-                          :passes-target? (when target
-                                            (<= (:p95 clean-stats)
-                                                (:target-ms target)))
-                          :environment (capture-environment)
-                          :timestamp (js/Date.now)}]
-
-              (log/info "Async benchmark complete:" name)
-              (log/info "  Mean:" (.toFixed (:mean clean-stats) 3) "ms")
-              (log/info "  Median:" (.toFixed (:median clean-stats) 3) "ms")
-              (log/info "  P95:" (.toFixed (:p95 clean-stats) 3) "ms")
-              (log/info "  Std Dev:" (.toFixed (:std-dev clean-stats) 3) "ms")
-              (log/info "  Outliers removed:" (:outlier-count cleaned-data))
-              (when target
-                (log/info "  Target:" (:target-ms target) "ms"
-                         (if (:passes-target? result) "PASS" "FAIL")))
-
-              ;; Store results
-              (swap! benchmark-results assoc name result)
-              (resolve result)))))))))
+          (let [measurements (<!
+                              (go-loop
+                               [i 0 results []]
+                               (if (>= i measurement-iterations)
+                                 results
+                                 (let [duration (<p! (run-single-iteration-async f))]
+                                   (when gc-between-iterations? (trigger-gc))
+                                   (<! (timeout delay-between-iterations-ms))
+                                   (recur (inc i) (conj results duration))))))
+                raw-stats (stats/full-statistics measurements)
+                cleaned-data (stats/remove-outliers measurements)
+                clean-stats (stats/full-statistics (:cleaned cleaned-data))
+                target (get bench/PERFORMANCE-TARGETS name)
+                result {:name name
+                        :config config
+                        :raw {:measurements measurements, :stats raw-stats}
+                        :cleaned {:measurements (:cleaned cleaned-data)
+                                  :stats clean-stats
+                                  :outliers-removed (:outlier-count cleaned-data)}
+                        :target target
+                        :passes-target? (when target
+                          (<= (:p95 clean-stats) (:target-ms target)))
+                        :environment (capture-environment)
+                        :timestamp (js/Date.now)}]
+            (log/info "Async benchmark complete:" name)
+            (log/info "  Mean:" (.toFixed (:mean clean-stats) 3) "ms")
+            (log/info "  Median:" (.toFixed (:median clean-stats) 3) "ms")
+            (log/info "  P95:" (.toFixed (:p95 clean-stats) 3) "ms")
+            (log/info "  Std Dev:" (.toFixed (:std-dev clean-stats) 3) "ms")
+            (log/info "  Outliers removed:" (:outlier-count cleaned-data))
+            (when target
+              (log/info
+               "  Target:"
+               (:target-ms target)
+               "ms"
+               (if (:passes-target? result) "PASS" "FAIL")))
+            (swap! benchmark-results assoc name result)
+            (resolve result))))))))
 
 ;; =============================================================================
 ;; Benchmark Suite
@@ -301,10 +291,10 @@
 ;; Results Export
 ;; =============================================================================
 
-(defn results-to-json
+(defn results->json
   "Converts benchmark results to JSON string."
   ([]
-   (results-to-json @benchmark-results))
+   (results->json @benchmark-results))
   ([results]
    (js/JSON.stringify (clj->js results) nil 2)))
 
@@ -318,7 +308,7 @@
    (export-results filename @benchmark-results))
   ([filename results]
    (when (exists? js/document)
-     (let [json-str (results-to-json results)
+     (let [json-str (results->json results)
            blob (js/Blob. #js [json-str] #js {:type "application/json"})
            url (js/URL.createObjectURL blob)
            link (js/document.createElement "a")]

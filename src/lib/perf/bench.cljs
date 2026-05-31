@@ -7,7 +7,8 @@
    - Memory tracking (when available)
    - DevTools integration
    - Frame time monitoring for 60fps validation"
-  (:require [taoensso.timbre :as log]))
+  (:require [clojure.math :as math]
+            [taoensso.timbre :as log]))
 
 ;; =============================================================================
 ;; Configuration
@@ -167,7 +168,7 @@
     (let [count (count sorted-values)
           index (-> (* n (dec count))
                     (/ 100)
-                    Math/round
+                    math/round
                     (max 0)
                     (min (dec count)))]
       (nth sorted-values index))))
@@ -183,8 +184,8 @@
           count (count durations)
           sum (reduce + durations)
           mean (/ sum count)
-          variance (/ (reduce + (map #(Math/pow (- % mean) 2) durations)) count)
-          std-dev (Math/sqrt variance)]
+          variance (/ (reduce + (map #(math/pow (- % mean) 2) durations)) count)
+          std-dev (math/sqrt variance)]
       {:count count
        :min (first sorted)
        :max (last sorted)
@@ -290,7 +291,7 @@
   []
   (let [times @frame-times]
     (when (seq times)
-      (let [stats (statistics (map #(hash-map :duration %) times))
+      (let [stats (statistics (for [time times] {:duration time}))
             target 16.67
             dropped (count (filter #(> % target) times))]
         (assoc stats

@@ -4,9 +4,8 @@ Tracks the refactor from global singletons to instantiable, hot-reload-surviving
 Workspaces with reactive same-file sync. Plan: `~/.claude/plans/plan-corrections-to-all-zazzy-candy.md`.
 Branch: `feature/multi-editor-workspaces` (off `ce25759`).
 
-Gate convention (verified): the meaningful lint gate is **clj-kondo + eastwood (0/0)**.
-`npm run lint` also runs splint + kibit, which exit non-zero on the committed baseline
-(~94 splint warnings, ~40 kibit suggestions — pre-existing, advisory). Benchmarks are
+Gate convention (verified): the full lint gate is **clj-kondo + eastwood + splint + kibit (0)**.
+Benchmarks are
 **unpinned** (no sudo CPU pinning available): measured per-metric noise between two runs
 of identical code is ~±70%, so benchmark comparisons here distinguish *real* regressions
 (consistent across replicate runs + a plausible mechanism) from noise.
@@ -212,7 +211,7 @@ The 3rd dead abstraction (`lib.lifecycle`, ~311 LOC) is now per-instance AND wir
   `:emit-timers` (clear) — with priorities. The unmount effect's former hand-ordered cleanup is
   replaced by one `stop-all-sync!` that tears them down in reverse-priority order (LSP → view →
   sub → timers — identical to the previous order). `stop-all-sync!` (new) is a synchronous,
-  ordered cleanup-fn pass so DOM teardown is not deferred into an async go-block (avoids a
+  ordered cleanup-fn pass so DOM teardown does not route through an async go-block (avoids a
   strict-mode remount racing the destroy).
 
 **Results:** test:debug **513/513**, clj-kondo 0/0, eastwood 0/0, test:types clean.
@@ -272,7 +271,7 @@ doc_sync_test pre-existed). Verified across all gates:
 **Performance:** the keystroke hot path is unchanged by Phases 5b/6 — the didChange accumulation
 is the same single `swap!` (now on the per-workspace `:lsp` atom instead of the per-editor
 state-atom), and lifecycle registration happens once at mount, not per-keystroke. EXP-007 / EXP-009
-/ EXP-010 / EXP-011 invariants preserved (no per-keystroke DataScript query; idle-deferred DB sync;
+/ EXP-010 / EXP-011 invariants preserved (no per-keystroke DataScript query; idle-scheduled DB sync;
 incremental ranges from the origin transaction). Benchmark-gated (`benchmark:gate`, +150%
 catastrophic-only threshold given unpinned CPU noise).
 
@@ -298,11 +297,9 @@ initial Phase-5b tests had missed, since they only checked the OUTBOUND LSP path
    path; no client→CM cycle (it self-clears on disconnect via a closure-captured interval id).
    New assertion proves it starts on connect.
 
-Remaining (pre-existing, OUT OF SCOPE of this workstream, disclosed not hidden): the demo's
-`:lsp/connected?` re-frame sub (`app.subs`) is fully orphaned — nothing writes the app-db
-`[:lsp lang :connected?]` it reads, and no view subscribes to it. It is pre-existing demo dead
-code, NOT one of the three named dead abstractions (which are all wired), and wiring it would mean
-inventing demo behavior. Flagged for the maintainer to wire or remove.
+Current app-event completion: editor `connect`, `lsp-initialized`, and `disconnect` events now update
+the demo app-db LSP state through `::handle-editor-event`; the prior orphaned `:lsp/connected?`
+reader has a writer path and test coverage.
 
 ## Status — COMPLETE
 
@@ -312,5 +309,5 @@ LSP diagnostics fan out to every pane on a file), one coherent per-workspace/per
 with reconnect + stale-request cleanup on by default, all three formerly-dead abstractions wired,
 and the picked engineering gaps (CI benchmark gate, demo dep-sync check, Karma WASM guard) closed.
 No module-global singletons remain for editor state; the only module cell is the `defonce` default
-Workspace (the deliberate hot-reload anchor). Final: **514/514** test:debug, clj-kondo/eastwood 0/0,
-tsd clean.
+Workspace (the deliberate hot-reload anchor). Final: **516/516** test:debug and test:release, full lint 0,
+tsd clean, formal local and CI-safe gates green.

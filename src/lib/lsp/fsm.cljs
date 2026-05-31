@@ -19,7 +19,7 @@
   {:disconnected #{:connecting}
    :connecting #{:connected :error :disconnected}
    :connected #{:initializing :disconnecting :error}
-   :initializing #{:initialized :error :disconnected}
+   :initializing #{:initialized :disconnecting :error :disconnected}
    :initialized #{:disconnecting :error :disconnected}
    :disconnecting #{:disconnected}
    :error #{:disconnected :connecting}})

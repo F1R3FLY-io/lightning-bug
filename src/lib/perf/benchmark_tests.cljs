@@ -215,10 +215,9 @@
    fetching diagnostics, and fetching symbols."
   []
   ;; Simulate a typical editor event cycle
-  (let [uri (db/active-uri conn)]
-    (when uri
-      (db/diagnostics-by-uri conn uri)
-      (db/symbols-by-uri conn uri))))
+  (when-let [uri (db/active-uri conn)]
+    (db/diagnostics-by-uri conn uri)
+    (db/symbols-by-uri conn uri)))
 
 ;; =============================================================================
 ;; Query Coalescence Benchmarks (EXP-007)
@@ -254,11 +253,10 @@
   "Benchmarks sequential queries for active document context (baseline for EXP-007).
    Simulates the old coeffect pattern: active-uri -> doc-text-lang -> doc-id-version."
   []
-  (let [uri (db/active-uri conn)]
-    (when uri
-      (let [[text lang] (db/doc-text-lang-by-uri conn uri)
-            [_ version] (db/document-id-version-by-uri conn uri)]
-        {:uri uri :text text :language lang :version version}))))
+  (when-let [uri (db/active-uri conn)]
+    (let [[text lang] (db/doc-text-lang-by-uri conn uri)
+          [_ version] (db/document-id-version-by-uri conn uri)]
+      {:uri uri :text text :language lang :version version})))
 
 (defn sequential-document-lookup-benchmark
   "Benchmarks sequential queries for document lookup (baseline for EXP-007).
@@ -467,7 +465,7 @@
                                                                    :indent-size 2}}
                                             :tree-sitter-wasm "/js/tree-sitter.wasm"})]
                       ;; Clear cached language to force re-init
-                      (when-let [langs-atom (some-> syntax/languages)]
+                      (when-let [langs-atom syntax/languages]
                         (swap! langs-atom dissoc "rholang"))
 
                       (go
@@ -604,11 +602,11 @@
   (js/Promise.
    (fn [resolve _]
      (let [start (js/performance.now)]
-       (-> (simulate-scroll view target-line)
-           (.then (fn [scroll-result]
-                    (let [end (js/performance.now)]
-                      (resolve (assoc scroll-result
-                                      :frame-time-ms (- end start)))))))))))
+       (.then (simulate-scroll view target-line)
+              (fn [scroll-result]
+                (let [end (js/performance.now)]
+                  (resolve (assoc scroll-result
+                                  :frame-time-ms (- end start))))))))))
 
 (defn scroll-performance-benchmark
   "Benchmarks scroll performance with EXP-005 viewport caching.
@@ -911,7 +909,7 @@
 ;; Export for Browser/Node
 ;; =============================================================================
 
-(defn ^:export runBenchmarks
+(defn run-benchmarks
   "Entry point for running benchmarks from JavaScript.
    Sets window.benchmarkComplete to true when done.
    Stores results in window.currentResults."
@@ -942,7 +940,9 @@
           (set! (.-currentResults js/window) #js {:error (.-message e)}))
         nil))))
 
-(defn ^:export runQuickTest
+(goog/exportSymbol "lib.perf.benchmark_tests.runBenchmarks" run-benchmarks)
+
+(defn run-quick-test
   "Entry point for quick benchmark testing from JavaScript.
    Sets window.benchmarkComplete to true when done."
   []
@@ -972,20 +972,28 @@
           (set! (.-currentResults js/window) #js {:error (.-message e)}))
         nil))))
 
-(defn ^:export getResults
+(goog/exportSymbol "lib.perf.benchmark_tests.runQuickTest" run-quick-test)
+
+(defn get-results-js
   "Returns benchmark results as a JavaScript object."
   []
   (clj->js (or @current-results (runner/get-results))))
 
-(defn ^:export exportResults
+(goog/exportSymbol "lib.perf.benchmark_tests.getResults" get-results-js)
+
+(defn export-results-js
   "Exports results to a downloadable JSON file."
   [filename]
   (runner/export-results filename))
 
-(defn ^:export isComplete
+(goog/exportSymbol "lib.perf.benchmark_tests.exportResults" export-results-js)
+
+(defn complete?
   "Returns true if benchmarks have completed."
   []
   @benchmark-complete)
+
+(goog/exportSymbol "lib.perf.benchmark_tests.isComplete" complete?)
 
 (defn ^:export reset
   "Resets benchmark state for a new run."
@@ -1002,7 +1010,7 @@
 ;; Scroll Performance Benchmark Exports (EXP-005a)
 ;; =============================================================================
 
-(defn ^:export runScrollBenchmark
+(defn run-scroll-benchmark
   "Entry point for running scroll performance benchmark from JavaScript.
    This is a dedicated benchmark for validating EXP-005 viewport caching.
 
@@ -1040,21 +1048,27 @@
            (teardown-scroll-benchmark!)
            (reject e)))))))
 
-(defn ^:export getCacheStats
+(goog/exportSymbol "lib.perf.benchmark_tests.runScrollBenchmark" run-scroll-benchmark)
+
+(defn get-cache-stats-js
   "Returns current cache statistics from the syntax highlighting system."
   []
-  (syntax/getCacheStats))
+  (syntax/get-cache-stats-js))
 
-(defn ^:export resetCacheStats
+(goog/exportSymbol "lib.perf.benchmark_tests.getCacheStats" get-cache-stats-js)
+
+(defn reset-cache-stats-js
   "Resets cache statistics to zero."
   []
-  (syntax/resetCacheStats))
+  (syntax/reset-cache-stats!))
+
+(goog/exportSymbol "lib.perf.benchmark_tests.resetCacheStats" reset-cache-stats-js)
 
 ;; =============================================================================
 ;; Query Cache Statistics (EXP-006)
 ;; =============================================================================
 
-(defn ^:export getQueryCacheStats
+(defn get-query-cache-stats
   "Returns current query cache statistics.
 
    Returns a JavaScript object with:
@@ -1067,15 +1081,21 @@
   []
   (clj->js (qc/get-stats)))
 
-(defn ^:export resetQueryCacheStats
+(goog/exportSymbol "lib.perf.benchmark_tests.getQueryCacheStats" get-query-cache-stats)
+
+(defn reset-query-cache-stats
   "Resets query cache statistics to zero."
   []
   (qc/reset-stats!))
 
-(defn ^:export invalidateQueryCache
+(goog/exportSymbol "lib.perf.benchmark_tests.resetQueryCacheStats" reset-query-cache-stats)
+
+(defn invalidate-query-cache
   "Invalidates all query cache entries."
   []
   (qc/invalidate-all!))
+
+(goog/exportSymbol "lib.perf.benchmark_tests.invalidateQueryCache" invalidate-query-cache)
 
 ;; =============================================================================
 ;; Module Initialization

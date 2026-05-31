@@ -162,7 +162,7 @@
              (db/update-active-uri! (ws/default-conn) uri)
 
              ;; Step 2: Verify no diagnostics initially
-             (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))))
+             (is (zero? (count @(rf/subscribe [:lsp/diagnostics]))))
 
              ;; Step 3: Edit document (introduce error)
              (db/update-document-text-by-uri! (ws/default-conn) uri "invalid { code")
@@ -191,7 +191,7 @@
              (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil [])
 
              ;; Step 8: Verify diagnostics cleared
-             (is (= 0 (count @(rf/subscribe [:lsp/diagnostics])))))
+             (is (zero? (count @(rf/subscribe [:lsp/diagnostics])))))
            (done))))
 
 ;; =============================================================================

@@ -12,7 +12,7 @@
    ["react" :as react]
    ["react-dom/client" :as rdclient]
    ["@codemirror/view" :refer [EditorView]]
-   [lib.core :refer [Editor createWorkspace]]
+   [lib.core :refer [Editor create-workspace]]
    [lib.workspace :as ws]
    [lib.editor.syntax :as syntax]
    [lib.state :refer [resources]]))
@@ -54,22 +54,28 @@
 (defn- cursor-head [^js view]
   (.. view -state -selection -main -head))
 
+(defn- open-document! [^js editor uri text language]
+  (.openDocument editor uri text language))
+
+(defn- activate-document! [^js editor uri]
+  (.activateDocument editor uri))
+
 (deftest split-panes-sync-live
   (testing "two panes over one file: A's user edit propagates live to B, B's cursor rebases, no echo"
     (async done
       (go
-        (let [workspace (createWorkspace)
+        (let [workspace (create-workspace)
               pane-a (mount-editor! workspace)
               pane-b (mount-editor! workspace)
               uri "inmemory:///split.txt"]
           (<! (timeout 200))                       ; both editors mount + views ready
-          (let [ea @(:ref-atom pane-a)
-                eb @(:ref-atom pane-b)]
+          (let [^js ea @(:ref-atom pane-a)
+                ^js eb @(:ref-atom pane-b)]
             (is (some? ea) "pane A handle present")
             (is (some? eb) "pane B handle present")
-            (.openDocument ea uri "hello world" "text")  ; creates + activates in shared ws
+            (open-document! ea uri "hello world" "text")  ; creates + activates in shared ws
             (<! (timeout 250))
-            (.activateDocument eb uri)               ; B splits onto the same file
+            (activate-document! eb uri)               ; B splits onto the same file
             (<! (timeout 250))
             (let [va (view-of pane-a)
                   vb (view-of pane-b)]
@@ -93,16 +99,16 @@
   (testing "either pane can drive: an edit in B also propagates to A"
     (async done
       (go
-        (let [workspace (createWorkspace)
+        (let [workspace (create-workspace)
               pane-a (mount-editor! workspace)
               pane-b (mount-editor! workspace)
               uri "inmemory:///bidir.txt"]
           (<! (timeout 200))
-          (let [ea @(:ref-atom pane-a)
-                eb @(:ref-atom pane-b)]
-            (.openDocument ea uri "base" "text")
+          (let [^js ea @(:ref-atom pane-a)
+                ^js eb @(:ref-atom pane-b)]
+            (open-document! ea uri "base" "text")
             (<! (timeout 250))
-            (.activateDocument eb uri)
+            (activate-document! eb uri)
             (<! (timeout 250))
             (let [va (view-of pane-a)
                   vb (view-of pane-b)]

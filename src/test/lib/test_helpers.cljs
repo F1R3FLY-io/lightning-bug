@@ -376,7 +376,7 @@
   (set (map :uri (db/documents (ws/default-conn)))))
 
 (defn snapshot-db-state
-  "Captures current database state for later comparison.
+  "Captures current database state for subsequent comparison.
    Returns a map with document count, diagnostics count, symbols count,
    active URI, and sample data checksums."
   []

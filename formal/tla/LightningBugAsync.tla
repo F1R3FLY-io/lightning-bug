@@ -30,9 +30,13 @@ VARIABLE version
 VARIABLE pendingChange
 \* @type: Str -> Int;
 VARIABLE diagnosticVersion
+\* @type: Set([uri: Str, openedAtSend: Bool]);
+VARIABLE didChangeLog
+\* @type: Set([uri: Str, sharedAtClose: Bool]);
+VARIABLE didCloseLog
 
 vars == <<mounted, active, docs, lspState, opened, version, pendingChange,
-          diagnosticVersion>>
+          diagnosticVersion, didChangeLog, didCloseLog>>
 
 LspStates == {"disconnected", "connecting", "initialized"}
 
@@ -45,38 +49,41 @@ Init ==
   /\ version = [u \in Uris |-> 0]
   /\ pendingChange = {}
   /\ diagnosticVersion = [u \in Uris |-> 0]
+  /\ didChangeLog = {}
+  /\ didCloseLog = {}
 
 Mount(p) ==
   /\ mounted[p] = FALSE
   /\ mounted' = [mounted EXCEPT ![p] = TRUE]
   /\ UNCHANGED <<active, docs, lspState, opened, version,
-                pendingChange, diagnosticVersion>>
+                pendingChange, diagnosticVersion, didChangeLog, didCloseLog>>
 
 Unmount(p) ==
   /\ mounted[p]
   /\ mounted' = [mounted EXCEPT ![p] = FALSE]
   /\ active' = [active EXCEPT ![p] = NoUri]
   /\ UNCHANGED <<docs, lspState, opened, version,
-                pendingChange, diagnosticVersion>>
+                pendingChange, diagnosticVersion, didChangeLog, didCloseLog>>
 
 ConnectLsp ==
   /\ lspState = "disconnected"
   /\ lspState' = "connecting"
   /\ UNCHANGED <<mounted, active, docs, opened, version,
-                pendingChange, diagnosticVersion>>
+                pendingChange, diagnosticVersion, didChangeLog, didCloseLog>>
 
 InitializeLsp ==
   /\ lspState = "connecting"
   /\ lspState' = "initialized"
   /\ UNCHANGED <<mounted, active, docs, opened, version,
-                pendingChange, diagnosticVersion>>
+                pendingChange, diagnosticVersion, didChangeLog, didCloseLog>>
 
 OpenDocument(p, u) ==
   /\ mounted[p]
   /\ active' = [active EXCEPT ![p] = u]
   /\ docs' = docs \cup {u}
   /\ version' = [version EXCEPT ![u] = IF version[u] = 0 THEN 1 ELSE @]
-  /\ UNCHANGED <<mounted, lspState, opened, pendingChange, diagnosticVersion>>
+  /\ UNCHANGED <<mounted, lspState, opened, pendingChange, diagnosticVersion,
+                didChangeLog, didCloseLog>>
 
 EnsureDidOpen(p, u) ==
   /\ mounted[p]
@@ -85,7 +92,7 @@ EnsureDidOpen(p, u) ==
   /\ lspState = "initialized"
   /\ opened' = opened \cup {u}
   /\ UNCHANGED <<mounted, active, docs, lspState, version,
-                pendingChange, diagnosticVersion>>
+                pendingChange, diagnosticVersion, didChangeLog, didCloseLog>>
 
 Edit(p, u) ==
   /\ mounted[p]
@@ -95,13 +102,14 @@ Edit(p, u) ==
   /\ version' = [version EXCEPT ![u] = @ + 1]
   /\ pendingChange' = IF u \in opened THEN pendingChange \cup {u} ELSE pendingChange
   /\ diagnosticVersion' = [diagnosticVersion EXCEPT ![u] = 0]
-  /\ UNCHANGED <<mounted, active, docs, lspState, opened>>
+  /\ UNCHANGED <<mounted, active, docs, lspState, opened, didChangeLog, didCloseLog>>
 
 FlushDidChange(u) ==
   /\ u \in pendingChange
   /\ pendingChange' = pendingChange \ {u}
+  /\ didChangeLog' = didChangeLog \cup {[uri |-> u, openedAtSend |-> u \in opened]}
   /\ UNCHANGED <<mounted, active, docs, lspState, opened, version,
-                diagnosticVersion>>
+                diagnosticVersion, didCloseLog>>
 
 ReceiveDiagnostics(u, v) ==
   /\ u \in docs
@@ -110,7 +118,8 @@ ReceiveDiagnostics(u, v) ==
   /\ v \in 0..MaxVersion
   /\ diagnosticVersion' =
        [diagnosticVersion EXCEPT ![u] = IF v = version[u] THEN v ELSE @]
-  /\ UNCHANGED <<mounted, active, docs, lspState, opened, version, pendingChange>>
+  /\ UNCHANGED <<mounted, active, docs, lspState, opened, version, pendingChange,
+                didChangeLog, didCloseLog>>
 
 CloseDocument(p, u) ==
   /\ mounted[p]
@@ -120,7 +129,11 @@ CloseDocument(p, u) ==
        /\ docs' = IF shared THEN docs ELSE docs \ {u}
        /\ opened' = IF shared THEN opened ELSE opened \ {u}
        /\ pendingChange' = IF shared THEN pendingChange ELSE pendingChange \ {u}
-  /\ UNCHANGED <<mounted, lspState, version, diagnosticVersion>>
+       /\ didCloseLog' =
+            IF shared
+            THEN didCloseLog
+            ELSE didCloseLog \cup {[uri |-> u, sharedAtClose |-> shared]}
+  /\ UNCHANGED <<mounted, lspState, version, diagnosticVersion, didChangeLog>>
 
 Next ==
   \/ ConnectLsp \/ InitializeLsp
@@ -142,6 +155,8 @@ TypeOK ==
   /\ version \in [Uris -> 0..MaxVersion]
   /\ pendingChange \subseteq Uris
   /\ diagnosticVersion \in [Uris -> 0..MaxVersion]
+  /\ didChangeLog \subseteq {[uri |-> u, openedAtSend |-> b] : u \in Uris, b \in BOOLEAN}
+  /\ didCloseLog \subseteq {[uri |-> u, sharedAtClose |-> b] : u \in Uris, b \in BOOLEAN}
 
 ActiveDocumentExists ==
   \A p \in Panes: active[p] # NoUri => active[p] \in docs
@@ -157,5 +172,21 @@ DiagnosticsAreCurrent ==
 
 NoWorkForClosedDocs ==
   pendingChange \subseteq docs
+
+DidChangeSentAfterOpen ==
+  \A d \in didChangeLog: d.openedAtSend = TRUE
+
+DidCloseOnlyWhenUnshared ==
+  \A d \in didCloseLog: d.sharedAtClose = FALSE
+
+PublicTraceInv ==
+  /\ TypeOK
+  /\ ActiveDocumentExists
+  /\ DidChangeRequiresDidOpen
+  /\ OpenedDocumentsExist
+  /\ DiagnosticsAreCurrent
+  /\ NoWorkForClosedDocs
+  /\ DidChangeSentAfterOpen
+  /\ DidCloseOnlyWhenUnshared
 
 ================================================================================

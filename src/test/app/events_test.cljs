@@ -230,7 +230,7 @@
 ;; =============================================================================
 
 (deftest run-agent-sets-status-and-schedules-validation
-  (testing "::run-agent sets status to running and dispatches later"
+  (testing "::run-agent sets status to running and schedules validation"
     (rf/dispatch-sync [::events/run-agent])
     (is (= :running (:status @rf-db/app-db)))))
 
@@ -244,11 +244,42 @@
 ;; Handle Editor Event Tests
 ;; =============================================================================
 
-(deftest handle-editor-event-placeholder
+(deftest handle-editor-event-updates-known-state
+  (testing "::handle-editor-event applies editor events to app db"
+    (rf/dispatch-sync [::events/handle-editor-event
+                       {:type "selection-change"
+                        :data {:cursor {:line 4 :column 2}
+                               :selection {:from {:line 4 :column 1}
+                                           :to {:line 4 :column 3}}}}])
+    (is (= {:line 4 :column 2} (get-in @rf-db/app-db [:editor :cursor])))
+    (is (= {:from {:line 4 :column 1}
+            :to {:line 4 :column 3}}
+           (get-in @rf-db/app-db [:editor :selection])))
+    (rf/dispatch-sync [::events/handle-editor-event
+                       {:type "highlight-change"
+                        :data {:from {:line 1 :column 0}
+                               :to {:line 1 :column 6}}}])
+    (is (= {:from {:line 1 :column 0}
+            :to {:line 1 :column 6}}
+           (get-in @rf-db/app-db [:editor :highlights])))
+    (rf/dispatch-sync [::events/handle-editor-event {:type "ready" :data {}}])
+    (is (true? (get-in @rf-db/app-db [:editor :ready])))))
+
+(deftest handle-editor-event-tracks-lsp-state
+  (testing "::handle-editor-event reflects LSP connection events"
+    (rf/dispatch-sync [::events/handle-editor-event {:type "connect" :data {:lang "rholang"}}])
+    (is (true? (get-in @rf-db/app-db [:lsp "rholang" :connected?])))
+    (rf/dispatch-sync [::events/handle-editor-event {:type "lsp-initialized" :data {:lang "rholang"}}])
+    (is (= {:connected? true :initialized? true}
+           (get-in @rf-db/app-db [:lsp "rholang"])))
+    (rf/dispatch-sync [::events/handle-editor-event {:type "disconnect" :data {:lang "rholang"}}])
+    (is (= {:connected? false :initialized? false}
+           (get-in @rf-db/app-db [:lsp "rholang"])))))
+
+(deftest handle-editor-event-ignores-unknown-types
   (testing "::handle-editor-event handles unknown event types gracefully"
     (let [initial-db @rf-db/app-db]
       (rf/dispatch-sync [::events/handle-editor-event {:type :unknown :data {}}])
-      ;; Should return db unchanged for unknown types
       (is (= initial-db @rf-db/app-db)))))
 
 ;; =============================================================================

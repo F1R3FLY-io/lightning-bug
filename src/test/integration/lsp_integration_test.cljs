@@ -59,20 +59,18 @@
 
 (deftest connection-manager-tracks-state
   (testing "Connection manager tracks connection state correctly"
-    (let [state-atom (r/atom {:lsp {"rholang" {:state :initialized}}})]
-      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
-        ;; Should report as connected when initialized
-        (is (true? (cm/connected? manager "rholang")))
-        (is (true? (cm/initialized? manager "rholang")))
-        ;; Non-existent language
-        (is (false? (cm/connected? manager "unknown")))))))
+    (let [state-atom (r/atom {:lsp {"rholang" {:state :initialized}}})
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
+      (is (true? (cm/connected? manager "rholang")))
+      (is (true? (cm/initialized? manager "rholang")))
+      (is (false? (cm/connected? manager "unknown"))))))
 
 (deftest connection-manager-handles-disconnected-state
   (testing "Connection manager reports disconnected correctly"
-    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})]
-      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
-        (is (false? (cm/connected? manager "rholang")))
-        (is (false? (cm/initialized? manager "rholang")))))))
+    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
+      (is (false? (cm/connected? manager "rholang")))
+      (is (false? (cm/initialized? manager "rholang"))))))
 
 ;; =============================================================================
 ;; Pending Request Management Tests
@@ -365,18 +363,17 @@
 
 (deftest multiple-languages-tracked-independently
   (testing "Multiple language connections are tracked independently"
-    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :initialized}
-                                               "javascript" {:state :connecting}
-                                               "text" {:state :disconnected}}})]
-      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
-        (is (true? (cm/initialized? manager "rholang")))
-        (is (true? (cm/connected? manager "rholang")))
-
-        (is (false? (cm/initialized? manager "javascript")))
-        (is (false? (cm/connected? manager "javascript")))
-
-        (is (false? (cm/initialized? manager "text")))
-        (is (false? (cm/connected? manager "text")))))))
+    (let [state-atom (reagent.core/atom
+                      {:lsp {"rholang" {:state :initialized}
+                             "javascript" {:state :connecting}
+                             "text" {:state :disconnected}}})
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
+      (is (true? (cm/initialized? manager "rholang")))
+      (is (true? (cm/connected? manager "rholang")))
+      (is (false? (cm/initialized? manager "javascript")))
+      (is (false? (cm/connected? manager "javascript")))
+      (is (false? (cm/initialized? manager "text")))
+      (is (false? (cm/connected? manager "text"))))))
 
 ;; =============================================================================
 ;; Document Sync Integration Tests
@@ -452,7 +449,7 @@
       (db/update-active-uri! (ws/default-conn) uri)
 
       ;; Verify initial state (no diagnostics)
-      (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))))
+      (is (zero? (count @(rf/subscribe [:lsp/diagnostics]))))
 
       ;; Step 2: Simulate LSP publishDiagnostics notification
       (let [lsp-notification {:jsonrpc "2.0"
@@ -491,7 +488,7 @@
       (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil [])
 
       ;; Step 5: Verify diagnostics cleared
-      (is (= 0 (count @(rf/subscribe [:lsp/diagnostics]))) "Diagnostics cleared after fix"))))
+      (is (zero? (count @(rf/subscribe [:lsp/diagnostics]))) "Diagnostics cleared after fix"))))
 
 (deftest lsp-symbol-update-flow
   (testing "Complete symbol flow: request -> response -> flatten -> DB"
@@ -544,7 +541,7 @@
                 inner-sym (first (filter #(= "Inner" (:name %)) syms))
                 method-sym (first (filter #(= "method" (:name %)) syms))]
             ;; Outer has no parent (root level)
-            (is (= 0 (:parent outer-sym)) "Outer has no parent (root)")
+            (is (zero? (:parent outer-sym)) "Outer has no parent (root)")
             ;; Inner and method should have non-zero parent references
             (is (not= 0 (:parent inner-sym)) "Inner has a parent")
             (is (not= 0 (:parent method-sym)) "method has a parent")))))))
@@ -626,7 +623,7 @@
         (is (= 2 (count diags2)) "Doc2 has 2 diagnostics"))
 
       (let [diags3 (db/diagnostics-by-uri (ws/default-conn) uri3)]
-        (is (= 0 (count diags3)) "Doc3 has 0 diagnostics")))))
+        (is (zero? (count diags3)) "Doc3 has 0 diagnostics")))))
 
 (deftest symbol-update-replaces-previous
   (testing "Symbol updates replace previous symbols for a document"
@@ -664,19 +661,14 @@
                       nil uri)]
         (db/replace-symbols! (ws/default-conn) uri symbols2))
       (is (= 2 (count @(rf/subscribe [:lsp/symbols]))))
-      (is (not (some #(= "OldSymbol" (:name %)) @(rf/subscribe [:lsp/symbols])))))))
+      (is (not-any? #(= "OldSymbol" (:name %)) @(rf/subscribe [:lsp/symbols]))))))
 
 (deftest lsp-state-affects-feature-availability
   (testing "LSP state affects whether features are available"
-    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})]
-      (let [manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
-        ;; Disconnected: features not available
-        (is (false? (cm/initialized? manager "rholang")))
-
-        ;; Transition to initialized
-        (swap! state-atom assoc-in [:lsp "rholang" :state] :initialized)
-        (is (true? (cm/initialized? manager "rholang")))
-
-        ;; Transition to error
-        (swap! state-atom assoc-in [:lsp "rholang" :state] :error)
-        (is (false? (cm/initialized? manager "rholang")))))))
+    (let [state-atom (reagent.core/atom {:lsp {"rholang" {:state :disconnected}}})
+          manager (cm/make-connection-manager state-atom nil (ws/default-conn))]
+      (is (false? (cm/initialized? manager "rholang")))
+      (swap! state-atom assoc-in [:lsp "rholang" :state] :initialized)
+      (is (true? (cm/initialized? manager "rholang")))
+      (swap! state-atom assoc-in [:lsp "rholang" :state] :error)
+      (is (false? (cm/initialized? manager "rholang"))))))

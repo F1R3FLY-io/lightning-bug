@@ -20,9 +20,46 @@
  ::handle-editor-event
  (fn [db [_ evt]]
    (let [type (:type evt)
-         _data (:data evt)]
+         data (:data evt)
+         lang (:lang data)]
      (case type
-       ;; placeholder
+       "selection-change"
+       (-> db
+           (assoc-in [:editor :cursor] (:cursor data))
+           (assoc-in [:editor :selection] (:selection data)))
+
+       "cursor-change"
+       (assoc-in db [:editor :cursor] (:cursor data))
+
+       "highlight-change"
+       (assoc-in db [:editor :highlights] data)
+
+       "search-term-change"
+       (assoc-in db [:search :term] (:term data))
+
+       "ready"
+       (assoc-in db [:editor :ready] true)
+
+       "connect"
+       (cond-> db
+         lang (assoc-in [:lsp lang :connected?] true))
+
+       "lsp-initialized"
+       (cond-> db
+         lang (assoc-in [:lsp lang] {:connected? true
+                                     :initialized? true}))
+
+       "disconnect"
+       (cond-> db
+         lang (assoc-in [:lsp lang] {:connected? false
+                                     :initialized? false}))
+
+       "lsp-error"
+       (assoc db :last-error data)
+
+       "error"
+       (assoc db :last-error data)
+
        db))))
 
 (rf/reg-event-db

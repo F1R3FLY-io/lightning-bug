@@ -104,10 +104,10 @@ docs/benchmarks/
 ├── README.md                 # This file
 ├── ledger/                   # Scientific experiment logs
 │   ├── BASELINE_*.md         # Initial baseline documentation
-│   └── EXP-XXX_*.md          # Individual experiment logs
+│   └── EXP-NNN_*.md          # Individual experiment logs
 ├── results/                  # Machine-readable results
 │   ├── baseline.json         # Current baseline measurements
-│   └── exp-XXX.json          # Experiment results
+│   └── exp-NNN.json          # Experiment results
 └── analysis/                 # Analysis documents
     └── bottleneck-analysis.md  # Profiling findings
 ```
@@ -137,7 +137,7 @@ Before any optimization:
 ### 2. Create Experiment Branch
 
 ```bash
-git checkout -b experiment/exp-XXX-description main
+git checkout -b experiment/exp-NNN-short-name main
 ```
 
 ### 3. Implement Optimization
@@ -149,7 +149,7 @@ git checkout -b experiment/exp-XXX-description main
 
 ```bash
 npm run benchmark:serve
-# Export results as exp-XXX.json
+# Export results as exp-NNN.json
 ```
 
 ### 5. Statistical Analysis

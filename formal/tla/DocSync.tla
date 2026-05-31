@@ -91,4 +91,15 @@ SeqMatchesEdits ==
 EmptyStreamHasNoSubscribers ==
   \A u \in Uris: Cardinality(subscribers[u]) = 0 => subscribers[u] = {}
 
+DeliverySeqPrecedesWorkspace ==
+  \A d \in deliveries: d.n < workspaceText[d.uri]
+
+DocSyncInv ==
+  /\ TypeOK
+  /\ SubscribedPanesConverge
+  /\ NoOriginEcho
+  /\ SeqMatchesEdits
+  /\ EmptyStreamHasNoSubscribers
+  /\ DeliverySeqPrecedesWorkspace
+
 ================================================================================

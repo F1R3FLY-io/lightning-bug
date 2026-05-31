@@ -44,8 +44,8 @@
                                (last line-info))]
                   (clj->js line)))
      "line" (fn [n]
-              (let [line (nth line-info (dec n) nil)]
-                (when line (clj->js line)))))))
+              (when-let [line (nth line-info (dec n) nil)]
+                (clj->js line))))))
 
 ;; =============================================================================
 ;; Position Conversion Tests
@@ -79,7 +79,7 @@
   (testing "pos->offset with zero-based positions"
     (let [doc (make-mock-doc "hello\nworld\ntest")]
       ;; Line 0, col 0 -> offset 0
-      (is (= 0 (utils/pos->offset doc {:line 0 :column 0} false)))
+      (is (zero? (utils/pos->offset doc {:line 0, :column 0} false)))
       ;; Line 0, col 3 -> offset 3
       (is (= 3 (utils/pos->offset doc {:line 0 :column 3} false)))
       ;; Line 1, col 0 -> offset 6
@@ -93,7 +93,7 @@
   (testing "pos->offset with one-based positions"
     (let [doc (make-mock-doc "hello\nworld")]
       ;; Line 1, col 1 -> offset 0
-      (is (= 0 (utils/pos->offset doc {:line 1 :column 1} true)))
+      (is (zero? (utils/pos->offset doc {:line 1, :column 1} true)))
       ;; Line 1, col 4 -> offset 3
       (is (= 3 (utils/pos->offset doc {:line 1 :column 4} true)))
       ;; Line 2, col 1 -> offset 6
@@ -239,7 +239,7 @@
 (def gen-simple-text
   "Generator for simple multi-line text (no newline characters in content)."
   (gen/fmap (fn [lines] (clojure.string/join "\n" lines))
-            (gen/vector (gen/fmap #(apply str %) (gen/vector gen/char-alpha 1 20)) 1 10)))
+            (gen/vector (gen/fmap str/join (gen/vector gen/char-alpha 1 20)) 1 10)))
 
 ;; Note: Property tests for offset<->pos roundtrip are complex due to the
 ;; mock object requirements. The unit tests above provide sufficient coverage.

@@ -286,8 +286,8 @@
 (defn stop-all-sync!
   "Synchronously stops all started resources in reverse dependency order by invoking their
   `:cleanup-fn`s. Use when teardown must be synchronous and ordered — e.g. a React effect
-  cleanup tearing down a DOM EditorView, where deferring to the async `stop-all!` go-block
-  would risk a strict-mode remount racing the destroy. Resources implementing the async
+  cleanup tearing down a DOM EditorView, where routing teardown through the async
+  `stop-all!` go-block would risk a strict-mode remount racing the destroy. Resources implementing the async
   IResourceLifecycle should use `stop-all!` instead; this path is cleanup-fn only."
   [reg-atom]
   (let [snapshot @reg-atom

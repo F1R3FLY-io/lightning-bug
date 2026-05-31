@@ -290,7 +290,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Removed the need to stub `goog` at run time.
+- Removed the need to provide a runtime `goog` shim.
 
 ## [0.2.2] - 2025-08-18
 

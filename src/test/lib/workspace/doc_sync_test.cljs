@@ -32,11 +32,11 @@
           sub-b (ds/subscribe-pane w uri :pane-b (fn [d] (swap! b-got conj d)))]
       (is (ds/has-peers? w uri) "two panes subscribed")
       (ds/publish-delta! w uri {:origin :pane-a :changes "CHANGES-A"})
-      (is (= 0 (count @a-got)) "origin pane does NOT receive its own delta (echo-suppressed)")
+      (is (zero? (count @a-got)) "origin pane does NOT receive its own delta (echo-suppressed)")
       (is (= 1 (count @b-got)) "the other pane receives it")
       (is (= "CHANGES-A" (:changes (first @b-got))) "delta payload intact")
       (is (= uri (:uri (first @b-got))) "delta stamped with uri")
-      (is (= 0 (:seq (first @b-got))) "first delta has seq 0")
+      (is (zero? (:seq (first @b-got))) "first delta has seq 0")
       (ds/publish-delta! w uri {:origin :pane-b :changes "CHANGES-B"})
       (is (= 1 (count @a-got)) "pane-a now receives pane-b's delta")
       (is (= 1 (:seq (first @a-got))) "seq monotonically increments")

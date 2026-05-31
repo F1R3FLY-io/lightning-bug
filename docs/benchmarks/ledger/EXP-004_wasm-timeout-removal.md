@@ -24,7 +24,7 @@ Code analysis of `src/lib/editor/syntax.cljs` revealed a hardcoded 100ms timeout
 ;; Load queries and parser in parallel
 ```
 
-This timeout appeared to be a development-time workaround that was never removed. There was no documented reason for this delay, and the subsequent code (loading queries and parser) does not depend on any async state that would require waiting.
+This timeout appeared to be a development-time delay that was no longer needed. There was no documented reason for this delay, and the subsequent code (loading queries and parser) does not depend on any async state that would require waiting.
 
 ## Implementation
 
@@ -103,7 +103,7 @@ initialization will reduce syntax init time with no regressions.
 Improvement: -100ms per syntax initialization (deterministic)
 Regressions: None detected
 
-The timeout was a development-time workaround that was never removed.
+The timeout was a development-time delay that was no longer needed.
 The subsequent code (loading queries and parser) does not depend on
 any async state that would require waiting.
 
@@ -115,6 +115,6 @@ Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
 ## Future Considerations
 
 For further startup optimization, consider:
-1. **EXP-005**: Lazy/deferred WASM loading until first parse needed
+1. **EXP-005**: Lazy-on-demand WASM loading until first parse needed
 2. **EXP-006**: Pre-loading WASM during idle time
 3. **EXP-007**: Web worker for parsing to avoid blocking the main thread

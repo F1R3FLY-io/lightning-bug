@@ -9,7 +9,8 @@
    - Sample size calculation for desired power
    - Confidence interval calculations
 
-   All tests use p < 0.05 as the significance threshold by default.")
+   All tests use p < 0.05 as the significance threshold by default."
+  (:require [clojure.math :as math]))
 
 ;; =============================================================================
 ;; Constants
@@ -57,7 +58,7 @@
   "Calculates the sample standard deviation."
   [xs]
   (when-let [v (variance xs)]
-    (Math/sqrt v)))
+    (math/sqrt v)))
 
 (defn median
   "Calculates the median of a sequence."
@@ -77,7 +78,7 @@
     (let [c (count sorted-xs)
           index (-> (* n (dec c))
                     (/ 100)
-                    Math/round
+                    math/round
                     (max 0)
                     (min (dec c)))]
       (nth sorted-xs index))))
@@ -156,12 +157,12 @@
     :else
     (let [max-iter 200
           eps 1e-10
-          factor (/ (Math/pow x a) a)
+          factor (/ (math/pow x a) a)
           ;; Simple series approximation
           result (loop [sum 1.0
                         term 1.0
                         n 1]
-                   (if (or (>= n max-iter) (< (Math/abs term) eps))
+                   (if (or (>= n max-iter) (< (js/Math.abs term) eps))
                      sum
                      (let [new-term (* term
                                        (/ (* (- a n -1) (- b n -1) x)
@@ -181,7 +182,7 @@
 (defn t-p-value
   "Calculates the two-tailed p-value for a t-statistic."
   [t-stat df]
-  (let [p-one-tail (- 1 (t-cdf (Math/abs t-stat) df))]
+  (let [p-one-tail (- 1 (t-cdf (js/Math.abs t-stat) df))]
     (* 2 p-one-tail)))
 
 ;; =============================================================================
@@ -221,7 +222,7 @@
            m2 (mean sample2)
            v1 (variance sample1)
            v2 (variance sample2)
-           se (Math/sqrt (+ (/ v1 n1) (/ v2 n2)))
+           se (math/sqrt (+ (/ v1 n1) (/ v2 n2)))
            t-stat (/ (- m1 m2) se)
            df (welch-df n1 v1 n2 v2)
            p-val (t-p-value t-stat df)
@@ -252,7 +253,7 @@
         n2 (count sample2)
         v1 (variance sample1)
         v2 (variance sample2)]
-    (Math/sqrt (/ (+ (* (dec n1) v1) (* (dec n2) v2))
+    (math/sqrt (/ (+ (* (dec n1) v1) (* (dec n2) v2))
                   (+ n1 n2 -2)))))
 
 (defn cohens-d
@@ -274,7 +275,7 @@
           m2 (mean sample2)
           s-pooled (pooled-std-dev sample1 sample2)
           d (if (zero? s-pooled) 0 (/ (- m1 m2) s-pooled))
-          abs-d (Math/abs d)]
+          abs-d (js/Math.abs d)]
       {:d d
        :magnitude (cond
                     (< abs-d 0.2) "negligible"
@@ -290,8 +291,8 @@
 (defn- rank-data
   "Assigns ranks to combined data, handling ties with average rank."
   [sample1 sample2]
-  (let [combined (concat (map #(vector % 1) sample1)
-                         (map #(vector % 2) sample2))
+  (let [combined (concat (for [item sample1] [item 1])
+                         (for [item sample2] [item 2]))
         sorted (sort-by first combined)
         n (count sorted)
         ;; Assign ranks with tie handling
@@ -343,13 +344,13 @@
            u (min u1 u2)
            ;; Normal approximation (valid for n1, n2 > 10)
            mean-u (/ (* n1 n2) 2)
-           std-u (Math/sqrt (/ (* n1 n2 (+ n1 n2 1)) 12))
+           std-u (math/sqrt (/ (* n1 n2 (+ n1 n2 1)) 12))
            z (if (zero? std-u) 0 (/ (- u mean-u) std-u))
            ;; Two-tailed p-value using normal approximation
            ;; Using standard normal CDF approximation
-           p-val (let [abs-z (Math/abs z)
-                       t (/ 1 (+ 1 (* 0.2316419 abs-z)))
-                       d (/ (* 0.3989423 (Math/exp (/ (* (- abs-z) abs-z) 2))) 1)
+           p-val (let [abs-z (js/Math.abs z)
+                       t (/ 1 (inc (* 0.2316419 abs-z)))
+                       d (* 0.3989423 (math/exp (/ (* (- abs-z) abs-z) 2)))
                        prob (* d t (+ 0.3193815
                                       (* t (+ -0.3565638
                                               (* t (+ 1.781478
@@ -390,7 +391,7 @@
                   (>= power 0.95) (:0.95 z-values)
                   (>= power 0.90) (:0.90 z-values)
                   :else 0.84)  ;; ~0.80 power
-         n (Math/ceil (/ (* 2 (Math/pow (+ z-alpha z-beta) 2))
+         n (math/ceil (/ (* 2 (math/pow (+ z-alpha z-beta) 2))
                          (* effect-size effect-size)))]
      {:sample-size (int n)
       :effect-size effect-size
@@ -420,7 +421,7 @@
      (let [n (count xs)
            m (mean xs)
            s (std-dev xs)
-           se (/ s (Math/sqrt n))
+           se (/ s (math/sqrt n))
            ;; Use z-value for large samples, t for small
            critical (if (> n 30)
                       (get z-values (keyword (str (+ 0.5 (/ level 2)))) 1.96)
@@ -471,7 +472,7 @@
        :p99 (percentile sorted 99)
        :ci-lower (:lower ci)
        :ci-upper (:upper ci)
-       :se (when (> n 1) (/ s (Math/sqrt n)))})))
+       :se (when (> n 1) (/ s (math/sqrt n)))})))
 
 ;; =============================================================================
 ;; Benchmark Comparison
@@ -550,11 +551,11 @@
 
                    (pos? diff)
                    (str "REJECT: Regression detected ("
-                        (.toFixed (Math/abs pct-change) 2) "% slower)")
+                        (.toFixed (js/Math.abs pct-change) 2) "% slower)")
 
                    :else
                    (str "ACCEPT: Significant improvement ("
-                        (.toFixed (Math/abs pct-change) 2) "% faster, p="
+                        (.toFixed (js/Math.abs pct-change) 2) "% faster, p="
                         (.toFixed (:p-value t-test) 4) ", d="
                         (.toFixed (:d effect) 3) ")"))
 

@@ -28,12 +28,12 @@
   "Returns the {:subject :seq :ref-count} entry for (ws, uri), creating it (with a
   fresh Subject) on first use and incrementing the subscriber ref-count."
   [ws uri]
-  (-> (swap! (:doc-streams ws) update uri
-             (fn [entry]
-               (if entry
-                 (update entry :ref-count inc)
-                 {:subject (Subject.) :seq 0 :ref-count 1})))
-      (get uri)))
+  (get (swap! (:doc-streams ws) update uri
+              (fn [entry]
+                (if entry
+                  (update entry :ref-count inc)
+                  {:subject (Subject.) :seq 0 :ref-count 1})))
+       uri))
 
 (defn release-stream!
   "Decrements the subscriber ref-count for (ws, uri); drops the stream entirely when

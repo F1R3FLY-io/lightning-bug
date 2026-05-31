@@ -91,9 +91,29 @@
   ConnectionManager's keyword-based predicates AND legacy flag readers stay in sync."
   [state-atom lang next]
   (let [current (current-state (get-in @state-atom [:lsp lang]))]
-    (when-not (fsm/valid-transition? current next)
-      (log/debug "LSP state transition" current "->" next "for" lang "(outside declared TRANSITIONS)"))
-    (swap! state-atom update-in [:lsp lang] merge {:state next} (fsm/state->flags next))))
+    (if (fsm/valid-transition? current next)
+      (do
+        (swap! state-atom update-in [:lsp lang] merge {:state next} (fsm/state->flags next))
+        true)
+      (do
+        (log/warn "Rejected invalid LSP state transition" current "->" next "for" lang)
+        false))))
+
+(defn- ensure-initializing-state!
+  "Normalizes legacy test/external fixtures that still track only pending
+  initialize requests and derived flags. Real websocket flow already reaches
+  :initializing before an initialize response is handled."
+  [state-atom lang]
+  (let [lsp-state (get-in @state-atom [:lsp lang])
+        current (current-state lsp-state)]
+    (when-not (:state lsp-state)
+      (case current
+        :disconnected (doseq [next [:connecting :connected :initializing]]
+                        (transition! state-atom lang next))
+        :connecting (doseq [next [:connected :initializing]]
+                      (transition! state-atom lang next))
+        :connected (transition! state-atom lang :initializing)
+        nil))))
 
 ;; Sending functions (client -> server)
 
@@ -209,6 +229,7 @@
         incremental? (= sync-kind 2)]
     (log/debug "LSP textDocumentSync kind for lang" lang ":" sync-kind "(incremental:" incremental? ")")
     (swap! state-atom assoc-in [:lsp lang :incremental-sync?] incremental?))
+  (ensure-initializing-state! state-atom lang)
   (notify-initialized lang state-atom)
   (transition! state-atom lang :initialized)
   (when-let [res-fn (get-in @state-atom [:lsp lang :promise-res-fn])]

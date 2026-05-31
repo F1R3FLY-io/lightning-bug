@@ -240,7 +240,7 @@
       (db/replace-diagnostics-by-uri! (ws/default-conn) uri nil [])
 
       ;; Verify cleared
-      (is (= 0 (count @(rf/subscribe [:lsp/diagnostics])))))))
+      (is (zero? (count @(rf/subscribe [:lsp/diagnostics])))))))
 
 ;; =============================================================================
 ;; Document with Symbols Tests

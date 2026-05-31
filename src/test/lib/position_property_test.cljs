@@ -19,12 +19,12 @@
 
 (def gen-simple-line
   "Generator for simple text lines without special characters."
-  (gen/fmap (fn [chars] (apply str chars))
+  (gen/fmap str/join
             (gen/vector gen/char-alphanumeric 0 80)))
 
 (def gen-line-with-spaces
   "Generator for lines with mixed spaces and characters."
-  (gen/fmap (fn [parts] (apply str parts))
+  (gen/fmap str/join
             (gen/vector (gen/one-of [gen/char-alphanumeric
                                      (gen/return \space)
                                      (gen/return \tab)])
@@ -32,7 +32,7 @@
 
 (def gen-unicode-line
   "Generator for lines with Unicode characters."
-  (gen/fmap (fn [chars] (apply str chars))
+  (gen/fmap str/join
             (gen/vector (gen/one-of [gen/char-alphanumeric
                                      gen/char-ascii
                                      ;; Add some common Unicode chars
@@ -46,17 +46,17 @@
 
 (def gen-multiline-document
   "Generator for multi-line documents."
-  (gen/fmap (fn [lines] (clojure.string/join "\n" lines))
+  (gen/fmap (fn [lines] (str/join "\n" lines))
             (gen/vector gen-simple-line 1 20)))
 
 (def gen-unicode-document
   "Generator for documents with Unicode content."
-  (gen/fmap (fn [lines] (clojure.string/join "\n" lines))
+  (gen/fmap (fn [lines] (str/join "\n" lines))
             (gen/vector gen-unicode-line 1 10)))
 
 (def gen-tabbed-document
   "Generator for documents with tabs."
-  (gen/fmap (fn [lines] (clojure.string/join "\n" lines))
+  (gen/fmap (fn [lines] (str/join "\n" lines))
             (gen/vector gen-line-with-spaces 1 10)))
 
 (defn gen-valid-offset-for-doc
@@ -68,7 +68,7 @@
 (defn gen-valid-position-for-doc
   "Generator for valid positions within a document."
   [doc-str]
-  (let [lines (clojure.string/split doc-str #"\n" -1)
+  (let [lines (str/split doc-str #"\n" -1)
         num-lines (count lines)]
     (gen/bind (gen/choose 0 (dec num-lines))
               (fn [line]
@@ -84,7 +84,7 @@
   "Creates a CodeMirror Text document from a string.
    CodeMirror's Text.of expects an array of lines, so we split by newlines."
   [s]
-  (.of Text (clj->js (clojure.string/split (or s "") #"\n" -1))))
+  (.of Text (clj->js (str/split (or s "") #"\n" -1))))
 
 (defn roundtrip-offset->pos->offset
   "Tests roundtrip conversion: offset -> position -> offset."
@@ -109,69 +109,85 @@
 
 (deftest position-offset-roundtrip-property
   (testing "offset->pos->offset roundtrip preserves offset (0-based)"
-    (let [prop (prop/for-all [doc-str gen-multiline-document]
-                 (let [max-offset (count doc-str)]
-                   (every? (fn [offset]
-                             (let [recovered (roundtrip-offset->pos->offset doc-str offset false)]
-                               (= offset recovered)))
-                           (range 0 (inc (min max-offset 100))))))]
-      (let [result (tc/quick-check 50 prop)]
-        (is (:pass? result)
-            (str "Roundtrip failed: " (:shrunk result))))))
+    (let [prop (prop/for-all
+                [doc-str gen-multiline-document]
+                (let [max-offset (count doc-str)]
+                  (every?
+                   (fn
+                    [offset]
+                    (let [recovered (roundtrip-offset->pos->offset
+                                     doc-str
+                                     offset
+                                     false)]
+                      (= offset recovered)))
+                   (range 0 (inc (min max-offset 100))))))
+          result (tc/quick-check 50 prop)]
+      (is (:pass? result) (str "Roundtrip failed: " (:shrunk result)))))
 
   (testing "offset->pos->offset roundtrip preserves offset (1-based)"
-    (let [prop (prop/for-all [doc-str gen-multiline-document]
-                 (let [max-offset (count doc-str)]
-                   (every? (fn [offset]
-                             (let [recovered (roundtrip-offset->pos->offset doc-str offset true)]
-                               (= offset recovered)))
-                           (range 0 (inc (min max-offset 100))))))]
-      (let [result (tc/quick-check 50 prop)]
-        (is (:pass? result)
-            (str "Roundtrip failed: " (:shrunk result)))))))
+    (let [prop (prop/for-all
+                [doc-str gen-multiline-document]
+                (let [max-offset (count doc-str)]
+                  (every?
+                   (fn
+                    [offset]
+                    (let [recovered (roundtrip-offset->pos->offset doc-str offset true)]
+                      (= offset recovered)))
+                   (range 0 (inc (min max-offset 100))))))
+          result (tc/quick-check 50 prop)]
+      (is (:pass? result) (str "Roundtrip failed: " (:shrunk result))))))
 
 (deftest position-offset-unicode-property
   (testing "Unicode characters are handled correctly in position conversion"
-    (let [prop (prop/for-all [doc-str gen-unicode-document]
-                 (let [max-offset (count doc-str)]
-                   (every? (fn [offset]
-                             (let [recovered (roundtrip-offset->pos->offset doc-str offset false)]
-                               (= offset recovered)))
-                           (range 0 (inc (min max-offset 50))))))]
-      (let [result (tc/quick-check 30 prop)]
-        (is (:pass? result)
-            (str "Unicode roundtrip failed: " (:shrunk result)))))))
+    (let [prop (prop/for-all
+                [doc-str gen-unicode-document]
+                (let [max-offset (count doc-str)]
+                  (every?
+                   (fn
+                    [offset]
+                    (let [recovered (roundtrip-offset->pos->offset
+                                     doc-str
+                                     offset
+                                     false)]
+                      (= offset recovered)))
+                   (range 0 (inc (min max-offset 50))))))
+          result (tc/quick-check 30 prop)]
+      (is (:pass? result) (str "Unicode roundtrip failed: " (:shrunk result))))))
 
 (deftest position-offset-tabs-property
   (testing "Tab characters are handled correctly in position conversion"
-    (let [prop (prop/for-all [doc-str gen-tabbed-document]
-                 (let [max-offset (count doc-str)]
-                   (every? (fn [offset]
-                             (let [recovered (roundtrip-offset->pos->offset doc-str offset false)]
-                               (= offset recovered)))
-                           (range 0 (inc (min max-offset 50))))))]
-      (let [result (tc/quick-check 30 prop)]
-        (is (:pass? result)
-            (str "Tab roundtrip failed: " (:shrunk result)))))))
+    (let [prop (prop/for-all
+                [doc-str gen-tabbed-document]
+                (let [max-offset (count doc-str)]
+                  (every?
+                   (fn
+                    [offset]
+                    (let [recovered (roundtrip-offset->pos->offset
+                                     doc-str
+                                     offset
+                                     false)]
+                      (= offset recovered)))
+                   (range 0 (inc (min max-offset 50))))))
+          result (tc/quick-check 30 prop)]
+      (is (:pass? result) (str "Tab roundtrip failed: " (:shrunk result))))))
 
 (deftest position-conversion-determinism-property
   (testing "Same input always produces same output"
-    (let [prop (prop/for-all [doc-str gen-multiline-document
-                              offset (gen/choose 0 100)]
-                 (let [doc (make-text-doc doc-str)
-                       effective-offset (min offset (count doc-str))]
-                   (let [pos1 (utils/offset->pos doc effective-offset false)
-                         pos2 (utils/offset->pos doc effective-offset false)]
-                     (= pos1 pos2))))]
-      (let [result (tc/quick-check 100 prop)]
-        (is (:pass? result)
-            (str "Determinism failed: " (:shrunk result)))))))
+    (let [prop (prop/for-all
+                [doc-str gen-multiline-document offset (gen/choose 0 100)]
+                (let [doc (make-text-doc doc-str)
+                      effective-offset (min offset (count doc-str))
+                      pos1 (utils/offset->pos doc effective-offset false)
+                      pos2 (utils/offset->pos doc effective-offset false)]
+                  (= pos1 pos2)))
+          result (tc/quick-check 100 prop)]
+      (is (:pass? result) (str "Determinism failed: " (:shrunk result))))))
 
 (deftest position-bounds-property
   (testing "Position line and column are within valid bounds"
     (let [prop (prop/for-all [doc-str gen-multiline-document]
                  (let [doc (make-text-doc doc-str)
-                       lines (clojure.string/split doc-str #"\n" -1)
+                       lines (str/split doc-str #"\n" -1)
                        num-lines (count lines)]
                    (every? (fn [offset]
                              (let [pos (utils/offset->pos doc offset false)]
@@ -179,16 +195,16 @@
                                     (< (:line pos) num-lines)
                                     (>= (:column pos) 0)
                                     (<= (:column pos) (count (nth lines (:line pos)))))))
-                           (range 0 (inc (min (count doc-str) 50))))))]
-      (let [result (tc/quick-check 50 prop)]
-        (is (:pass? result)
-            (str "Bounds check failed: " (:shrunk result)))))))
+                           (range 0 (inc (min (count doc-str) 50))))))
+          result (tc/quick-check 50 prop)]
+      (is (:pass? result)
+          (str "Bounds check failed: " (:shrunk result))))))
 
 (deftest offset-bounds-property
   (testing "Offset is within valid document bounds"
     (let [prop (prop/for-all [doc-str gen-multiline-document]
                  (let [doc (make-text-doc doc-str)
-                       lines (clojure.string/split doc-str #"\n" -1)]
+                       lines (str/split doc-str #"\n" -1)]
                    (every? (fn [line-idx]
                              (every? (fn [col]
                                        (let [pos {:line line-idx :column col}
@@ -197,10 +213,10 @@
                                              (and (>= offset 0)
                                                   (<= offset (count doc-str))))))
                                      (range 0 (inc (count (nth lines line-idx))))))
-                           (range 0 (count lines)))))]
-      (let [result (tc/quick-check 50 prop)]
-        (is (:pass? result)
-            (str "Offset bounds failed: " (:shrunk result)))))))
+                           (range 0 (count lines)))))
+          result (tc/quick-check 50 prop)]
+      (is (:pass? result)
+          (str "Offset bounds failed: " (:shrunk result))))))
 
 ;; =============================================================================
 ;; Edge Case Unit Tests
@@ -210,14 +226,14 @@
   (testing "Position conversion on empty document"
     (let [doc (make-text-doc "")]
       (is (= {:line 0 :column 0} (utils/offset->pos doc 0 false)))
-      (is (= 0 (utils/pos->offset doc {:line 0 :column 0} false))))))
+      (is (zero? (utils/pos->offset doc {:line 0, :column 0} false))))))
 
 (deftest single-line-document-position-test
   (testing "Position conversion on single-line document"
     (let [doc (make-text-doc "hello")]
       ;; Beginning
       (is (= {:line 0 :column 0} (utils/offset->pos doc 0 false)))
-      (is (= 0 (utils/pos->offset doc {:line 0 :column 0} false)))
+      (is (zero? (utils/pos->offset doc {:line 0, :column 0} false)))
       ;; Middle
       (is (= {:line 0 :column 2} (utils/offset->pos doc 2 false)))
       (is (= 2 (utils/pos->offset doc {:line 0 :column 2} false)))
@@ -280,7 +296,7 @@
 
 (deftest large-document-position-test
   (testing "Position conversion on large document"
-    (let [large-doc (apply str (repeat 1000 "This is a line of text.\n"))
+    (let [large-doc (str/join (repeat 1000 "This is a line of text.\n"))
           doc (make-text-doc large-doc)]
       ;; Test several positions throughout the document
       (doseq [offset [0 100 500 1000 5000 10000]]

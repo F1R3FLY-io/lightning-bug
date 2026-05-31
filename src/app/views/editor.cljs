@@ -25,26 +25,12 @@
                                         (let [evt (js->clj evt-js :keywordize-keys true)
                                               type (:type evt)]
                                           (rf/dispatch [::e/handle-editor-event evt])
-                                          ;; EXP-008: Events already debounced in core, dispatch immediately
                                           (case type
-                                            "selection-change"
-                                            (let [{:keys [cursor selection]} (:data evt)]
-                                              (rf/dispatch [::e/update-cursor cursor])
-                                              (rf/dispatch [::e/update-selection selection]))
-
-                                            "content-change"
-                                            nil  ; Content updates handled by DataScript in lib.core (EXP-009)
-
-                                            "highlight-change"
-                                            (rf/dispatch [::e/update-highlights (:data evt)])
-
                                             "ready"
-                                            (do
-                                              (when (nil? (.getFileUri er))
-                                                (go
-                                                  (<! (timeout 100)) ;; Brief delay to ensure CM is fully ready.
-                                                  (.openDocument er "inmemory://untitled.rho" "" "rholang")))
-                                              (rf/dispatch [::e/editor-ready]))
+                                            (when (nil? (.getFileUri er))
+                                              (go
+                                                (<! (timeout 100)) ;; Brief delay to ensure CM is fully ready.
+                                                (.openDocument er "inmemory://untitled.rho" "" "rholang")))
 
                                             nil))))))
                            (do

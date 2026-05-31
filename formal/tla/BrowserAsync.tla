@@ -18,36 +18,41 @@ VARIABLE pendingDebounce
 VARIABLE pendingIdle
 \* @type: Str -> Int;
 VARIABLE dbWrites
-\* @type: Bool;
-VARIABLE unsafeWrites
+\* @type: Str -> Bool;
+VARIABLE everMounted
+\* @type: Set([pane: Str, wasMounted: Bool]);
+VARIABLE writeHistory
 \* @type: Str -> Bool;
 VARIABLE shutdowns
 
-vars == <<mounted, pendingDebounce, pendingIdle, dbWrites, unsafeWrites, shutdowns>>
+vars == <<mounted, pendingDebounce, pendingIdle, dbWrites, everMounted,
+          writeHistory, shutdowns>>
 
 Init ==
   /\ mounted = [p \in Panes |-> FALSE]
   /\ pendingDebounce = {}
   /\ pendingIdle = {}
   /\ dbWrites = [p \in Panes |-> 0]
-  /\ unsafeWrites = FALSE
+  /\ everMounted = [p \in Panes |-> FALSE]
+  /\ writeHistory = {}
   /\ shutdowns = [p \in Panes |-> FALSE]
 
 Mount(p) ==
   /\ mounted[p] = FALSE
   /\ mounted' = [mounted EXCEPT ![p] = TRUE]
+  /\ everMounted' = [everMounted EXCEPT ![p] = TRUE]
   /\ shutdowns' = [shutdowns EXCEPT ![p] = FALSE]
-  /\ UNCHANGED <<pendingDebounce, pendingIdle, dbWrites, unsafeWrites>>
+  /\ UNCHANGED <<pendingDebounce, pendingIdle, dbWrites, writeHistory>>
 
 ScheduleDebounce(p) ==
   /\ mounted[p]
   /\ pendingDebounce' = pendingDebounce \cup {p}
-  /\ UNCHANGED <<mounted, pendingIdle, dbWrites, unsafeWrites, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingIdle, dbWrites, everMounted, writeHistory, shutdowns>>
 
 ScheduleIdle(p) ==
   /\ mounted[p]
   /\ pendingIdle' = pendingIdle \cup {p}
-  /\ UNCHANGED <<mounted, pendingDebounce, dbWrites, unsafeWrites, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingDebounce, dbWrites, everMounted, writeHistory, shutdowns>>
 
 FireDebounce(p) ==
   /\ p \in pendingDebounce
@@ -55,7 +60,8 @@ FireDebounce(p) ==
   /\ dbWrites[p] < MaxWrites
   /\ pendingDebounce' = pendingDebounce \ {p}
   /\ dbWrites' = [dbWrites EXCEPT ![p] = @ + 1]
-  /\ UNCHANGED <<mounted, pendingIdle, unsafeWrites, shutdowns>>
+  /\ writeHistory' = writeHistory \cup {[pane |-> p, wasMounted |-> mounted[p]]}
+  /\ UNCHANGED <<mounted, pendingIdle, everMounted, shutdowns>>
 
 FireIdle(p) ==
   /\ p \in pendingIdle
@@ -63,27 +69,26 @@ FireIdle(p) ==
   /\ dbWrites[p] < MaxWrites
   /\ pendingIdle' = pendingIdle \ {p}
   /\ dbWrites' = [dbWrites EXCEPT ![p] = @ + 1]
-  /\ UNCHANGED <<mounted, pendingDebounce, unsafeWrites, shutdowns>>
+  /\ writeHistory' = writeHistory \cup {[pane |-> p, wasMounted |-> mounted[p]]}
+  /\ UNCHANGED <<mounted, pendingDebounce, everMounted, shutdowns>>
 
 StaleDebounceAfterUnmount(p) ==
   /\ p \in pendingDebounce
   /\ mounted[p] = FALSE
   /\ pendingDebounce' = pendingDebounce \ {p}
-  /\ unsafeWrites' = unsafeWrites
-  /\ UNCHANGED <<mounted, pendingIdle, dbWrites, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingIdle, dbWrites, everMounted, writeHistory, shutdowns>>
 
 StaleIdleAfterUnmount(p) ==
   /\ p \in pendingIdle
   /\ mounted[p] = FALSE
   /\ pendingIdle' = pendingIdle \ {p}
-  /\ unsafeWrites' = unsafeWrites
-  /\ UNCHANGED <<mounted, pendingDebounce, dbWrites, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingDebounce, dbWrites, everMounted, writeHistory, shutdowns>>
 
 Unmount(p) ==
   /\ mounted[p]
   /\ mounted' = [mounted EXCEPT ![p] = FALSE]
   /\ shutdowns' = [shutdowns EXCEPT ![p] = TRUE]
-  /\ UNCHANGED <<pendingDebounce, pendingIdle, dbWrites, unsafeWrites>>
+  /\ UNCHANGED <<pendingDebounce, pendingIdle, dbWrites, everMounted, writeHistory>>
 
 Next ==
   \/ \E p \in Panes:
@@ -100,13 +105,19 @@ TypeOK ==
   /\ pendingDebounce \subseteq Panes
   /\ pendingIdle \subseteq Panes
   /\ dbWrites \in [Panes -> 0..MaxWrites]
-  /\ unsafeWrites \in BOOLEAN
+  /\ everMounted \in [Panes -> BOOLEAN]
+  /\ writeHistory \subseteq {[pane |-> p, wasMounted |-> m] : p \in Panes, m \in BOOLEAN}
   /\ shutdowns \in [Panes -> BOOLEAN]
 
 NoUnmountedMutation ==
-  unsafeWrites = FALSE
+  \A w \in writeHistory: w.wasMounted = TRUE
 
 UnmountRequestsShutdown ==
-  \A p \in Panes: mounted[p] = FALSE /\ dbWrites[p] > 0 => shutdowns[p] \/ ~shutdowns[p]
+  \A p \in Panes: everMounted[p] /\ mounted[p] = FALSE => shutdowns[p]
+
+BrowserInv ==
+  /\ TypeOK
+  /\ NoUnmountedMutation
+  /\ UnmountRequestsShutdown
 
 ================================================================================

@@ -211,15 +211,14 @@
   []
   @cache-stats)
 
-(defn ^:export getCacheStats
+(defn get-cache-stats-js
   "JavaScript-accessible function to get cache stats."
   []
   (clj->js @cache-stats))
 
-(defn ^:export resetCacheStats
-  "JavaScript-accessible function to reset cache stats."
-  []
-  (reset-cache-stats!))
+(goog/exportSymbol "lib.editor.syntax.getCacheStats" get-cache-stats-js)
+
+(goog/exportSymbol "lib.editor.syntax.resetCacheStats" reset-cache-stats!)
 
 (defn make-highlighter-plugin
   "Creates a ViewPlugin for syntax highlighting using Tree-Sitter queries.

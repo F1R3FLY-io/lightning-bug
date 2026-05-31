@@ -29,7 +29,7 @@
 ;; so documents survive re-renders AND hot reloads.
 (defonce ^:private workspace-context (react/createContext nil))
 
-(defn ^:export EditorWorkspaceProvider
+(defn editor-workspace-provider
   "Provider component: wrap editors that should SHARE a workspace.
   Usage (JS): <EditorWorkspaceProvider value={ws}>...editors...</EditorWorkspaceProvider>"
   [js-props]
@@ -37,7 +37,9 @@
                        #js {:value (.-value js-props)}
                        (.-children js-props)))
 
-(defn ^:export createWorkspace
+(goog/exportSymbol "lib.core.EditorWorkspaceProvider" editor-workspace-provider)
+
+(defn create-workspace
   "Creates a new ISOLATED workspace (its own documents/projects/loaded resources/reactive
   change streams). Pass it to one or more <Editor> instances — via the `workspace` prop or
   <EditorWorkspaceProvider value={ws}> — so they share state (open files propagate between
@@ -45,6 +47,8 @@
   Hold the result somewhere stable (a module binding / defonce) so it survives hot reloads."
   []
   (ws/make-workspace))
+
+(goog/exportSymbol "lib.core.createWorkspace" create-workspace)
 
 (defn- default-state
   "Computes the initial editor state from converted CLJS props.
@@ -107,7 +111,7 @@
                       [ready set-ready] (react/useState false)
                       events (react/useMemo (fn [] (ReplaySubject.)) #js [])
                       ;; Stable per-pane identity for reactive cross-pane echo-suppression.
-                      pane-id (react/useMemo (fn [] (random-uuid)) #js [])
+                      pane-id (react/useMemo random-uuid #js [])
                       ;; Per-editor LSP client (ILspClient). Constructed once over this
                       ;; editor's state-atom + events + workspace conn; routes all LSP
                       ;; calls through the protocol.

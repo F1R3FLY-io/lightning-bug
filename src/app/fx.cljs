@@ -149,17 +149,23 @@
 ;; Console/Logging Effects
 ;; =============================================================================
 
+(defn- log-info-effect [message]
+  (log/info message))
+
+(defn- log-warn-effect [message]
+  (log/warn message))
+
+(defn- log-error-effect [message]
+  (log/error message))
+
 (rf/reg-fx
  :console/log
- (fn [message]
-   (log/info message)))
+ log-info-effect)
 
 (rf/reg-fx
  :console/warn
- (fn [message]
-   (log/warn message)))
+ log-warn-effect)
 
 (rf/reg-fx
  :console/error
- (fn [message]
-   (log/error message)))
+ log-error-effect)

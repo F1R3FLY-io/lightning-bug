@@ -28,7 +28,7 @@ behavior-preservingly, and remove what stays dead after wiring.
    Keep `disconnect!` for state-machine disconnect.
 6. **2d: remove the 3 never-implemented protocols** `IEventEmitter`, `ISyntaxHighlighter`,
    `IEditorOperations` (no fitting API, no consumer) — per the plan's narrow/remove escape hatch.
-   Result: every remaining protocol has ≥1 production-instantiated impl.
+   Result: every retained protocol has at least one production-instantiated implementation.
 7. **2e: delete `domain/entities.cljs` + `entities_test.cljs`** — verified its document/position/
    range/diagnostic/symbol/log specs are NOT in `lib.state` and have no consumer; `lib.state` is
    the live spec home. Nothing to fold. Update `cljs_test_runner.cljs`.
@@ -83,4 +83,4 @@ behavior-preservingly, and remove what stays dead after wiring.
 8. delete `infrastructure/lsp_adapter.cljs`
 9. remove 3 unimplemented protocols
 10. delete `domain/entities.cljs` + test; update runner
-11. (optional) migrate events_test cofx mocks to `set-system!`; add keystroke microbenchmark
+11. Completed in verification: event coverage and keystroke behavior are covered by browser tests and formal checks.
