@@ -146,7 +146,7 @@
                        :contentChanges [{:text text}]}} state-atom))
 
 (defn notify-did-change-incremental
-  "Notifies the LSP server with incremental content changes (EXP-011 Phase 2c).
+  "Notifies the LSP server with incremental content changes.
    Each change contains :range, :rangeLength, and :text for efficient delta sync."
   [lang uri changes version state-atom]
   (send lang {:method "textDocument/didChange"
@@ -218,10 +218,9 @@
 
 (defn handle-initialize-response
   "Handles the LSP initialize response, marking the connection as initialized and resolving the promise.
-   EXP-011: Also detects TextDocumentSyncKind for incremental sync support."
+   Also detects TextDocumentSyncKind for incremental sync support."
   [lang result state-atom events]
   (log/info "LSP initialized for lang" lang)
-  ;; EXP-011 Phase 2a: Detect incremental sync capability
   ;; TextDocumentSyncKind: 0=None, 1=Full, 2=Incremental
   (let [sync-kind (or (get-in result [:capabilities :textDocumentSync :change])
                       (get-in result [:capabilities :textDocumentSync])

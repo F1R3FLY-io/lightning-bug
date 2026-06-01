@@ -302,7 +302,7 @@
           (str "TRANSITIONS should contain " state)))))
 
 ;; =============================================================================
-;; ILspClient Delegation Tests (Phase 2 — CM is now the live per-editor client)
+;; ILspClient Delegation Tests
 ;; =============================================================================
 
 (deftest connect-supplier-returns-resource-supplier

@@ -5,9 +5,16 @@ import { spawnSync } from 'node:child_process';
 
 const specs = [
   'LspConnection',
+  'LspConnectionInductiveCheck',
+  'LspConnectionLiveness',
   'BrowserAsync',
+  'BrowserAsyncInductiveCheck',
+  'BrowserAsyncLiveness',
   'DocSync',
-  'LightningBugAsync'
+  'DocSyncInductiveCheck',
+  'LightningBugAsync',
+  'LightningBugAsyncInductiveCheck',
+  'LightningBugAsyncLiveness'
 ];
 
 function run(command, args) {

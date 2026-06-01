@@ -66,6 +66,81 @@
                (is true "Connect succeeded")))
            (done))))
 
+(deftest unexpected-close-invokes-reconnect
+  (async done
+         (go
+           (let [state (r/atom {})
+                 events (rxjs/Subject.)
+                 reconnect-count (atom 0)
+                 mock-res (<! (with-mock-lsp
+                                (fn [mock]
+                                  (go
+                                    (try
+                                      (let [connect-ch (lsp/connect (ws/default-conn)
+                                                                    "test"
+                                                                    {:url "ws://test"}
+                                                                    state
+                                                                    events
+                                                                    #(swap! reconnect-count inc))]
+                                        (let [wait-res (<! (wait-for #(some? (.-onopen (:sock mock))) 1000))]
+                                          (if (= :error (first wait-res))
+                                            (throw (second wait-res))
+                                            (is (second wait-res) "onopen handler set")))
+                                        ((:trigger-open mock))
+                                        (let [[status value] (<! connect-ch)]
+                                          (when (= :error status)
+                                            (throw (js/Error. "connect failed" #js {:cause value}))))
+                                        (is (true? (get-in @state [:lsp "test" :initialized?]))
+                                            "connection initialized before close")
+                                        ((:trigger-close mock))
+                                        (is (= 1 @reconnect-count)
+                                            "unexpected established close invokes reconnect callback")
+                                        [:ok nil])
+                                      (catch :default e
+                                        [:error (js/Error. "unexpected-close-invokes-reconnect failed" #js {:cause e})]))))))]
+             (when (= :error (first mock-res))
+               (let [err (second mock-res)]
+                 (lib-utils/log-error-with-cause err)
+                 (is false (str "Mock body failed: " (.-message err)))))
+             (done)))))
+
+(deftest graceful-shutdown-close-does-not-reconnect
+  (async done
+         (go
+           (let [state (r/atom {})
+                 events (rxjs/Subject.)
+                 reconnect-count (atom 0)
+                 mock-res (<! (with-mock-lsp
+                                (fn [mock]
+                                  (go
+                                    (try
+                                      (let [connect-ch (lsp/connect (ws/default-conn)
+                                                                    "test"
+                                                                    {:url "ws://test"}
+                                                                    state
+                                                                    events
+                                                                    #(swap! reconnect-count inc))]
+                                        (let [wait-res (<! (wait-for #(some? (.-onopen (:sock mock))) 1000))]
+                                          (if (= :error (first wait-res))
+                                            (throw (second wait-res))
+                                            (is (second wait-res) "onopen handler set")))
+                                        ((:trigger-open mock))
+                                        (let [[status value] (<! connect-ch)]
+                                          (when (= :error status)
+                                            (throw (js/Error. "connect failed" #js {:cause value}))))
+                                        (swap! state assoc-in [:lsp "test" :shutting-down?] true)
+                                        ((:trigger-close mock))
+                                        (is (zero? @reconnect-count)
+                                            "graceful shutdown close suppresses reconnect callback")
+                                        [:ok nil])
+                                      (catch :default e
+                                        [:error (js/Error. "graceful-shutdown-close-does-not-reconnect failed" #js {:cause e})]))))))]
+             (when (= :error (first mock-res))
+               (let [err (second mock-res)]
+                 (lib-utils/log-error-with-cause err)
+                 (is false (str "Mock body failed: " (.-message err)))))
+             (done)))))
+
 (deftest flatten-symbols-basic
   (let [syms [{:name "root"
                :kind 12
@@ -400,6 +475,26 @@
     (let [msg (js/JSON.parse (subs (first @sent) (str/index-of (first @sent) "{")))]
       (is (s/valid? ::lsp/request (js->clj msg :keywordize-keys true)) "Shutdown conforms to request spec"))))
 
+(deftest shutdown-clears-unrelated-pending-and-tracks-shutdown
+  (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
+                                     :state :initialized
+                                     :pending {1 :initialize
+                                               2 {:type :document-symbol
+                                                  :uri "file:///test.rho"}}
+                                     :next-id 3
+                                     :connected? true
+                                     :initialized? true
+                                     :reachable? true}}})
+        sent (atom [])]
+    (with-redefs [lsp/send-raw (fn [_lang full _state] (swap! sent conj full))]
+      (lsp/request-shutdown "test" state))
+    (is (= :disconnecting (get-in @state [:lsp "test" :state])))
+    (is (= {3 :shutdown} (get-in @state [:lsp "test" :pending]))
+        "Only the shutdown request remains pending")
+    (is (= 4 (get-in @state [:lsp "test" :next-id]))
+        "Shutdown consumes exactly one fresh request ID")
+    (is (= 1 (count @sent)))))
+
 (deftest exit-sends-notification
   (let [state (r/atom {:lsp {"test" {:ws (js/Object.)
                                      :pending {}
@@ -448,7 +543,7 @@
              (done)))))
 
 ;; =============================================================================
-;; Edge Case Tests - Phase 2
+;; Edge Case Tests
 ;; =============================================================================
 
 (deftest message-serialization-unicode-preserved

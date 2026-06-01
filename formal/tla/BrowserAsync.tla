@@ -7,8 +7,8 @@ EXTENDS Naturals
 
 \* @type: Set(Str);
 CONSTANTS Panes
-\* @type: Int;
-CONSTANTS MaxWrites
+
+ASSUME PanesAssumption == Panes \in SUBSET STRING
 
 \* @type: Str -> Bool;
 VARIABLE mounted
@@ -16,8 +16,6 @@ VARIABLE mounted
 VARIABLE pendingDebounce
 \* @type: Set(Str);
 VARIABLE pendingIdle
-\* @type: Str -> Int;
-VARIABLE dbWrites
 \* @type: Str -> Bool;
 VARIABLE everMounted
 \* @type: Set([pane: Str, wasMounted: Bool]);
@@ -25,14 +23,15 @@ VARIABLE writeHistory
 \* @type: Str -> Bool;
 VARIABLE shutdowns
 
-vars == <<mounted, pendingDebounce, pendingIdle, dbWrites, everMounted,
-          writeHistory, shutdowns>>
+vars == <<mounted, pendingDebounce, pendingIdle, everMounted, writeHistory,
+          shutdowns>>
+
+WriteRecords == {[pane |-> p, wasMounted |-> TRUE] : p \in Panes}
 
 Init ==
   /\ mounted = [p \in Panes |-> FALSE]
   /\ pendingDebounce = {}
   /\ pendingIdle = {}
-  /\ dbWrites = [p \in Panes |-> 0]
   /\ everMounted = [p \in Panes |-> FALSE]
   /\ writeHistory = {}
   /\ shutdowns = [p \in Panes |-> FALSE]
@@ -42,53 +41,49 @@ Mount(p) ==
   /\ mounted' = [mounted EXCEPT ![p] = TRUE]
   /\ everMounted' = [everMounted EXCEPT ![p] = TRUE]
   /\ shutdowns' = [shutdowns EXCEPT ![p] = FALSE]
-  /\ UNCHANGED <<pendingDebounce, pendingIdle, dbWrites, writeHistory>>
+  /\ UNCHANGED <<pendingDebounce, pendingIdle, writeHistory>>
 
 ScheduleDebounce(p) ==
   /\ mounted[p]
   /\ pendingDebounce' = pendingDebounce \cup {p}
-  /\ UNCHANGED <<mounted, pendingIdle, dbWrites, everMounted, writeHistory, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingIdle, everMounted, writeHistory, shutdowns>>
 
 ScheduleIdle(p) ==
   /\ mounted[p]
   /\ pendingIdle' = pendingIdle \cup {p}
-  /\ UNCHANGED <<mounted, pendingDebounce, dbWrites, everMounted, writeHistory, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingDebounce, everMounted, writeHistory, shutdowns>>
 
 FireDebounce(p) ==
   /\ p \in pendingDebounce
   /\ mounted[p]
-  /\ dbWrites[p] < MaxWrites
   /\ pendingDebounce' = pendingDebounce \ {p}
-  /\ dbWrites' = [dbWrites EXCEPT ![p] = @ + 1]
-  /\ writeHistory' = writeHistory \cup {[pane |-> p, wasMounted |-> mounted[p]]}
+  /\ writeHistory' = writeHistory \cup {[pane |-> p, wasMounted |-> TRUE]}
   /\ UNCHANGED <<mounted, pendingIdle, everMounted, shutdowns>>
 
 FireIdle(p) ==
   /\ p \in pendingIdle
   /\ mounted[p]
-  /\ dbWrites[p] < MaxWrites
   /\ pendingIdle' = pendingIdle \ {p}
-  /\ dbWrites' = [dbWrites EXCEPT ![p] = @ + 1]
-  /\ writeHistory' = writeHistory \cup {[pane |-> p, wasMounted |-> mounted[p]]}
+  /\ writeHistory' = writeHistory \cup {[pane |-> p, wasMounted |-> TRUE]}
   /\ UNCHANGED <<mounted, pendingDebounce, everMounted, shutdowns>>
 
 StaleDebounceAfterUnmount(p) ==
   /\ p \in pendingDebounce
   /\ mounted[p] = FALSE
   /\ pendingDebounce' = pendingDebounce \ {p}
-  /\ UNCHANGED <<mounted, pendingIdle, dbWrites, everMounted, writeHistory, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingIdle, everMounted, writeHistory, shutdowns>>
 
 StaleIdleAfterUnmount(p) ==
   /\ p \in pendingIdle
   /\ mounted[p] = FALSE
   /\ pendingIdle' = pendingIdle \ {p}
-  /\ UNCHANGED <<mounted, pendingDebounce, dbWrites, everMounted, writeHistory, shutdowns>>
+  /\ UNCHANGED <<mounted, pendingDebounce, everMounted, writeHistory, shutdowns>>
 
 Unmount(p) ==
   /\ mounted[p]
   /\ mounted' = [mounted EXCEPT ![p] = FALSE]
   /\ shutdowns' = [shutdowns EXCEPT ![p] = TRUE]
-  /\ UNCHANGED <<pendingDebounce, pendingIdle, dbWrites, everMounted, writeHistory>>
+  /\ UNCHANGED <<pendingDebounce, pendingIdle, everMounted, writeHistory>>
 
 Next ==
   \/ \E p \in Panes:
@@ -102,11 +97,10 @@ Spec == Init /\ [][Next]_vars
 
 TypeOK ==
   /\ mounted \in [Panes -> BOOLEAN]
-  /\ pendingDebounce \subseteq Panes
-  /\ pendingIdle \subseteq Panes
-  /\ dbWrites \in [Panes -> 0..MaxWrites]
+  /\ pendingDebounce \in SUBSET Panes
+  /\ pendingIdle \in SUBSET Panes
   /\ everMounted \in [Panes -> BOOLEAN]
-  /\ writeHistory \subseteq {[pane |-> p, wasMounted |-> m] : p \in Panes, m \in BOOLEAN}
+  /\ writeHistory \in SUBSET WriteRecords
   /\ shutdowns \in [Panes -> BOOLEAN]
 
 NoUnmountedMutation ==

@@ -13,6 +13,10 @@ CONSTANTS Uris
 \* @type: Int;
 CONSTANTS MaxText
 
+ASSUME PanesAssumption == Panes \in SUBSET STRING
+ASSUME UrisAssumption == Uris \in SUBSET STRING
+ASSUME MaxTextAssumption == MaxText \in Nat
+
 \* @type: Str -> Set(Str);
 VARIABLE subscribers
 \* @type: Str -> Int;
@@ -73,9 +77,9 @@ TypeOK ==
   /\ workspaceText \in [Uris -> 0..MaxText]
   /\ paneText \in [Panes -> [Uris -> 0..MaxText]]
   /\ seq \in [Uris -> 0..MaxText]
-  /\ deliveries \subseteq
-       { [uri |-> u, origin |-> o, pane |-> p, n |-> k]
-           : u \in Uris, o \in Panes, p \in Panes, k \in 0..MaxText }
+  /\ deliveries \in SUBSET
+       {[uri |-> u, origin |-> o, pane |-> p, n |-> k]
+          : u \in Uris, o \in Panes, p \in Panes, k \in 0..MaxText}
 
 SubscribedPanesConverge ==
   \A u \in Uris:
@@ -88,9 +92,6 @@ NoOriginEcho ==
 SeqMatchesEdits ==
   \A u \in Uris: seq[u] = workspaceText[u]
 
-EmptyStreamHasNoSubscribers ==
-  \A u \in Uris: Cardinality(subscribers[u]) = 0 => subscribers[u] = {}
-
 DeliverySeqPrecedesWorkspace ==
   \A d \in deliveries: d.n < workspaceText[d.uri]
 
@@ -99,7 +100,6 @@ DocSyncInv ==
   /\ SubscribedPanesConverge
   /\ NoOriginEcho
   /\ SeqMatchesEdits
-  /\ EmptyStreamHasNoSubscribers
   /\ DeliverySeqPrecedesWorkspace
 
 ================================================================================

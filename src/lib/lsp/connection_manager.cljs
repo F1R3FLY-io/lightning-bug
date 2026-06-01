@@ -207,8 +207,6 @@
   ;; === Request Operations ===
 
   (request-symbols! [_this language uri]
-    ;; Narrowed (Phase 2): thin pass-through matching lib.core's live (unguarded) behavior.
-    ;; State-machine disconnect remains available via disconnect!.
     (lsp/request-document-symbol language uri state-atom))
 
   (request-shutdown! [_this language]

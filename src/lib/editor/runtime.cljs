@@ -169,18 +169,14 @@
   "Returns the array of CodeMirror extensions, including dynamic syntax compartment,
   static diagnostic compartment. Appends extra-extensions from state.
   EXP-008: Uses centralized debounce coordination for LSP and search.
-  EXP-009: Optimizes keystroke hot path with:
-    - Phase 1: Debounced DataScript text sync
-    - Phase 2: LSP-aware lazy text serialization
-    - Phase 3: Cached active URI within handler"
+  The keystroke path uses debounced DataScript text sync, LSP-aware lazy text
+  serialization, and a cached active URI within each update handler."
   [state-atom events on-content-change view-ref client conn workspace pane-id]
   (let [lsp-atom (:lsp workspace)   ; per-workspace LSP state + per-(ws,uri) didChange accumulator
         update-ext (.. EditorView -updateListener
                        (of (fn [^js u]
-                             ;; EXP-009 Phase 3: Cache URI once per handler invocation
                              (let [uri (:active-uri @state-atom)]
                                (when (or (.-docChanged u) (.-selectionSet u))
-                                 ;; EXP-009 Phase 4: Pass cached URI to update-editor-state
                                  (update-editor-state (.-state u) state-atom events uri))
                                (let [old-term (:search-term @state-atom "")
                                      new-term (or (.-search (getSearchQuery (.-state u))) "")]
@@ -194,20 +190,18 @@
                                  ;; EXP-010: Removed lazy text that was still forced on every keystroke
                                  (let [^js doc (.-doc (.-state u))
                                        doc-length (.-length doc)
-                                       ;; EXP-010 Phase 3: Use cached LSP status instead of DataScript query
                                        lsp-connected? (get-in @state-atom [:lsp-document-opened uri] false)
                                        from-api? (some #(.annotation % external-set-annotation) (.-transactions u))]
                                    (log/trace (str "Document changed for uri: " uri ", length:" doc-length))
-                                   ;; Phase 4: propagate this user edit to other panes viewing
-                                   ;; the same file. Skipped when API-driven (echo guard) or when
-                                   ;; no second pane is subscribed (has-peers? avoids serialization).
+                                   ;; Propagate this user edit to other panes viewing the same file.
+                                   ;; API-driven edits are echo-guarded, and single-pane edits skip
+                                   ;; serialization.
                                    (when-not from-api?
                                      (clear-visible-diagnostics! conn workspace uri))
                                    (when (and (not from-api?) (doc-sync/has-peers? workspace uri))
                                      (doc-sync/publish-delta! workspace uri
                                                               {:origin pane-id
                                                                :changes (.toJSON (.-changes u))}))
-                                   ;; EXP-011 Phase 2b: Accumulate incremental changes for LSP
                                    ;; Only accumulate for user edits (not API calls) when LSP is connected
                                    (when (and lsp-connected? (not from-api?))
                                      (let [old-doc (.-doc (.-startState u))
@@ -224,7 +218,6 @@
                                                                  :rangeLength (- toA fromA)
                                                                  :text (str inserted)})))
                                                      false)))
-                                   ;; EXP-011 Phase 1: Idle-scheduled DataScript sync
                                    ;; CodeMirror is the source of truth during editing.
                                    ;; DataScript only needs eventual consistency for LSP and persistence.
                                    ;; Use requestIdleCallback to avoid blocking the main thread with O(n) serialization.
@@ -276,12 +269,10 @@
                                    ;; LSP notification (still debounced separately for server rate limiting)
                                    (when lsp-connected?
                                      (when-not from-api?
-                                       ;; EXP-011 Phase 2: Use incremental sync when available.
-                                       ;; Phase 5b: keyed per-(workspace,uri) and reading the
-                                       ;; per-workspace accumulator, so edits to one file from
-                                       ;; ANY pane coalesce into ONE debounced didChange with ONE
-                                       ;; monotonic version (the conn-counter). Different files do
-                                       ;; not stomp each other (the prior constant key was a bug).
+                                       ;; Use incremental sync when available. The debounce key is
+                                       ;; per-(workspace,uri) and reads the per-workspace accumulator,
+                                       ;; so edits to one file from any pane coalesce into one didChange
+                                       ;; with one monotonic version.
                                        (debounce/debounced-call
                                         [:lsp-did-change uri]
                                         (fn []
@@ -346,7 +337,6 @@
                                                                           :version version
                                                                           :text text}}})
                 (db/document-opened-by-uri! conn uri)
-                ;; EXP-010 Phase 3: Update cache for hot path
                 (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                 (emit-event events "document-open" {:uri uri
                                                     :content text
@@ -378,7 +368,6 @@
                                                                                       :version version
                                                                                       :text text}}})
                             (db/document-opened-by-uri! conn uri)
-                            ;; EXP-010 Phase 3: Update cache for hot path
                             (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                             (emit-event events "document-open" {:uri uri
                                                                 :content text
@@ -407,16 +396,13 @@
                                                                                     :version version
                                                                                     :text text}}})
                           (db/document-opened-by-uri! conn uri)
-                          ;; EXP-010 Phase 3: Update cache for hot path
                           (swap! state-atom assoc-in [:lsp-document-opened uri] true)
                           (emit-event events "document-open" {:uri uri
                                                               :content text
                                                               :language lang
                                                               :opened true}))))))))
-            ;; Phase 5b: populate THIS pane's hot-path didChange cache once the file is
-            ;; open at the workspace level — regardless of which pane sent the didOpen.
-            ;; Without this, a 2nd pane that activates an already-open file would never
-            ;; set its cache and so would never accumulate/send its own keystroke didChanges.
+            ;; Populate this pane's didChange cache once the file is open at the
+            ;; workspace level, regardless of which pane sent the didOpen.
             (when (db/document-opened-by-uri? conn uri)
               (swap! state-atom assoc-in [:lsp-document-opened uri] true))
             [:ok nil]

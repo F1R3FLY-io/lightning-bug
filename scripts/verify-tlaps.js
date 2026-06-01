@@ -10,12 +10,17 @@ const tlapsLib = join(tlapsRoot, 'lib', 'tlaps');
 const tlapsBin = join(tlapsLib, 'bin');
 const tlapsIsabelleBin = join(tlapsLib, 'Isabelle2011-1', 'bin');
 const formalTlaDir = join(repoRoot, 'formal', 'tla');
+const formalTlaProofsDir = join(formalTlaDir, 'proofs');
 
 const proofModules = [
   'formal/tla/proofs/LspConnectionProofs.tla',
+  'formal/tla/proofs/LspConnectionInductiveProofs.tla',
+  'formal/tla/proofs/LspConnectionLivenessProofs.tla',
   'formal/tla/proofs/BrowserAsyncProofs.tla',
+  'formal/tla/proofs/BrowserAsyncLivenessProofs.tla',
   'formal/tla/proofs/DocSyncProofs.tla',
-  'formal/tla/proofs/LightningBugAsyncProofs.tla'
+  'formal/tla/proofs/LightningBugAsyncProofs.tla',
+  'formal/tla/proofs/LightningBugAsyncLivenessProofs.tla'
 ];
 
 if (!existsSync(tlapm)) {
@@ -41,7 +46,16 @@ try {
   for (const proofModule of proofModules) {
     const result = spawnSync(
       tlapm,
-      ['--nofp', '-I', formalTlaDir, '-I', tlapsLib, resolve(repoRoot, proofModule)],
+      [
+        '--nofp',
+        '-I',
+        formalTlaDir,
+        '-I',
+        formalTlaProofsDir,
+        '-I',
+        tlapsLib,
+        resolve(repoRoot, proofModule)
+      ],
       { stdio: 'inherit', env, cwd: workDir }
     );
     if (result.error) throw result.error;

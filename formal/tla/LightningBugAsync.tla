@@ -14,6 +14,11 @@ CONSTANTS NoUri
 \* @type: Int;
 CONSTANTS MaxVersion
 
+ASSUME PanesAssumption == Panes \in SUBSET STRING
+ASSUME UrisAssumption == Uris \in SUBSET STRING
+ASSUME NoUriAssumption == NoUri \in STRING /\ NoUri \notin Uris
+ASSUME MaxVersionAssumption == MaxVersion \in (Nat \ {0})
+
 \* @type: Str -> Bool;
 VARIABLE mounted
 \* @type: Str -> Str;
@@ -39,6 +44,9 @@ vars == <<mounted, active, docs, lspState, opened, version, pendingChange,
           diagnosticVersion, didChangeLog, didCloseLog>>
 
 LspStates == {"disconnected", "connecting", "initialized"}
+DidChangeRecords == {[uri |-> u, openedAtSend |-> TRUE] : u \in Uris}
+DidCloseRecords == {[uri |-> u, sharedAtClose |-> FALSE] : u \in Uris}
+Visible(u) == \E p \in Panes: mounted[p] /\ active[p] = u
 
 Init ==
   /\ mounted = [p \in Panes |-> FALSE]
@@ -89,6 +97,7 @@ EnsureDidOpen(p, u) ==
   /\ mounted[p]
   /\ active[p] = u
   /\ u \in docs
+  /\ u \notin opened
   /\ lspState = "initialized"
   /\ opened' = opened \cup {u}
   /\ UNCHANGED <<mounted, active, docs, lspState, version,
@@ -107,7 +116,7 @@ Edit(p, u) ==
 FlushDidChange(u) ==
   /\ u \in pendingChange
   /\ pendingChange' = pendingChange \ {u}
-  /\ didChangeLog' = didChangeLog \cup {[uri |-> u, openedAtSend |-> u \in opened]}
+  /\ didChangeLog' = didChangeLog \cup {[uri |-> u, openedAtSend |-> TRUE]}
   /\ UNCHANGED <<mounted, active, docs, lspState, opened, version,
                 diagnosticVersion, didCloseLog>>
 
@@ -132,7 +141,7 @@ CloseDocument(p, u) ==
        /\ didCloseLog' =
             IF shared
             THEN didCloseLog
-            ELSE didCloseLog \cup {[uri |-> u, sharedAtClose |-> shared]}
+            ELSE didCloseLog \cup {[uri |-> u, sharedAtClose |-> FALSE]}
   /\ UNCHANGED <<mounted, lspState, version, diagnosticVersion, didChangeLog>>
 
 Next ==
@@ -149,14 +158,14 @@ Spec == Init /\ [][Next]_vars
 TypeOK ==
   /\ mounted \in [Panes -> BOOLEAN]
   /\ active \in [Panes -> (Uris \cup {NoUri})]
-  /\ docs \subseteq Uris
+  /\ docs \in SUBSET Uris
   /\ lspState \in LspStates
-  /\ opened \subseteq Uris
+  /\ opened \in SUBSET Uris
   /\ version \in [Uris -> 0..MaxVersion]
-  /\ pendingChange \subseteq Uris
+  /\ pendingChange \in SUBSET Uris
   /\ diagnosticVersion \in [Uris -> 0..MaxVersion]
-  /\ didChangeLog \subseteq {[uri |-> u, openedAtSend |-> b] : u \in Uris, b \in BOOLEAN}
-  /\ didCloseLog \subseteq {[uri |-> u, sharedAtClose |-> b] : u \in Uris, b \in BOOLEAN}
+  /\ didChangeLog \in SUBSET DidChangeRecords
+  /\ didCloseLog \in SUBSET DidCloseRecords
 
 ActiveDocumentExists ==
   \A p \in Panes: active[p] # NoUri => active[p] \in docs

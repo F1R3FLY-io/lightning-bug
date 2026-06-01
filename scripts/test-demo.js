@@ -11,28 +11,6 @@ import puppeteer from 'puppeteer-core';
   const demoDir = path.join(baseDir, 'resources/public/demo');
   const port = 3002; // Arbitrary port
 
-  // Simple HTTP server to serve the demo directory
-  const server = http.createServer((req, res) => {
-    console.log(`Server request: ${req.url}`);
-    const filePath = path.join(demoDir, req.url === '/' ? 'index.html' : req.url);
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        console.log(`Server 404: ${filePath}`);
-        res.writeHead(404);
-        res.end('Not found');
-      } else {
-        const ext = path.extname(filePath);
-        const contentType = ext === '.html' ? 'text/html' : ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : ext === '.wasm' ? 'application/wasm' : 'text/plain';
-        res.writeHead(200, { 'Content-Type': contentType });
-        res.end(data);
-      }
-    });
-  });
-
-  server.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
-  });
-
   // Determine browsers based on OS
   const isWindows = process.platform === 'win32';
   const isLinux = process.platform === 'linux';
@@ -62,12 +40,42 @@ import puppeteer from 'puppeteer-core';
   }
   if (browsersToTest.length === 0) {
     console.log(`No browser matches ${testBrowser}, skipping sanity test`);
-    server.close(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
+    process.exit(0);
     return;
   }
+
+  if (explicitBrowser && browsersToTest.length === 1 && browsersToTest[0].name === 'Safari' && !isMacOS) {
+    console.error('Safari sanity target is macOS-only');
+    process.exit(1);
+    return;
+  }
+
+  // Simple HTTP server to serve the demo directory
+  const server = http.createServer((req, res) => {
+    console.log(`Server request: ${req.url}`);
+    const filePath = path.join(demoDir, req.url === '/' ? 'index.html' : req.url);
+    fs.readFile(filePath, (err, data) => {
+      if (err) {
+        console.log(`Server 404: ${filePath}`);
+        res.writeHead(404);
+        res.end('Not found');
+      } else {
+        const ext = path.extname(filePath);
+        const contentType = ext === '.html' ? 'text/html' : ext === '.js' ? 'application/javascript' : ext === '.css' ? 'text/css' : ext === '.wasm' ? 'application/wasm' : 'text/plain';
+        res.writeHead(200, { 'Content-Type': contentType });
+        res.end(data);
+      }
+    });
+  });
+
+  server.on('error', (e) => {
+    console.error(`Failed to start demo server on port ${port}:`, e);
+    process.exit(1);
+  });
+
+  server.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
+  });
 
   let allTestsPassed = true;
   let skippedBrowsers = 0;
@@ -79,6 +87,12 @@ import puppeteer from 'puppeteer-core';
     if (shouldSkipMissingBrowser(browserConfig)) {
       skippedBrowsers += 1;
       console.log(`Skipping ${name}: browser executable is not available in this environment`);
+      continue;
+    }
+
+    if (name === 'Safari' && !isMacOS) {
+      console.error('Safari sanity target is macOS-only');
+      allTestsPassed = false;
       continue;
     }
 

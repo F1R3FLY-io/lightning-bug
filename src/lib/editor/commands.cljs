@@ -241,7 +241,6 @@
                                                      (emit-event events "lsp-message" {:method "textDocument/didClose"
                                                                                        :lang lang
                                                                                        :params {:textDocument {:uri uri}}})
-                                                     ;; EXP-010 Phase 3: Clear cache on close
                                                      (swap! state-atom update :lsp-document-opened dissoc uri))
                                                    (when-not shared-with-peer?
                                                      (db/delete-document-by-id! conn id))
@@ -285,7 +284,6 @@
                                                                                                 :lang old-lang
                                                                                                 :params {:files [{:oldUri old-uri
                                                                                                                   :newUri new-uri}]}}))
-                                                            ;; EXP-010 Phase 3: Update cache for renamed document
                                                             (swap! state-atom update :lsp-document-opened
                                                                    (fn [m] (-> m (dissoc old-uri) (assoc new-uri true)))))
                                                           (if lang-changed?

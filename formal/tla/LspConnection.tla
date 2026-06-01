@@ -11,12 +11,15 @@ CONSTANTS MaxPendingId
 \* @type: Int;
 CONSTANTS MaxReconnects
 
+ASSUME LangsAssumption == Langs \in SUBSET STRING
 ASSUME MaxPendingIdAssumption == MaxPendingId \in (Nat \ {0})
 ASSUME MaxReconnectsAssumption == MaxReconnects \in Nat
 
 States ==
   {"disconnected", "connecting", "connected", "initializing",
    "initialized", "disconnecting", "error"}
+
+PendingKinds == {"none", "initialize", "request", "shutdown"}
 
 AllowedTransition ==
   {<<"disconnected", "connecting">>,
@@ -54,6 +57,8 @@ VARIABLE connecting
 VARIABLE reachable
 \* @type: Str -> Set(Int);
 VARIABLE pending
+\* @type: Str -> (Int -> Str);
+VARIABLE pendingKind
 \* @type: Str -> Int;
 VARIABLE nextId
 \* @type: Str -> Bool;
@@ -62,7 +67,7 @@ VARIABLE shuttingDown
 VARIABLE reconnects
 
 vars == <<state, connected, isInitialized, connecting, reachable,
-          pending, nextId, shuttingDown, reconnects>>
+          pending, pendingKind, nextId, shuttingDown, reconnects>>
 
 FlagsFor(s) ==
   [connected |-> ConnectedState(s),
@@ -77,6 +82,9 @@ SetLangState(l, s) ==
   /\ connecting' = [connecting EXCEPT ![l] = FlagsFor(s).connecting]
   /\ reachable' = [reachable EXCEPT ![l] = FlagsFor(s).reachable]
 
+EmptyPendingKinds == [id \in 1..MaxPendingId |-> "none"]
+OnlyPendingKind(id, kind) == [EmptyPendingKinds EXCEPT ![id] = kind]
+
 Init ==
   /\ state = [l \in Langs |-> "disconnected"]
   /\ connected = [l \in Langs |-> FALSE]
@@ -84,6 +92,7 @@ Init ==
   /\ connecting = [l \in Langs |-> FALSE]
   /\ reachable = [l \in Langs |-> FALSE]
   /\ pending = [l \in Langs |-> {}]
+  /\ pendingKind = [l \in Langs |-> EmptyPendingKinds]
   /\ nextId = [l \in Langs |-> 1]
   /\ shuttingDown = [l \in Langs |-> FALSE]
   /\ reconnects = [l \in Langs |-> 0]
@@ -94,13 +103,14 @@ StartConnect(l) ==
   /\ CanTransition(state[l], "connecting")
   /\ SetLangState(l, "connecting")
   /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
-  /\ UNCHANGED <<pending, nextId, reconnects>>
+  /\ UNCHANGED <<pending, pendingKind, nextId, reconnects>>
 
 OpenSocketAndInitialize(l) ==
   /\ state[l] = "connecting"
   /\ nextId[l] <= MaxPendingId
   /\ SetLangState(l, "initializing")
   /\ pending' = [pending EXCEPT ![l] = @ \cup {nextId[l]}]
+  /\ pendingKind' = [pendingKind EXCEPT ![l] = [@ EXCEPT ![nextId[l]] = "initialize"]]
   /\ nextId' = [nextId EXCEPT ![l] = @ + 1]
   /\ UNCHANGED <<shuttingDown, reconnects>>
 
@@ -108,7 +118,9 @@ InitializeResponse(l) ==
   /\ state[l] = "initializing"
   /\ pending[l] # {}
   /\ \E id \in pending[l]:
+       /\ pendingKind[l][id] = "initialize"
        /\ pending' = [pending EXCEPT ![l] = @ \ {id}]
+       /\ pendingKind' = [pendingKind EXCEPT ![l] = [@ EXCEPT ![id] = "none"]]
        /\ SetLangState(l, "initialized")
   /\ UNCHANGED <<nextId, shuttingDown, reconnects>>
 
@@ -116,15 +128,19 @@ Request(l) ==
   /\ state[l] = "initialized"
   /\ nextId[l] <= MaxPendingId
   /\ pending' = [pending EXCEPT ![l] = @ \cup {nextId[l]}]
+  /\ pendingKind' = [pendingKind EXCEPT ![l] = [@ EXCEPT ![nextId[l]] = "request"]]
   /\ nextId' = [nextId EXCEPT ![l] = @ + 1]
   /\ UNCHANGED <<state, connected, isInitialized, connecting, reachable,
                 shuttingDown, reconnects>>
 
 Response(l) ==
   /\ shuttingDown[l] = FALSE
+  /\ state[l] = "initialized"
   /\ pending[l] # {}
   /\ \E id \in pending[l]:
-       pending' = [pending EXCEPT ![l] = @ \ {id}]
+       /\ pendingKind[l][id] = "request"
+       /\ pending' = [pending EXCEPT ![l] = @ \ {id}]
+       /\ pendingKind' = [pendingKind EXCEPT ![l] = [@ EXCEPT ![id] = "none"]]
   /\ UNCHANGED <<state, connected, isInitialized, connecting, reachable,
                 nextId, shuttingDown, reconnects>>
 
@@ -134,6 +150,7 @@ StartShutdown(l) ==
   /\ CanTransition(state[l], "disconnecting")
   /\ SetLangState(l, "disconnecting")
   /\ pending' = [pending EXCEPT ![l] = {nextId[l]}]
+  /\ pendingKind' = [pendingKind EXCEPT ![l] = OnlyPendingKind(nextId[l], "shutdown")]
   /\ nextId' = [nextId EXCEPT ![l] = @ + 1]
   /\ shuttingDown' = [shuttingDown EXCEPT ![l] = TRUE]
   /\ UNCHANGED reconnects
@@ -143,6 +160,7 @@ ShutdownClosed(l) ==
   /\ CanTransition("disconnecting", "disconnected")
   /\ SetLangState(l, "disconnected")
   /\ pending' = [pending EXCEPT ![l] = {}]
+  /\ pendingKind' = [pendingKind EXCEPT ![l] = EmptyPendingKinds]
   /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
   /\ UNCHANGED <<nextId, reconnects>>
 
@@ -151,6 +169,7 @@ SocketError(l) ==
   /\ CanTransition(state[l], "error")
   /\ SetLangState(l, "error")
   /\ pending' = [pending EXCEPT ![l] = {}]
+  /\ pendingKind' = [pendingKind EXCEPT ![l] = EmptyPendingKinds]
   /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
   /\ UNCHANGED <<nextId, reconnects>>
 
@@ -160,6 +179,7 @@ UnexpectedClose(l) ==
   /\ CanTransition(state[l], "disconnected")
   /\ SetLangState(l, "disconnected")
   /\ pending' = [pending EXCEPT ![l] = {}]
+  /\ pendingKind' = [pendingKind EXCEPT ![l] = EmptyPendingKinds]
   /\ reconnects' = [reconnects EXCEPT ![l] = IF @ < MaxReconnects THEN @ + 1 ELSE @]
   /\ UNCHANGED <<nextId, shuttingDown>>
 
@@ -170,7 +190,7 @@ Reconnect(l) ==
   /\ SetLangState(l, "connecting")
   /\ reconnects' = [reconnects EXCEPT ![l] = @ - 1]
   /\ shuttingDown' = [shuttingDown EXCEPT ![l] = FALSE]
-  /\ UNCHANGED <<pending, nextId>>
+  /\ UNCHANGED <<pending, pendingKind, nextId>>
 
 Next ==
   \/ \E l \in Langs:
@@ -188,6 +208,7 @@ TypeOK ==
   /\ connecting \in [Langs -> BOOLEAN]
   /\ reachable \in [Langs -> BOOLEAN]
   /\ pending \in [Langs -> SUBSET (1..MaxPendingId)]
+  /\ pendingKind \in [Langs -> [1..MaxPendingId -> PendingKinds]]
   /\ nextId \in [Langs -> 1..(MaxPendingId + 1)]
   /\ shuttingDown \in [Langs -> BOOLEAN]
   /\ reconnects \in [Langs -> 0..MaxReconnects]
@@ -213,7 +234,37 @@ ShutdownStateConsistent ==
   \A l \in Langs:
     shuttingDown[l] =>
       /\ state[l] = "disconnecting"
-      /\ Cardinality(pending[l]) = 1
+      /\ \E id \in 1..MaxPendingId:
+           pending[l] = {id}
+
+PendingKindsMatchPending ==
+  \A l \in Langs:
+    \A id \in 1..MaxPendingId:
+      (id \in pending[l]) <=> (pendingKind[l][id] # "none")
+
+PendingIdsAreIssued ==
+  \A l \in Langs:
+    \A id \in pending[l]:
+      id < nextId[l]
+
+ShutdownPendingIsShutdown ==
+  \A l \in Langs:
+    shuttingDown[l] =>
+      \A id \in pending[l]:
+        pendingKind[l][id] = "shutdown"
+
+NoShutdownRequestOutsideShutdown ==
+  \A l \in Langs:
+    \A id \in pending[l]:
+      pendingKind[l][id] = "shutdown" => shuttingDown[l]
+
+ReconnectQueuedOnlyWhileDisconnected ==
+  \A l \in Langs:
+    reconnects[l] > 0 => state[l] = "disconnected"
+
+ReconnectQueueIsUnit ==
+  \A l \in Langs:
+    reconnects[l] <= 1
 
 LspInv ==
   /\ TypeOK
@@ -222,5 +273,11 @@ LspInv ==
   /\ PendingOnlyWhileLive
   /\ GracefulShutdownDoesNotReconnect
   /\ ShutdownStateConsistent
+  /\ PendingKindsMatchPending
+  /\ PendingIdsAreIssued
+  /\ ShutdownPendingIsShutdown
+  /\ NoShutdownRequestOutsideShutdown
+  /\ ReconnectQueuedOnlyWhileDisconnected
+  /\ ReconnectQueueIsUnit
 
 ================================================================================

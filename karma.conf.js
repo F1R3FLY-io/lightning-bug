@@ -2,6 +2,7 @@ import { existsSync } from 'fs';
 
 export default async function (config) {
   const karmaFile = process.env.KARMA_FILE || 'target/karma-test.js';
+  const webkitLauncher = (await import('./scripts/karma-playwright-webkit-launcher.js')).default;
 
   // Fail fast (with a clear message) if the runtime-fetched test artifacts are
   // missing. These are copied by `npm run prepare:test`; without them the browser
@@ -25,11 +26,11 @@ export default async function (config) {
     import('karma-chrome-launcher'),
     import('karma-spec-reporter'),
     import('karma-firefox-launcher'),
-    import('karma-opera-launcher'),
-    import('karma-webkit-launcher')
+    import('karma-opera-launcher')
   ]);
 
   config.set({
+    plugins: ['karma-*', webkitLauncher],
     frameworks: ['cljs-test'],
     files: [
       karmaFile,
