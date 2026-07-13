@@ -1,0 +1,39 @@
+@startuml
+' Same-file reactive sync between two panes, with double echo-suppression.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam ParticipantBorderColor #333333
+skinparam sequence {
+  LifeLineBorderColor #999999
+  ParticipantBackgroundColor #D6E4F0
+  ParticipantFontColor #10223A
+}
+
+participant "Pane A\n(origin)" as A #D6E4F0
+participant "doc-stream\nSubject (ws,uri)" as S #F5E9D0
+participant "Pane B\n(peer)" as B #D6E4F0
+
+== User types in Pane A ==
+A -> A : updateListener fires\n(user edit, not annotated)
+A -> A : has-peers? → true
+A -> S : publish-delta!\n{origin=A, changes, seq}
+S -> A : delivers to A's subscriber
+note right of A #FADBD8
+  Guard 1: origin == own pane-id
+  → Pane A IGNORES its own delta
+end note
+S -> B : delivers to B's subscriber
+B -> B : origin (A) ≠ own pane-id → accept
+B -> B : apply-remote-delta!\n(annotated external-set)
+note right of B #D5F5E3
+  Guard 2: applied with external-set
+  annotation → B's updateListener treats
+  it as API-driven → no re-publish,
+  no "user edit" LSP path. Cursor rebases
+  via selection.map.
+end note
+
+== Result ==
+note over A, B: Both panes converged. One coalesced LSP didChange is produced per file.
+@enduml

@@ -1,0 +1,44 @@
+@startuml
+' Two editors share one Workspace; a third uses an isolated Workspace.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+rectangle "<Editor> pane A\nuri = a.rho" as pa #4F86C6
+rectangle "<Editor> pane B\nuri = a.rho" as pb #4F86C6
+rectangle "<Editor> pane C\nuri = b.rho" as pc #4F86C6
+
+package "Workspace W1  (shared)" #EDEFF2 {
+  rectangle "conn\n(DataScript DB)" as c1 #E8A33D
+  rectangle "resources\n(Tree-Sitter parsers/queries)" as r1 #8E7CC3
+  rectangle "lsp / lsp-events\n(1 connection per language)" as l1 #5FA55A
+  rectangle "doc-streams\n(per-file sync Subjects)" as d1 #F5C77E
+}
+
+package "Workspace W2  (isolated)" #EDEFF2 {
+  rectangle "conn" as c2 #E8A33D
+  rectangle "resources" as r2 #8E7CC3
+  rectangle "lsp / lsp-events" as l2 #5FA55A
+  rectangle "doc-streams" as d2 #F5C77E
+}
+
+pa --> c1
+pa --> l1
+pb --> c1
+pb --> l1
+pa <..> d1 : same-file sync
+pb <..> d1 : same-file sync
+pc --> c2
+pc --> l2
+
+note bottom of d1
+  Panes A and B show the SAME file → live sync.
+  Pane C is fully isolated (different Workspace):
+  shares no documents, resources, or LSP.
+end note
+@enduml

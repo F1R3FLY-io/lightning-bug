@@ -1,0 +1,30 @@
+@startuml
+' The five stages `npm test` runs in order; the first red stage aborts the rest.
+' Colours follow the docs colour legend: green = passing/gate step, blue = build
+' output, teal = editor/demo runtime.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam ActivityBorderColor #333333
+skinparam ActivityDiamondBorderColor #333333
+skinparam noteBorderColor #B0A15A
+skinparam noteBackgroundColor #FBF6DD
+
+title npm test — sequential gate chain (stops at first failure)
+
+start
+#5FA55A:**test:types**\ntsd validates the hand-written\nTypeScript bindings (types/*.d.ts);
+#5FA55A:**test:debug**\nKarma runs 516 tests against\nthe :none (debug) compile;
+#5FA55A:**test:release**\nKarma runs 516 tests against\nthe :advanced (release) compile;
+#4F86C6:**build:demo** (MODE=release)\nshadow-cljs release :libs\n+ copy demo assets;
+#6FB2B0:**test:demo**\nheadless browser loads the demo\nand asserts the Editor boots;
+stop
+
+note right
+  npm test is A && B && C && D && E,
+  so a failing stage aborts the chain.
+  Local default browser:
+  ChromeHeadlessNoSandbox
+  (override with KARMA_BROWSERS).
+end note
+@enduml

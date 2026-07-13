@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   testability the `app.cofx`/`app.fx` docstrings always promised).
 - `lib.editor.runtime`: namespace extracted from `lib.core` (event emission, CodeMirror
   extension assembly, document activation, and the LSP didOpen lifecycle).
+- `lib.editor.commands`: namespace extracted from `lib.core` — the imperative `build-handle`
+  method bag (the public ref API) behind an `editor-ctx`.
+- **Formal verification.** TLA+ models (`BrowserAsync`, `DocSync`, `LightningBugAsync`,
+  `LspConnection` — each with an inductive-invariant check and, except `DocSync`, a liveness
+  variant), checked with TLC and proved with TLAPS; five constructive Rocq mirrors; and a
+  `verify:formal:alignment` gate that keeps the LSP finite-state machine's states/transitions
+  identical across `lib.lsp.fsm`, `LspConnection.tla`, and `Async/Fsm.v`. `verify:formal:ci`
+  (alignment + Rocq) gates `release`. LSP request/response is now typed (pending-request kinds).
 - Test coverage: `infrastructure.datascript-adapter` (repository delegation + EXP-007
   coalesced-query regression guard), `app.system` (the DI seam), and `app.languages`.
 
@@ -55,11 +63,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ILspClient`) via dependency injection; `lib.lsp.connection-manager/ConnectionManager`
   is the live per-editor LSP client. EXP-007 coalesced-query performance preserved
   (benchmark-verified, no regression).
-- `lib/core.cljs` reduced from 1158 to 728 lines (−37%) by extracting `lib.editor.runtime`
-  (behavior-preserving byte-exact move; no benchmark regression).
+- `lib/core.cljs` reduced from 1158 to ~291 lines by extracting the runtime and imperative-command
+  clusters into `lib.editor.runtime` and `lib.editor.commands` (behavior-preserving byte-exact
+  moves; no benchmark regression). The shell is now `default-state` + the React wiring + lifecycle
+  effects.
 - Consolidated `get-lang-from-ext` into `lib.utils` as the single source of truth.
 - Documented the `lib.db` query-naming convention (`document-*` single-attribute vs
   `doc-*`/`active-uri-*` coalesced accessors).
+- **Documentation.** Restructured `docs/` into architecture, usage-guide, formal-verification,
+  benchmarks, development, and security sections, with PlantUML diagrams rendered to committed SVG
+  via a new `npm run docs:diagrams` script; archived the historical remediation and
+  benchmark-experiment ledgers under `docs/archive/`; and rewrote the README as a focused landing
+  page. See `docs/README.md`.
 
 ### Fixed
 

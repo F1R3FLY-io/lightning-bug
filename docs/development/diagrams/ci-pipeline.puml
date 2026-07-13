@@ -1,0 +1,56 @@
+@startuml
+' GitHub Actions job DAG from .github/workflows/ci.yaml.
+' Colours: teal = fast checks, orange = performance gate, crimson = formal gate,
+' blue = cross-platform tests, green = the terminal publish/gate job.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #555555
+skinparam packageStyle rectangle
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+skinparam noteBorderColor #7A8797
+skinparam noteBackgroundColor #EDEFF2
+
+title CI and Release — job DAG (.github/workflows/ci.yaml)
+
+rectangle "**lint-and-test-types**\nlint (clj-kondo · eastwood · splint · kibit)\n+ test:types + check:demo-deps" as lint #6FB2B0
+rectangle "**benchmark**\nbase vs head → compare-benchmarks.js\n--gate-regression 150   (pull_request only)" as bench #E8A33D
+rectangle "**formal-verification**\nverify:formal:ci = alignment + Rocq\n(installs Rocq via opam)" as formal #C0504D
+rectangle "**test**\nmatrix: OS x browser x {debug, release}\nKarma tests + demo sanity + libs artifact" as test #4F86C6
+rectangle "**release**\ndownload libs artifact -> npm publish\n(GitHub Packages)" as release #5FA55A
+
+lint --> bench
+lint --> formal
+lint --> test
+
+lint --> release
+formal --> release
+test --> release
+
+note top of bench
+  Runs only on pull_request.
+  Fails only on a > 150% (2.5x)
+  regression; the full report is
+  posted to the run summary either way.
+end note
+
+note bottom of release
+  Runs only on push of a v* tag and
+  needs: lint-and-test-types,
+  formal-verification, test.
+  benchmark is PR-only and is NOT a
+  release dependency.
+end note
+
+legend right
+  |= colour |= job role |
+  |<#6FB2B0>   | fast checks (lint + types) |
+  |<#E8A33D>   | performance regression gate |
+  |<#C0504D>   | formal-methods gate |
+  |<#4F86C6>   | cross-platform browser tests |
+  |<#5FA55A>   | publish / terminal gate |
+endlegend
+@enduml

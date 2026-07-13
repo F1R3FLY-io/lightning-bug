@@ -1,0 +1,34 @@
+@startuml
+' How editor events reach the host application.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+rectangle "lib.editor.runtime\n(content/selection/document/\nlanguage/search events)" as rt #6FB2B0
+rectangle "lib.editor.commands\n(document ops, highlight, scroll, error)" as cmds #6FB2B0
+rectangle "lib.core\n(ready, destroy)" as core #4F86C6
+rectangle "lib.lsp.client\n(lsp-message, lsp-initialized,\ndiagnostics, symbols, connect,\ndisconnect, lsp-error, log)" as lsp #5FA55A
+
+rectangle "emit-event\n(per-type debounce)" as emit #F5C77E
+rectangle "Workspace :lsp-events\n(inbound LSP, shared)" as wsev #C7E0C3
+rectangle "per-editor\nReplaySubject" as subj #F5C77E
+rectangle "host: editorRef.getEvents()\n.subscribe(evt => …)" as host #D6E4F0
+
+rt --> emit
+cmds --> emit
+core --> emit
+emit --> subj
+lsp --> wsev
+wsev --> subj : fanned in to\nEVERY pane
+subj --> host
+
+note bottom of wsev
+  One connection per language per Workspace
+  emits here; each pane forwards to its own
+  subject and filters by URI when applying.
+end note
+@enduml

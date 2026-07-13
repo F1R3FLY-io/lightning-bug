@@ -1,0 +1,74 @@
+@startuml
+' Module / layering map. Colours follow the docs colour legend.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #555555
+skinparam packageStyle rectangle
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+package "Demo application (:app)  — composition root" #EAF2FB {
+  rectangle "app.core / app.views\n(re-frame + re-posh UI)" as appui #4F86C6
+  rectangle "app.system\n(DI container)" as appsys #4F86C6
+  rectangle "app.cofx / app.fx\n(re-frame coeffects/effects)" as appfx #4F86C6
+  rectangle "app.languages\n(language registry)" as applang #4F86C6
+}
+
+package "Domain — ports (hexagon boundary)" #EDEFF2 {
+  rectangle "domain.protocols\nIDocumentRepository · IDiagnosticsRepository\nISymbolsRepository · ILspClient\nIResourceLifecycle · IDebounceCoordinator · ILogRepository" as ports #B9C2CE
+}
+
+package "Infrastructure — driven adapters" #FBEFDD {
+  rectangle "infrastructure.datascript-adapter\n(4 DataScript*Repository records,\neach holds a Workspace conn)" as adapter #E8A33D
+}
+
+package "Library editor (:libs)  — the product" #F3F7FB {
+  rectangle "lib.core\nReact shell + createWorkspace\n+ EditorWorkspaceProvider" as core #4F86C6
+  rectangle "lib.editor.runtime\n+ lib.editor.commands" as edrt #6FB2B0
+  rectangle "lib.editor.syntax / highlight\n/ diagnostics / annotations\n(Tree-Sitter + CodeMirror)" as edsyn #8E7CC3
+  rectangle "lib.lsp.connection-manager\n→ lib.lsp.client → lib.lsp.fsm" as lsp #5FA55A
+  rectangle "lib.workspace\n+ lib.workspace.doc-sync" as ws #8794A6
+  rectangle "lib.db\n(DataScript schema + queries)" as db #E8A33D
+  rectangle "lib.state · lib.debounce\nlib.lifecycle · lib.query-cache · lib.utils" as libsupport #C9D4E0
+}
+
+package "Extensions" #F3F7FB {
+  rectangle "ext.lang.rholang\n(RholangExtension)" as rho #8E7CC3
+}
+
+' --- App consumes the hexagon ---
+appui --> appsys
+appsys --> adapter : instantiates (over the\ndefault Workspace conn)
+appfx ..> ports : depends on (DI)
+adapter ..|> ports : implements
+adapter --> db
+
+' --- Library editor stack ---
+core --> edrt
+core --> ws
+core --> edsyn
+core ..> lsp : uses `ILspClient`\n(ConnectionManager)
+lsp ..|> ports : ConnectionManager\nimplements ILspClient
+edrt --> db : conn threaded\n(first arg)
+edrt --> lsp
+ws --> db
+edsyn --> libsupport : load-resource
+core --> rho : `languages` prop
+
+note right of ports
+  Only ports that earn their keep are kept.
+  Three protocols (IEventEmitter,
+  ISyntaxHighlighter, IEditorOperations)
+  were removed — no fitting implementer.
+end note
+
+note bottom of core
+  Hexagonal is **partial**: the app consumes the
+  ports via cofx/fx; the library editor is a parallel
+  stack that calls lib.db directly (conn-threaded)
+  and consumes only ILspClient polymorphically.
+end note
+@enduml

@@ -1,0 +1,27 @@
+@startuml
+' The scientific-method optimization loop.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam activity {
+  BackgroundColor #D6E4F0
+  BorderColor #2C5F8A
+  FontColor #10223A
+  DiamondBackgroundColor #F5E0C3
+  DiamondBorderColor #B5791F
+}
+
+start
+:Formulate hypothesis\n(target metric + expected effect,\nquantified);
+:Create experiment branch\nfrom a captured baseline;
+:Implement the optimization\n(minimal, isolated change);
+:Run benchmarks\n(≥30 samples, warmup, IQR outlier removal);
+:Statistical analysis\nWelch's t · Cohen's d · 95% CI;
+if (p < 0.05  AND  |d| ≥ 0.2\nAND no regressions?) then (yes)
+  :ACCEPT — merge;
+else (no)
+  :REJECT — keep as evidence;
+endif
+:Document result in an EXP log\n(hypothesis, change, result, decision, lessons);
+stop
+@enduml

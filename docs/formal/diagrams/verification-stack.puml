@@ -1,0 +1,46 @@
+@startuml
+' The verification tools and the two-tier gate.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #7A1F2B
+  FontColor #3A0A10
+}
+
+rectangle "TLA+ models (.tla)\nbase + InductiveCheck + Liveness" as tla #E6A9B0
+rectangle "TLAPS proofs (.tla, 8 modules)" as tlaps #E6A9B0
+rectangle "Rocq proofs (.v, 5 modules)" as rocq #E6A9B0
+rectangle "src/lib/lsp/fsm.cljs\n(FSM source of truth)" as src #5FA55A
+
+rectangle "TLC\n(bounded model check)" as tlc #F5C77E
+rectangle "tlapm + Z3 / Zenon / Isabelle\n(parametric proof)" as tlapmt #F5C77E
+rectangle "rocq compile\n(constructive check)" as rocqc #F5C77E
+rectangle "verify-formal-alignment.js\n(source↔formal diff + regex)" as align #F5C77E
+
+tla --> tlc
+tlaps --> tlapmt
+rocq --> rocqc
+src --> align
+tla --> align
+rocq --> align
+
+package "CI gate — verify:formal:ci  (blocks release)" #D5F5E3 {
+  rectangle "alignment" as ga #A9DCB5
+  rectangle "rocq compile" as gr #A9DCB5
+}
+package "Local/full gate — verify:formal" #FDF6E3 {
+  rectangle "alignment + TLC + TLAPS + rocq" as gf #F3E1A9
+}
+
+align ..> ga
+rocqc ..> gr
+tlc ..> gf
+tlapmt ..> gf
+
+note bottom of ga
+  CI deliberately does NOT run TLC/TLAPS
+  (too heavy / tool-dependent). The alignment
+  gate self-guards this: it fails if CI adds them.
+end note
+@enduml

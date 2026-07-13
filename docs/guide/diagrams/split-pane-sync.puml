@@ -1,0 +1,53 @@
+@startuml
+' Split-pane live synchronization: two <Editor> panes sharing ONE Workspace,
+' both viewing the SAME file. Colour legend (see docs/README.md):
+'   Blue  = React shell / <Editor> pane
+'   Slate = Workspace (lib.workspace) + its per-file doc-sync stream
+'   Amber = RxJS event / delta streams
+'   Orange = DataScript (authoritative persisted text)
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantFontColor #FFFFFF
+}
+actor User as U #E8E8E8
+
+participant "Pane A\n<Editor>" as A #4A90D9
+participant "Workspace\ndoc-sync Subject" as WS #708090
+participant "DataScript\nconn (:document/text)" as DB #E67E22
+participant "Pane B\n<Editor>" as B #4A90D9
+
+== Open the shared document ==
+U -> A : openDocument(uri, text, "text")
+A -> DB : transact document\n(:document/uri, :document/text)
+A -> A : seed CodeMirror view
+
+== Split onto the same file ==
+U -> B : activateDocument(uri)
+B -> DB : read :document/text for uri
+DB --> B : "hello world"
+B -> B : seed CodeMirror view
+
+== Live edit in A propagates to B ==
+U -> A : type "XYZ " (CodeMirror edit)
+A -> WS : publish-delta!\n{origin: A, changes: ChangeSet}
+note right of WS #FFF3CD
+  RxJS Subject per (workspace, uri).
+  has-peers? is true, so the delta
+  is serialized and fanned out.
+end note
+WS --> B : delta (origin A)
+B -> B : apply ChangeSet with\nexternal-set annotation\n(cursor rebases 5 -> 9)
+WS --> A : delta (origin A)
+A -> A : ignore own emission\n(no echo)
+
+== Eventual persistence (idle) ==
+A -> DB : requestIdleCallback:\nupdate :document/text
+note over A, B #E8F0FE
+  Each pane keeps its OWN cursor,
+  selection, and scroll position.
+end note
+@enduml

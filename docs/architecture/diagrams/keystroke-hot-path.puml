@@ -1,0 +1,38 @@
+@startuml
+' What the CodeMirror updateListener does on each document change.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam activity {
+  BackgroundColor #E4DFF0
+  BorderColor #6A4FA0
+  FontColor #221436
+  DiamondBackgroundColor #F5E0C3
+  DiamondBorderColor #B5791F
+}
+
+start
+:update fires;
+:update cursor / selection\nstate (cheap, per-pane atom);
+if (docChanged AND active-uri?) then (yes)
+  if (external-set annotation?) then (API-driven)
+    :immediate on-content-change\ncallback;
+    :full Tree-Sitter re-parse;
+    stop
+  else (user edit)
+    :clear stale visible diagnostics;
+    if (has-peers?) then (yes)
+      :publish-delta! to doc-stream\n(same-file sync);
+    else (no)
+    endif
+    :accumulate incremental LSP change\n(per-Workspace, per-uri);
+    :schedule idle DataScript text sync\n(50 ms / max 200 ms, requestIdleCallback);
+    :emit content-change {uri, length}\n(NOT the full document text);
+    :schedule debounced didChange\n(150 ms / max 500 ms);
+    :incremental Tree-Sitter parse\n(replay iterChanges into tree.edit);
+    stop
+  endif
+else (no)
+  stop
+endif
+@enduml

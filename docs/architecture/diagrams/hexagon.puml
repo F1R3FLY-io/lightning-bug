@@ -1,0 +1,75 @@
+@startuml
+' Ports & adapters: driving (primary) adapters on the left, the ports in the centre,
+' driven (secondary) adapters on the right, backing systems behind them.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #555555
+skinparam packageStyle rectangle
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+package "Driving side (primary)" #EAF2FB {
+  rectangle "app.cofx\n(coeffects — reads)" as cofx #4F86C6
+  rectangle "app.fx\n(effects — writes)" as fx #4F86C6
+  rectangle "app.system\n(DI container:\ninit! / set-system! / reset-system!)" as sys #4F86C6
+}
+
+package "Domain — ports\n(domain.protocols)" #EDEFF2 {
+  rectangle "IDocumentRepository" as pdoc #B9C2CE
+  rectangle "IDiagnosticsRepository" as pdiag #B9C2CE
+  rectangle "ISymbolsRepository" as psym #B9C2CE
+  rectangle "ILogRepository" as plog #B9C2CE
+  rectangle "ILspClient" as plsp #B9C2CE
+  rectangle "IResourceLifecycle" as plife #B9C2CE
+  rectangle "IDebounceCoordinator" as pdeb #B9C2CE
+}
+
+package "Driven side (secondary) — adapters" #FBEFDD {
+  rectangle "DataScriptDocumentRepository" as adoc #E8A33D
+  rectangle "DataScriptDiagnosticsRepository" as adiag #E8A33D
+  rectangle "DataScriptSymbolsRepository" as asym #E8A33D
+  rectangle "DataScriptLogRepository" as alog #E8A33D
+  rectangle "ConnectionManager" as acm #5FA55A
+  rectangle "LifecycleManager" as alife #8794A6
+  rectangle "DebounceCoordinator" as adeb #8794A6
+}
+
+package "Backing systems" #F3F7FB {
+  rectangle "lib.db (DataScript)" as db #E8A33D
+  rectangle "lib.lsp.client\n(WebSocket / JSON-RPC)" as lspc #5FA55A
+}
+
+cofx ..> pdoc
+cofx ..> pdiag
+cofx ..> psym
+cofx ..> plog
+fx ..> pdoc
+fx ..> plsp
+sys --> adoc : instantiates
+sys --> adiag
+sys --> asym
+sys --> alog
+
+adoc ..|> pdoc
+adiag ..|> pdiag
+asym ..|> psym
+alog ..|> plog
+acm ..|> plsp
+alife ..|> plife
+adeb ..|> pdeb
+
+adoc --> db
+adiag --> db
+asym --> db
+alog --> db
+acm --> lspc
+
+note bottom of plsp
+  ILspClient is the ONE port the library editor
+  (lib.core) also consumes directly — the editor
+  holds a ConnectionManager and calls p/notify-*!
+end note
+@enduml

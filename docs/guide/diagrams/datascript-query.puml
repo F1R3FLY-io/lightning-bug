@@ -1,0 +1,38 @@
+@startuml
+' Path of a Datalog query from the imperative API to the Workspace's DataScript conn.
+' Colour legend (see docs/README.md):
+'   Blue   = host / JS caller
+'   Teal   = <Editor> command layer
+'   Slate  = Workspace (owns the conn)
+'   Orange = DataScript conn + EAV index
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantFontColor #FFFFFF
+}
+participant "JS caller\n(host app)" as H #4A90D9
+participant "editorRef.current\nquery() / getDb()" as E #2AA198
+participant "Workspace" as WS #708090
+database "DataScript conn\n(EAV index)" as DB #E67E22
+
+H -> E : query("[:find ?uri :where\n[?e :document/uri ?uri]]", params?)
+E -> E : js->clj (keywordize)
+E -> WS : resolve active Workspace conn
+WS --> E : conn
+E -> DB : d/q(query, @conn, ...params)
+DB --> E : result (Clojure data)
+E -> E : clj->js
+E --> H : JS array
+
+== Advanced: direct access ==
+H -> E : getDb()
+E --> H : conn (opaque)
+note right of H #FFF3CD
+  With the raw conn you can call the
+  DataScript library directly, e.g.
+  ds.pull for nested :symbol/parent.
+end note
+@enduml

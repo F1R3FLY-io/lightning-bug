@@ -96,7 +96,8 @@
     "benchmark:restore": "sudo ./scripts/benchmark-setup.sh --restore",
     "compare-benchmarks": "node scripts/compare-benchmarks.js",
     "benchmark:gate": "node scripts/compare-benchmarks.js docs/benchmarks/results/baseline.json docs/benchmarks/results/experiment.json --gate-regression 150",
-    "check:demo-deps": "node scripts/check-demo-deps.js"
+    "check:demo-deps": "node scripts/check-demo-deps.js",
+    "docs:diagrams": "node scripts/render-diagrams.js"
   },
   "main": "dist/libs/lib.core.js",
   "module": "dist/libs/lib.core.js",

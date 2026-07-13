@@ -1,0 +1,51 @@
+@startuml
+' Imperative ref + RxJS event interaction for a single <Editor>.
+' Colour legend (see docs/README.md):
+'   Blue  = React host component / <Editor>
+'   Teal  = Editor runtime & commands
+'   Amber = RxJS event stream (getEvents)
+'   Orange = DataScript
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantFontColor #FFFFFF
+}
+participant "Host component\n(useRef + useEffect)" as H #4A90D9
+participant "<Editor>\nimperative handle" as E #2AA198
+participant "RxJS Observable\ngetEvents()" as O #F5A623
+participant "DataScript conn\ngetDb() / query()" as DB #E67E22
+
+== Mount & readiness ==
+H -> E : render <Editor ref=...>
+E -->> O : emit { type: "ready" }
+H -> E : isReady()
+E --> H : true
+H -> O : getEvents().subscribe(handler)
+
+== Drive the editor imperatively ==
+H -> E : openDocument(uri, text, "rholang")
+E -->> O : emit { type: "document-open" }
+E -->> O : emit { type: "content-change" }
+H -> E : setCursor({ line: 1, column: 3 })
+E -->> O : emit { type: "selection-change" }
+
+== React to events ==
+O --> H : handler(event)
+note right of H #FFF3CD
+  Host updates its own React state
+  from the event stream (one-way flow).
+end note
+
+== Read state on demand ==
+H -> E : getState()
+E -> DB : coalesced reads
+DB --> E : documents, diagnostics, symbols
+E --> H : EditorState snapshot
+
+== Unmount ==
+H -> O : subscription.unsubscribe()
+E -->> O : emit { type: "destroy" }
+@enduml

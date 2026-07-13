@@ -1,0 +1,52 @@
+@startuml
+' LSP connection finite-state machine: 7 states, 17 transitions.
+' This is the single source of truth in lib.lsp.fsm and the anchor of the
+' source<->formal alignment gate (see docs/formal/verification-gate.md).
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #3B7A3B
+skinparam state {
+  BackgroundColor #D4EDD0
+  BorderColor #3B7A3B
+  FontColor #123312
+}
+
+[*] --> disconnected
+
+disconnected --> connecting : StartConnect
+
+connecting --> connected : OpenSocket (onopen)
+connecting --> error : SocketError
+connecting --> disconnected : UnexpectedClose
+
+connected --> initializing : send `initialize`
+connected --> disconnecting : StartShutdown
+connected --> error : SocketError
+
+initializing --> initialized : InitializeResponse
+initializing --> disconnecting : StartShutdown
+initializing --> error : SocketError
+initializing --> disconnected : UnexpectedClose
+
+initialized --> disconnecting : StartShutdown
+initialized --> error : SocketError
+initialized --> disconnected : UnexpectedClose
+
+disconnecting --> disconnected : ShutdownClosed (exit + close)
+
+error --> disconnected : cleanup
+error --> connecting : Reconnect (backoff)
+
+note right of initialized
+  Derived flags (connected? / initialized? /
+  connecting? / reachable?) are PROJECTIONS of
+  this state — never written directly.
+  connected? holds for: connected, initializing,
+  initialized.
+end note
+
+note bottom of disconnecting
+  Graceful shutdown sets :shutting-down? so
+  UnexpectedClose does NOT trigger auto-reconnect.
+end note
+@enduml

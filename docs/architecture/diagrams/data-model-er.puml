@@ -1,0 +1,76 @@
+@startuml
+' Entity-relationship view of the DataScript schema (per Workspace).
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 6
+skinparam ArrowColor #555555
+skinparam class {
+  BackgroundColor #F5E0C3
+  BorderColor #B5791F
+  FontColor #3A2A0A
+  AttributeFontColor #3A2A0A
+}
+hide methods
+hide circle
+
+entity "document" as doc {
+  + document/uri  <<unique identity>>
+  --
+  document/text
+  document/language  <<index>>
+  document/version  <<index>>
+  document/dirty
+  document/opened  <<index>>
+  document/project  <<ref>>
+}
+
+entity "diagnostic" as diag {
+  diagnostic/document  <<ref, index>>
+  --
+  diagnostic/message
+  diagnostic/severity
+  diagnostic/start-line / start-char
+  diagnostic/end-line / end-char
+  diagnostic/version  <<index, optional>>
+}
+
+entity "symbol" as sym {
+  symbol/document  <<ref, index>>
+  symbol/parent  <<ref, self>>
+  --
+  symbol/name
+  symbol/kind
+  symbol/(start|end)-(line|char)
+  symbol/selection-(start|end)-(line|char)
+}
+
+entity "project" as proj {
+  + project/id  <<unique identity>>
+  + project/root  <<unique identity>>
+  --
+  project/name  <<optional>>
+}
+
+entity "log" as log {
+  log/message
+  log/lang
+}
+
+entity "active-uri  <<singleton>>" as au {
+  + workspace/active-uri  <<unique identity>>
+}
+
+diag }o--|| doc : diagnostic/document
+sym  }o--|| doc : symbol/document
+sym  }o--o| sym : symbol/parent (hierarchy)
+doc  }o--o| proj : document/project\n(longest root-prefix)
+au ..> doc : names the focused URI
+
+note bottom of au
+  A single entity holds the Workspace focus.
+  update-active-uri! retracts only OTHER
+  active-uri entities (the attr is unique-
+  identity, so a blanket retract would blank
+  the just-set focus).
+end note
+@enduml

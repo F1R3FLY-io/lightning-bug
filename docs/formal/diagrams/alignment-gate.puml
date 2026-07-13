@@ -1,0 +1,30 @@
+@startuml
+' The source<->formal FSM alignment check.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+rectangle "src/lib/lsp/fsm.cljs\nSTATES · TRANSITIONS · state->connected?" as cljs #5FA55A
+rectangle "formal/tla/LspConnection.tla\nStates · AllowedTransition · ConnectedState" as tla #E6A9B0
+rectangle "formal/rocq/Async/Fsm.v\nall_states · all_transitions · connected_state" as coq #E6A9B0
+
+rectangle "verify-formal-alignment.js\nextract → normalize (CamelCase↔kebab) → assertSame" as gate #F5C77E
+
+cljs --> gate
+tla --> gate
+coq --> gate
+
+rectangle "Must be IDENTICAL:\n7 states · 17 transitions · 3 connected-states" as ok #A9DCB5
+gate --> ok : else build FAILS
+
+note bottom of gate
+  Plus regex assertions over source:
+  no direct :state writes; shutdown clears
+  pending; responses matched by id; didClose
+  suppressed while a URI is shared.
+end note
+@enduml

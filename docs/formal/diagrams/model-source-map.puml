@@ -1,0 +1,36 @@
+@startuml
+' Which source subsystem each formal model abstracts.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #7A1F2B
+  FontColor #3A0A10
+}
+
+package "Formal models (TLA+ / Rocq)" #FBE9EB {
+  rectangle "BrowserAsync" as m1 #E6A9B0
+  rectangle "DocSync" as m2 #E6A9B0
+  rectangle "LightningBugAsync" as m3 #E6A9B0
+  rectangle "LspConnection" as m4 #E6A9B0
+}
+
+package "Source subsystem" #F3F7FB {
+  rectangle "React unmount + debounce +\nidle DataScript sync\n(lib.core, lib.editor.runtime)" as s1 #D6E4F0
+  rectangle "Same-file reactive sync\n(lib.workspace.doc-sync)" as s2 #8794A6
+  rectangle "Public-API document lifecycle\n(lib.editor.commands + runtime)" as s3 #6FB2B0
+  rectangle "LSP connection FSM + WebSocket\n(lib.lsp.fsm / client / connection-manager)" as s4 #5FA55A
+}
+
+m1 --> s1 : abstracts
+m2 --> s2 : abstracts
+m3 --> s3 : abstracts
+m4 --> s4 : abstracts
+
+note bottom of m4
+  Only LspConnection's state/transition SHAPE is
+  mechanically tied to source (the alignment gate).
+  The other ties are hand-written abstractions +
+  regex behaviour assertions — see verification-gate.md.
+end note
+@enduml

@@ -1,0 +1,34 @@
+@startuml
+' System-context view: Lightning Bug and the actors/systems around it.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #1A1A1A
+}
+
+actor "Developer" as dev #FDF6E3
+
+rectangle "Host web application\n(React 18/19)" as host #D6E4F0
+
+package "Lightning Bug (browser)" #F7FBFF {
+  rectangle "<b>Editor</b> React component\n(:libs target)" as editor #4F86C6
+  rectangle "Tree-Sitter\ngrammars + core (WASM)" as wasm #E4DFF0
+  rectangle "In-memory DataScript DB\n(per Workspace)" as ds #F5E0C3
+}
+
+cloud "Language Server\n(e.g. rholang-language-server)" as lsp #D4EDD0
+
+dev --> host : interacts
+host --> editor : embeds `<Editor>` (props, ref, RxJS events)
+editor --> wasm : loads grammar,\nparses & highlights
+editor --> ds : reads/writes\ndocuments, diagnostics, symbols
+editor <--> lsp : LSP over **ws://** (JSON-RPC):\ndidOpen/didChange/…, diagnostics, symbols
+
+note bottom of lsp
+  Optional. Absent ⇒ the editor still
+  runs (syntax only, graceful degradation).
+end note
+@enduml

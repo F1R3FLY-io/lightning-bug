@@ -1,0 +1,39 @@
+@startuml
+' How the lib.core React shell composes its parts on mount.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+rectangle "lib.core  (React forwardRef shell, ~291 lines)" as core #4F86C6 {
+  rectangle "1. Resolve Workspace\nprop → context → shared default" as step1 #D6E4F0
+  rectangle "2. Per-editor state atom\n(reagent atom in a useRef)" as step2 #D6E4F0
+  rectangle "3. useMemo singletons:\nevents (ReplaySubject), pane-id,\nclient (ConnectionManager), lifecycle-mgr,\n**editor-ctx**, container/view refs" as step3 #D6E4F0
+  rectangle "4. useImperativeHandle\n= commands/build-handle(ctx, ready)" as step4 #D6E4F0
+  rectangle "5. Mount effect:\nbuild EditorState/EditorView,\nsubscribe events, register resources,\nemit `ready`" as step5 #D6E4F0
+}
+
+rectangle "editor-ctx  (immutable dependency bundle)\n{state-atom view-ref events client conn\n workspace pane-id lsp-atom}" as ctx #B9C2CE
+
+rectangle "lib.editor.commands\nbuild-handle → 28-method ref API" as cmds #6FB2B0
+rectangle "lib.editor.runtime\nget-extensions · activate-document ·\nensure-lsp-document-opened · emit-event" as rt #6FB2B0
+
+step1 --> step2
+step2 --> step3
+step3 --> step4
+step4 --> step5
+step3 --> ctx : builds
+ctx --> cmds : passed to build-handle
+ctx --> rt : same fields passed\npositionally
+step5 --> rt : get-extensions,\nactivate-document
+
+note bottom of ctx
+  One dependency vocabulary shared by both
+  extracted namespaces — neither touches React,
+  only ctx. This is the extraction seam.
+end note
+@enduml

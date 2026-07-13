@@ -1,0 +1,43 @@
+@startuml
+' Connect -> initialize -> didOpen -> diagnostics, and fan-out to panes.
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam ParticipantBorderColor #333333
+skinparam sequence {
+  LifeLineBorderColor #999999
+  ParticipantBackgroundColor #D4EDD0
+  ParticipantFontColor #123312
+}
+
+participant "Editor pane" as pane #D6E4F0
+participant "ConnectionManager\n(ILspClient)" as cm #D4EDD0
+participant "lib.lsp.client\n(WebSocket)" as client #D4EDD0
+participant "Language server" as srv #C8E6C9
+participant "DataScript\nconn" as db #F5E0C3
+
+pane -> cm : ensure-lsp-document-opened(uri)
+cm -> client : connect! (if needed)
+client -> srv : ws:// open
+srv --> client : onopen  → state=connected
+client -> srv : `initialize`  → state=initializing
+srv --> client : InitializeResponse\n(syncKind: incremental?)
+client -> srv : `initialized`  → state=initialized
+client -> srv : textDocument/didOpen
+pane -> pane : mark :opened (db + atom)
+
+... user edits (debounced 150 ms / max 500 ms) ...
+pane -> cm : notify-did-change-incremental!
+cm -> client : textDocument/didChange\n(one coalesced, monotonic version)
+client -> srv : didChange
+
+srv --> client : publishDiagnostics(uri, version)
+client -> db : replace-diagnostics-by-uri!
+client -> pane : emit `diagnostics`\n(via Workspace :lsp-events → each pane)
+pane -> pane : apply to view IF uri == my active file
+pane -> cm : request document symbols
+cm -> srv : textDocument/documentSymbol
+srv --> client : symbols
+client -> db : replace-symbols!  (flattened)
+client -> pane : emit `symbols`
+@enduml

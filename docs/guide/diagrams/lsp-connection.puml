@@ -1,0 +1,52 @@
+@startuml
+' LSP-over-WebSocket lifecycle between one Workspace and a language server.
+' Colour legend (see docs/README.md):
+'   Blue   = <Editor> / host
+'   Slate  = Workspace (owns the connection)
+'   Green  = LSP server (rholang-language-server)
+'   Amber  = RxJS event stream
+'   Orange = DataScript
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantFontColor #FFFFFF
+}
+participant "<Editor>" as E #4A90D9
+participant "Workspace\nLSP connection manager" as WS #708090
+participant "rholang-language-server\n(ws://localhost:41551)" as S #27AE60
+participant "DataScript conn" as DB #E67E22
+participant "getEvents()\nRxJS" as O #F5A623
+
+E -> WS : openDocument(uri, text, "rholang")
+WS -> S : WebSocket connect
+WS -> S : initialize / initialized
+WS -->> O : emit { type: "connect" }
+WS -->> O : emit { type: "lsp-initialized" }
+WS -> S : textDocument/didOpen
+WS -->> O : emit { type: "document-open" }
+
+== Server pushes results ==
+S --> WS : textDocument/publishDiagnostics
+WS -> DB : replace :diagnostic/* for uri
+WS -->> O : emit { type: "diagnostics" }
+S --> WS : documentSymbol response
+WS -> DB : replace :symbol/* for uri
+WS -->> O : emit { type: "symbols" }
+
+== Edits ==
+E -> WS : user edit (debounced)
+WS -> S : textDocument/didChange (monotonic version)
+
+== Shutdown ==
+E -> WS : shutdownLsp("rholang")
+WS -> S : shutdown / exit
+WS -->> O : emit { type: "disconnect" }
+note over E, S #E8F0FE
+  LSP is OPTIONAL: with no lspUrl the editor
+  still highlights, indents, and edits — only
+  diagnostics/symbols are unavailable.
+end note
+@enduml

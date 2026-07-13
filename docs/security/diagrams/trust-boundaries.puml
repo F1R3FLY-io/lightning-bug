@@ -1,0 +1,48 @@
+@startuml
+' Data-flow diagram with trust boundaries (dashed = boundary crossing).
+skinparam defaultFontName Helvetica
+skinparam shadowing false
+skinparam roundcorner 10
+skinparam ArrowColor #555555
+skinparam rectangle {
+  BorderColor #333333
+  FontColor #10223A
+}
+
+package "Browser origin (host-controlled)" #EAF2FB {
+  rectangle "Host web application\n(trusted by itself)" as host #4F86C6
+  rectangle "<Editor> + library\n(runs with host privileges)" as editor #4F86C6
+  rectangle "DataScript DB\n(in-memory, no persistence)" as db #F5E0C3
+}
+
+package "Same-origin sandbox" #F1EAF7 {
+  rectangle "Tree-Sitter core + grammar\n(WebAssembly)" as wasm #8E7CC3
+  rectangle ".scm highlight/indent queries" as scm #8E7CC3
+}
+
+cloud "Language server\n(UNTRUSTED input)" as lsp #F8D7DA
+
+host --> editor : props / ref / events
+editor --> db : query() / getDb()\n(exposes DB to host)
+editor ..> wasm : loads + executes\n(supply-chain trust)
+editor ..> scm : loads + runs
+editor <..> lsp : #B22222
+
+note right of lsp #F8D7DA
+  Boundary 1 (network): ws:// is
+  UNAUTHENTICATED + PLAINTEXT by default.
+  Treat every message (diagnostics, symbols,
+  logs) as untrusted input.
+end note
+
+note bottom of wasm
+  Boundary 2 (supply chain): grammar WASM and
+  .scm queries are code that runs against input.
+  data:/Blob URLs may embed them.
+end note
+
+note top of host
+  Boundary 3 (host trust): getDb()/query() hand the
+  host app full read access to the editor's DataScript DB.
+end note
+@enduml
