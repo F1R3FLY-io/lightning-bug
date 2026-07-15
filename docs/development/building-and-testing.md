@@ -125,7 +125,7 @@ Every script below is defined in [`package.json`](../../package.json) and invoke
 
 ### Lint
 
-The lint gate is four Clojure linters run in sequence; see
+The lint gate is four Clojure linters plus a documentation linter, run in sequence; see
 [Contributing → the lint gate](./contributing.md#the-lint-gate) for what each one enforces.
 
 | Script | Command | Role |
@@ -134,7 +134,11 @@ The lint gate is four Clojure linters run in sequence; see
 | `lint:eastwood` | `clojure -M:dev:eastwood` | Bytecode-level lint (reflection, suspicious constructs). |
 | `lint:splint` | `clojure -M:dev:splint` | Idiom / style suggestions. |
 | `lint:kibit` | `clojure -X:dev:kibit` | Suggests idiomatic rewrites. |
-| `lint` | `npm run lint:clj-kondo && npm run lint:eastwood && npm run lint:splint && npm run lint:kibit` | Run all four. |
+| `lint:docs` | `node scripts/lint-docs.js` | Docs linter (deprecated PlantUML activity colours; transposed GFM inline math). See [Documentation linter](#documentation-linter). |
+| `lint` | `npm run lint:clj-kondo && … && npm run lint:kibit && npm run lint:docs` | Run all five. |
+
+`lint:docs` accepts `--fix` (`npm run lint:docs -- --fix`) to auto-apply the deterministic rewrites,
+and optional explicit file paths to lint a subset.
 
 ### Test
 
@@ -205,7 +209,8 @@ Knowing their roles helps when a build step fails.
 | `compare-benchmarks.js` | Statistically compare baseline vs experiment; supports `--gate-regression`. |
 | `benchmark-setup.sh` | Set/restore CPU governor and report frequencies for stable benchmarking. |
 | `check-demo-deps.js` | Detect version drift between the root `package.json` and the demo's. |
-| `render-diagrams.js` | Render all `docs/**/*.puml` diagrams to SVG (the `docs:diagrams` script). |
+| `render-diagrams.js` | Render all `docs/**/*.puml` diagrams to SVG (the `docs:diagrams` script), then fail if any SVG carries a baked-in PlantUML deprecation/error banner. |
+| `lint-docs.js` | Docs linter (the `lint:docs` script): deprecated PlantUML activity colours and transposed GFM inline math; supports `--fix`. |
 | `verify-formal-alignment.js` | Assert the source LSP FSM, the TLA+/Rocq models, and CI reference the same states/models. |
 | `verify-rocq.js` | Discover and compile every `formal/rocq/**/*.v` proof. |
 | `verify-tla.js` | Model-check the listed TLA+ specifications with TLC. |
@@ -314,7 +319,9 @@ npm run docs:diagrams
 ```
 
 `scripts/render-diagrams.js` walks `docs/**`, renders every `.puml` to a sibling `.svg`
-(`-tsvg -nometadata` for reproducible output), and exits non-zero if any expected SVG is missing.
+(`-tsvg -nometadata` for reproducible output), and exits non-zero if any expected SVG is missing
+**or if a rendered SVG carries a baked-in PlantUML deprecation/error banner** (PlantUML emits some
+warnings into the image while still exiting 0, so the render is checked, not just the exit code).
 
 **Workflow when you add or edit a diagram:**
 
@@ -331,6 +338,40 @@ Because `.gitignore` blacklists everything by default (see
 [Contributing → the .gitignore whitelist gotcha](./contributing.md#the-gitignore-whitelist-gotcha)),
 `.puml` and `.svg` files are only committable thanks to the explicit `!/docs/**/*.puml` and
 `!/docs/**/*.svg` whitelist entries.
+
+---
+
+## Documentation linter
+
+`npm run lint:docs` (chained into `npm run lint`, so CI enforces it) statically checks the docs for
+two regressions that PlantUML and GitHub render *silently wrong* rather than rejecting outright:
+
+- **Deprecated PlantUML activity colour.** The activity "colour prefix" `#RRGGBB:label;` is
+  deprecated. Recent PlantUML bakes a *"This syntax is deprecated…"* banner into the rendered SVG
+  (and drops the fill) while still exiting `0`, so the broken diagram ships unnoticed. Move the
+  colour to a trailing stereotype instead:
+
+  ```text
+  #5FA55A:build the thing;         ← deprecated (flagged)
+  :build the thing; <<#5FA55A>>    ← supported
+  ```
+
+- **Transposed GFM inline math.** GitHub renders inline math as a backtick code span wrapped *in*
+  dollar signs. Putting the dollars *inside* the backticks instead yields an inert code span that
+  shows the literal source, never math:
+
+  ```text
+  `$x^2$`      ← wrong: renders as literal text (flagged)
+  $`x^2`$      ← correct: renders as math
+  ```
+
+Both checks skip fenced code blocks. The math check fires only on spans containing a LaTeX
+metacharacter (`\ ^ _ { }`), so prose that merely *mentions* the forbidden syntax with a placeholder
+(such as `$…$`) is not flagged; as a last resort a `<!-- lint:allow-math -->` comment on the
+offending line suppresses it. Run `npm run lint:docs -- --fix` to auto-apply both rewrites (then
+re-run `npm run docs:diagrams` to regenerate any fixed `.puml`). The post-render guard in
+`render-diagrams.js` re-checks every generated SVG for the same PlantUML banner, so a deprecated
+diagram cannot slip through even if it was authored outside the linter's view.
 
 ---
 

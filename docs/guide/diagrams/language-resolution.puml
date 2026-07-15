@@ -15,33 +15,33 @@ skinparam activity {
 }
 start
 :languages map (Editor prop)\nkey -> LanguageConfig;
-#4A90D9:activate a document\nof language L;
+:activate a document\nof language L; <<#4A90D9>>
 
 partition "Grammar / parser" {
   if (config has :parser?) then (yes)
-    #9B59B6:use custom Parser\n(bypasses grammarWasm);
+    :use custom Parser\n(bypasses grammarWasm); <<#9B59B6>>
   elseif (config has :grammar-wasm?) then (yes)
-    #9B59B6:resolve grammarWasm\n(string OR thunk -> path/data-URL);
-    #9B59B6:load Tree-Sitter grammar WASM\ninto the syntax compartment;
+    :resolve grammarWasm\n(string OR thunk -> path/data-URL); <<#9B59B6>>
+    :load Tree-Sitter grammar WASM\ninto the syntax compartment; <<#9B59B6>>
   else (neither)
-    #E8E8E8:no grammar ->\nplain-text editing\n(the default "text" language);
+    :no grammar ->\nplain-text editing\n(the default "text" language); <<#E8E8E8>>
   endif
 }
 
 partition "Syntax queries" {
-  #9B59B6:resolve highlightsQuery /\nhighlightsQueryPath (string or thunk);
-  #9B59B6:resolve indentsQuery /\nindentsQueryPath (string or thunk);
+  :resolve highlightsQuery /\nhighlightsQueryPath (string or thunk); <<#9B59B6>>
+  :resolve indentsQuery /\nindentsQueryPath (string or thunk); <<#9B59B6>>
 }
 
 partition "Language server (optional)" {
   if (config has :lsp-url?) then (yes)
-    #27AE60:connect one WebSocket\nper language per Workspace;
-    #27AE60:diagnostics + symbols\nlight up;
+    :connect one WebSocket\nper language per Workspace; <<#27AE60>>
+    :diagnostics + symbols\nlight up; <<#27AE60>>
   else (no)
-    #E8E8E8:editor degrades gracefully\n(no diagnostics/symbols);
+    :editor degrades gracefully\n(no diagnostics/symbols); <<#E8E8E8>>
   endif
 }
 
-#2AA198:editor ready for language L;
+:editor ready for language L; <<#2AA198>>
 stop
 @enduml
